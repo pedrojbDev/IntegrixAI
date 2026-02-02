@@ -1,0 +1,21 @@
+from enum import Enum
+
+
+class AuthorizationStatus(str, Enum):
+    EM_ANALISE = "EM_ANALISE"
+    APROVADA = "APROVADA"
+    NEGADA = "NEGADA"
+    PENDENTE_DOC = "PENDENTE_DOC"
+    NAO_ENCONTRADA = "NAO_ENCONTRADA"
+
+
+class CallFinalState(str, Enum):
+    RESOLVIDA_AUTOMATICO = "RESOLVIDA_AUTOMATICO"
+    TRANSFERIDA_HUMANO = "TRANSFERIDA_HUMANO"
+    ERRO_SISTEMA = "ERRO_SISTEMA"
+    ENCERRADA_USUARIO = "ENCERRADA_USUARIO"
+
+
+class AuthLevel(str, Enum):
+    LOW = "LOW"
+    HIGH = "HIGH"
