@@ -9,6 +9,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from app.config import get_settings
 from app.db import Base
+from app.models import call_event  # noqa: F401
 
 config = context.config
 
@@ -45,4 +46,3 @@ if context.is_offline_mode():
     run_migrations_offline()
 else:
     run_migrations_online()
-

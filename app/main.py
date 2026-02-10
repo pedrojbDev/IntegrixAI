@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from .api.ops import router as ops_router
 from .api.routes import router as tools_router
 from .config import get_settings
 from .logging import setup_logging
@@ -9,6 +10,7 @@ setup_logging(settings.log_level)
 
 app = FastAPI(title=settings.app_name)
 app.include_router(tools_router)
+app.include_router(ops_router)
 
 
 @app.get("/health")

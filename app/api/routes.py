@@ -1,9 +1,11 @@
 import asyncio
+import hmac
 import json
+import time
 import uuid
 from typing import Awaitable, Callable
 
-from fastapi import APIRouter, Depends, Body
+from fastapi import APIRouter, Depends, Body, Request
 from pydantic import ValidationError
 
 from ..config import Settings, get_settings
@@ -22,6 +24,8 @@ from ..schemas.tools import (
     ToolResponse,
 )
 from ..services.data_provider import AuthenticationError, ServiceUnavailable, get_data_provider
+from ..services.audit_store import record_call_event
+from ..services.metrics import metrics_store
 from ..services.tenant import resolve_tenant
 from ..utils.enums import CallFinalState
 
@@ -175,8 +179,28 @@ def _parse_arguments(arguments_raw: object) -> dict:
     return arguments_raw
 
 
+def _is_authorized(http_request: Request, settings: Settings) -> bool:
+    """
+    Validate optional webhook secret. If no secret is configured, accept request.
+    """
+    if not settings.webhook_secret:
+        return True
+    received_secret = http_request.headers.get(settings.webhook_secret_header)
+    if not received_secret:
+        return False
+    return hmac.compare_digest(received_secret, settings.webhook_secret)
+
+
+def _wrap_result(tool_call_id: str | None, result: ToolResponse) -> dict:
+    return {"results": [{"toolCallId": tool_call_id, "result": result.model_dump()}]}
+
+
 @router.post("/tools")
-async def dispatch_tools(payload: dict = Body(...), settings: Settings = Depends(get_settings)):
+async def dispatch_tools(
+    http_request: Request,
+    payload: dict = Body(...),
+    settings: Settings = Depends(get_settings),
+):
     """
     Entry point for Vapi tool-calls (message.type='tool-calls') returning always HTTP 200 with results array.
     """
@@ -185,6 +209,32 @@ async def dispatch_tools(payload: dict = Body(...), settings: Settings = Depends
     to_number = None
     tool_call_id = None
     arguments: dict | None = None
+    tenant_id: str | None = None
+    started_at = time.perf_counter()
+
+    def finalize(
+        payload_dict: dict,
+        *,
+        ok: bool,
+        final_state: CallFinalState,
+        event_type: str,
+        error_code: str | None = None,
+    ) -> dict:
+        duration_ms = (time.perf_counter() - started_at) * 1000
+        metrics_store.record(tool_name=tool_name, ok=ok, final_state=final_state, duration_ms=duration_ms)
+        record_call_event(
+            settings=settings,
+            tenant_id=tenant_id,
+            call_id=call_id,
+            tool_name=tool_name,
+            event_type=event_type,
+            final_state=final_state.value,
+            ok=ok,
+            duration_ms=duration_ms,
+            error_code=error_code,
+            payload=payload_dict,
+        )
+        return payload_dict
 
     # Accept both wrapped (message.toolCallList) and flat (toolCallList) envelopes
     message = payload.get("message") if isinstance(payload, dict) else None
@@ -221,10 +271,40 @@ async def dispatch_tools(payload: dict = Body(...), settings: Settings = Depends
                     final_state=CallFinalState.TRANSFERIDA_HUMANO,
                     message=str(exc),
                 )
-                return {"results": [{"toolCallId": tool_call_id, "result": ToolResponse(ok=False, tool_name=tool_name, error=error, final_state=CallFinalState.TRANSFERIDA_HUMANO).model_dump()}]}
+                response = ToolResponse(
+                    ok=False,
+                    tool_name=tool_name,
+                    error=error,
+                    final_state=CallFinalState.TRANSFERIDA_HUMANO,
+                )
+                return finalize(
+                    _wrap_result(tool_call_id, response),
+                    ok=response.ok,
+                    final_state=response.final_state,
+                    event_type="tool_argument_validation",
+                    error_code=error.code,
+                )
 
     tenant_id = resolve_tenant(to_number, settings)
     set_call_context(call_id, tenant_id)
+
+    if not _is_authorized(http_request, settings):
+        log.warning(
+            "webhook_unauthorized",
+            event_type="security",
+            tenant_id=tenant_id,
+            call_id=call_id,
+            tool_name=tool_name,
+            final_state=CallFinalState.TRANSFERIDA_HUMANO,
+        )
+        clear_call_context()
+        return finalize(
+            {"results": []},
+            ok=False,
+            final_state=CallFinalState.TRANSFERIDA_HUMANO,
+            event_type="webhook_unauthorized",
+            error_code="UNAUTHORIZED",
+        )
 
     # Ignore if no tool call data
     if tool_call_id is None or tool_name == "unknown" or arguments is None:
@@ -237,7 +317,13 @@ async def dispatch_tools(payload: dict = Body(...), settings: Settings = Depends
             final_state=CallFinalState.TRANSFERIDA_HUMANO,
         )
         clear_call_context()
-        return {"results": []}
+        return finalize(
+            {"results": []},
+            ok=False,
+            final_state=CallFinalState.TRANSFERIDA_HUMANO,
+            event_type="event_ignored",
+            error_code="IGNORED",
+        )
 
     handler = TOOL_HANDLERS.get(tool_name)
     if handler is None:
@@ -251,7 +337,19 @@ async def dispatch_tools(payload: dict = Body(...), settings: Settings = Depends
         )
         clear_call_context()
         error = ToolError(code="VALIDATION", message="tool_name invalido")
-        return {"results": [{"toolCallId": tool_call_id, "result": ToolResponse(ok=False, tool_name=tool_name, error=error, final_state=CallFinalState.TRANSFERIDA_HUMANO).model_dump()}]}
+        response = ToolResponse(
+            ok=False,
+            tool_name=tool_name,
+            error=error,
+            final_state=CallFinalState.TRANSFERIDA_HUMANO,
+        )
+        return finalize(
+            _wrap_result(tool_call_id, response),
+            ok=response.ok,
+            final_state=response.final_state,
+            event_type="tool_not_found",
+            error_code=error.code,
+        )
 
     try:
         data, final_state = await handler(arguments, settings, call_id, tenant_id)
@@ -338,4 +436,11 @@ async def dispatch_tools(payload: dict = Body(...), settings: Settings = Depends
         ok=response.ok,
         tool_call_id=tool_call_id,
     )
-    return {"results": [{"toolCallId": tool_call_id, "result": response.model_dump()}]}
+    error_code = response.error.code if response.error else None
+    return finalize(
+        _wrap_result(tool_call_id, response),
+        ok=response.ok,
+        final_state=response.final_state,
+        event_type="tool_completed",
+        error_code=error_code,
+    )

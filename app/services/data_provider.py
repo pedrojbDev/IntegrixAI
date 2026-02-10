@@ -37,8 +37,9 @@ def get_data_provider(settings: Settings) -> DataProvider:
 
         return MockDataProvider(settings)
 
-    if settings.data_mode == "protheus":
-        raise ServiceUnavailable("Protheus provider not implemented in pilot")
+    if settings.data_mode == "external_api":
+        from .external_api_provider import ExternalApiDataProvider
+
+        return ExternalApiDataProvider(settings)
 
     raise ServiceUnavailable(f"Unsupported DATA_MODE: {settings.data_mode}")
-
