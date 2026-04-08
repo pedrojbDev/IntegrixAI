@@ -15,6 +15,23 @@ class ServiceUnavailable(Exception):
     """Raised when upstream/unimplemented provider cannot serve the request."""
 
 
+class BusinessRuleError(Exception):
+    """Raised for recoverable business-validation errors returned by upstream."""
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        field: str | None = None,
+        details: dict | None = None,
+    ):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.field = field
+        self.details = details or {}
+
+
 class DataProvider(ABC):
     @abstractmethod
     def authenticate_member(self, cpf: str, birthdate: date, call_id: str) -> tuple[str, AuthLevel]:
@@ -26,7 +43,13 @@ class DataProvider(ABC):
 
     @abstractmethod
     def search_providers(
-        self, city: str, neighborhood: str | None, query: str
+        self,
+        tenant_id: str,
+        city: str,
+        neighborhood: str | None,
+        query: str,
+        cpf: str | None,
+        tipo_atendimento: str | None,
     ) -> Sequence[Provider]:
         ...
 

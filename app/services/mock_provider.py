@@ -45,7 +45,13 @@ class MockDataProvider(DataProvider):
         return statuses[digest % len(statuses)]
 
     def search_providers(
-        self, city: str, neighborhood: str | None, query: str
+        self,
+        tenant_id: str,
+        city: str,
+        neighborhood: str | None,
+        query: str,
+        cpf: str | None,
+        tipo_atendimento: str | None,
     ) -> Sequence[Provider]:
         maybe_introduce_chaos(self.settings)
         city_key = city.strip().lower()

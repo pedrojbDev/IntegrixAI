@@ -5,7 +5,7 @@ import time
 import uuid
 from typing import Awaitable, Callable
 
-from fastapi import APIRouter, Depends, Body, Request
+from fastapi import APIRouter, Depends, Body, HTTPException, Request
 from pydantic import ValidationError
 
 from ..config import Settings, get_settings
@@ -23,9 +23,15 @@ from ..schemas.tools import (
     ToolError,
     ToolResponse,
 )
-from ..services.data_provider import AuthenticationError, ServiceUnavailable, get_data_provider
+from ..services.data_provider import (
+    AuthenticationError,
+    BusinessRuleError,
+    ServiceUnavailable,
+    get_data_provider,
+)
 from ..services.audit_store import record_call_event
 from ..services.metrics import metrics_store
+from ..services.specialty_catalog import get_specialty_catalog
 from ..services.tenant import resolve_tenant
 from ..utils.enums import CallFinalState
 
@@ -115,13 +121,37 @@ async def _handle_search_providers(
 ) -> tuple[dict, CallFinalState]:
     provider = get_data_provider(settings)
     payload = SearchProvidersRequest(**args, call_id=call_id, to_number=None)
+    catalog = get_specialty_catalog(settings)
+    if catalog.is_enabled:
+        canonical_specialty = catalog.resolve(payload.query)
+        if canonical_specialty is None:
+            suggestions = catalog.suggest(payload.query)
+            raise BusinessRuleError(
+                code="ESPECIALIDADE_INVALIDA",
+                field="especialidade",
+                message="Especialidade nao encontrada na lista disponivel",
+                details={"suggestions": suggestions},
+            )
+    else:
+        canonical_specialty = payload.query
+
     try:
         providers = await asyncio.wait_for(
-            asyncio.to_thread(provider.search_providers, payload.city, payload.neighborhood, payload.query),
+            asyncio.to_thread(
+                provider.search_providers,
+                tenant_id,
+                payload.city,
+                payload.neighborhood,
+                canonical_specialty,
+                payload.cpf,
+                payload.tipo_atendimento,
+            ),
             timeout=settings.provider_timeout_seconds,
         )
     except asyncio.TimeoutError:
         raise TimeoutError("Timeout na busca de rede")
+    except BusinessRuleError:
+        raise
     except ServiceUnavailable as exc:
         raise RuntimeError(str(exc))
 
@@ -132,7 +162,8 @@ async def _handle_search_providers(
         call_id=call_id,
         city=payload.city,
         neighborhood=payload.neighborhood,
-        query=payload.query,
+        query=canonical_specialty,
+        cpf_mask=_mask_cpf(payload.cpf) if payload.cpf else None,
         count=len(providers),
         tool_name="search_providers",
         final_state=CallFinalState.RESOLVIDA_AUTOMATICO,
@@ -375,6 +406,30 @@ async def dispatch_tools(
             tool_name=tool_name,
             final_state=CallFinalState.TRANSFERIDA_HUMANO,
         )
+    except BusinessRuleError as exc:
+        log.warning(
+            "tool_business_validation",
+            event_type="business_error",
+            tenant_id=tenant_id,
+            call_id=call_id,
+            tool_name=tool_name,
+            final_state=CallFinalState.RESOLVIDA_AUTOMATICO,
+            upstream_code=exc.code,
+            field=exc.field,
+            message=exc.message,
+        )
+        response = ToolResponse(
+            ok=False,
+            error=ToolError(code="VALIDATION", message=exc.message),
+            data={
+                "retryable": True,
+                "field": exc.field,
+                "upstream_code": exc.code,
+                **(exc.details or {}),
+            },
+            tool_name=tool_name,
+            final_state=CallFinalState.RESOLVIDA_AUTOMATICO,
+        )
     except TimeoutError as exc:
         log.error(
             "tool_timeout",
@@ -388,6 +443,24 @@ async def dispatch_tools(
         response = ToolResponse(
             ok=False,
             error=ToolError(code="TIMEOUT", message=str(exc)),
+            tool_name=tool_name,
+            final_state=CallFinalState.TRANSFERIDA_HUMANO,
+        )
+    except HTTPException as exc:
+        error_code = "UPSTREAM_503" if exc.status_code >= 500 else "VALIDATION"
+        log.error(
+            "tool_http_exception",
+            event_type="error",
+            tenant_id=tenant_id,
+            call_id=call_id,
+            tool_name=tool_name,
+            final_state=CallFinalState.TRANSFERIDA_HUMANO,
+            status_code=exc.status_code,
+            message=str(exc.detail),
+        )
+        response = ToolResponse(
+            ok=False,
+            error=ToolError(code=error_code, message=str(exc.detail)),
             tool_name=tool_name,
             final_state=CallFinalState.TRANSFERIDA_HUMANO,
         )

@@ -12,7 +12,14 @@ class Base(DeclarativeBase):
 
 def get_engine():
     settings = get_settings()
-    return create_engine(settings.database_url, pool_pre_ping=True)
+    connect_args = {}
+    if settings.database_url.startswith("postgresql"):
+        connect_args["connect_timeout"] = int(settings.db_connect_timeout_seconds)
+    return create_engine(
+        settings.database_url,
+        pool_pre_ping=True,
+        connect_args=connect_args,
+    )
 
 
 engine = get_engine()
@@ -25,4 +32,3 @@ def get_db():
         yield db
     finally:
         db.close()
-

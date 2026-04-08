@@ -1,23 +1,27 @@
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import case, desc, func, select
 
-from ..config import get_settings
+from ..config import Settings, get_settings
 from ..db import SessionLocal
 from ..logging import get_logger
 from ..models.call_event import CallEvent
+from ..services.dashboard_metrics import get_costs, get_overview, get_tools
 from ..services.metrics import metrics_store
+from ..services.vapi_cost_sync import VapiCostSyncService
+from .security import require_ops_token
 
-router = APIRouter(prefix="/ops", tags=["ops"])
+router = APIRouter(prefix="/ops", tags=["ops"], dependencies=[Depends(require_ops_token)])
 log = get_logger()
 
 
-def _db_disabled_response() -> dict:
-    return {
-        "enabled": False,
-        "message": "DB auditing is disabled. Set DB_ENABLED=true to query audit endpoints.",
-    }
+def _assert_db_enabled(settings: Settings) -> None:
+    if not settings.db_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="DB auditing is disabled. Set DB_ENABLED=true.",
+        )
 
 
 @router.get("/baseline")
@@ -33,15 +37,13 @@ async def recent_audit_events(
     final_state: str | None = Query(default=None),
     ok: bool | None = Query(default=None),
     event_type: str | None = Query(default=None),
+    settings: Settings = Depends(get_settings),
 ):
-    settings = get_settings()
-    if not settings.db_enabled:
-        return _db_disabled_response()
+    _assert_db_enabled(settings)
 
     session = SessionLocal()
     try:
         stmt = select(CallEvent).order_by(desc(CallEvent.created_at)).limit(limit)
-
         if tool_name:
             stmt = stmt.where(CallEvent.tool_name == tool_name)
         if call_id:
@@ -74,18 +76,16 @@ async def recent_audit_events(
                 for row in rows
             ],
         }
-    except Exception as exc:
-        log.error("ops_recent_failed", event_type="error", reason=str(exc))
-        return {"enabled": True, "error": "Failed to load recent audit events"}
     finally:
         session.close()
 
 
 @router.get("/audit/summary")
-async def audit_summary(since_minutes: int | None = Query(default=None, ge=1, le=10080)):
-    settings = get_settings()
-    if not settings.db_enabled:
-        return _db_disabled_response()
+async def audit_summary(
+    since_minutes: int | None = Query(default=None, ge=1, le=10080),
+    settings: Settings = Depends(get_settings),
+):
+    _assert_db_enabled(settings)
 
     session = SessionLocal()
     try:
@@ -143,8 +143,71 @@ async def audit_summary(since_minutes: int | None = Query(default=None, ge=1, le
                 for row in per_tool_rows
             ],
         }
+    finally:
+        session.close()
+
+
+@router.post("/costs/sync")
+async def sync_vapi_costs(settings: Settings = Depends(get_settings)):
+    _assert_db_enabled(settings)
+    session = SessionLocal()
+    try:
+        result = VapiCostSyncService(settings).sync(session)
+        log.info("ops_cost_sync_completed", event_type="ops_cost_sync", **result)
+        return {"ok": True, "result": result}
     except Exception as exc:
-        log.error("ops_summary_failed", event_type="error", reason=str(exc))
-        return {"enabled": True, "error": "Failed to load audit summary"}
+        log.error("ops_cost_sync_failed", event_type="error", message=str(exc))
+        raise HTTPException(status_code=502, detail=str(exc))
+    finally:
+        session.close()
+
+
+@router.get("/dashboard/overview")
+async def dashboard_overview(
+    window: str = Query(default="24h", pattern="^(15m|1h|24h|7d)$"),
+    tenant_id: str | None = Query(default=None),
+    assistant_id: str | None = Query(default=None),
+    settings: Settings = Depends(get_settings),
+):
+    _assert_db_enabled(settings)
+    session = SessionLocal()
+    try:
+        return get_overview(
+            session, window=window, tenant_id=tenant_id, assistant_id=assistant_id
+        )
+    finally:
+        session.close()
+
+
+@router.get("/dashboard/costs")
+async def dashboard_costs(
+    window: str = Query(default="24h", pattern="^(15m|1h|24h|7d)$"),
+    tenant_id: str | None = Query(default=None),
+    assistant_id: str | None = Query(default=None),
+    settings: Settings = Depends(get_settings),
+):
+    _assert_db_enabled(settings)
+    session = SessionLocal()
+    try:
+        return get_costs(
+            session, window=window, tenant_id=tenant_id, assistant_id=assistant_id
+        )
+    finally:
+        session.close()
+
+
+@router.get("/dashboard/tools")
+async def dashboard_tools(
+    window: str = Query(default="24h", pattern="^(15m|1h|24h|7d)$"),
+    tenant_id: str | None = Query(default=None),
+    assistant_id: str | None = Query(default=None),
+    settings: Settings = Depends(get_settings),
+):
+    _assert_db_enabled(settings)
+    session = SessionLocal()
+    try:
+        return get_tools(
+            session, window=window, tenant_id=tenant_id, assistant_id=assistant_id
+        )
     finally:
         session.close()

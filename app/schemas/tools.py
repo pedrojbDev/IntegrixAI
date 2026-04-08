@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from ..utils.enums import AuthLevel, AuthorizationStatus, CallFinalState
 
@@ -44,9 +44,16 @@ class Provider(BaseModel):
 
 
 class SearchProvidersRequest(ToolBase):
-    city: str
-    neighborhood: str | None = None
-    query: str
+    cpf: str | None = None
+    tipo_atendimento: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("tipo_atendimento", "tipoAtendimento"),
+    )
+    city: str = Field(validation_alias=AliasChoices("city", "cidade"))
+    neighborhood: str | None = Field(
+        default=None, validation_alias=AliasChoices("neighborhood", "bairro")
+    )
+    query: str = Field(validation_alias=AliasChoices("query", "especialidade"))
 
 
 class SearchProvidersResponse(BaseModel):
