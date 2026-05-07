@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Integrix Dashboard</title>
+  <meta
+    name="description"
+    content="Painel operacional limpo para acompanhar volume, resolução, handoff, falhas e custo."
+  />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Libre+Caslon+Display&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="/static/dashboard/dashboard.css" />
+</head>
+<body>
+  <div class="page-shell">
+    <header class="page-header">
+      <div class="header-copy">
+        <span class="eyebrow">Integrix Dashboard</span>
+        <h1>Operação em foco, sem ruído.</h1>
+        <p>
+          Leitura rápida das métricas que mais importam para atendimento, custo e degradação da
+          operação.
+        </p>
+      </div>
+
+      <div class="header-status">
+        <div class="status-block">
+          <span class="label">Saúde da janela</span>
+          <strong id="health-badge" class="health-badge health-neutral">Aguardando</strong>
+          <p id="health-summary" class="status-text">Carregando visão operacional.</p>
+        </div>
+        <div class="status-block">
+          <span class="label">Última atualização</span>
+          <strong id="last-refresh" class="status-value">Ainda não sincronizado</strong>
+          <p id="status-line" class="status-text">Pronto para consultar os dados.</p>
+        </div>
+      </div>
+    </header>
+
+    <section class="toolbar">
+      <div class="toolbar-fields">
+        <label class="field">
+          <span>Janela</span>
+          <select id="window" class="control">
+            <option value="15m">15 minutos</option>
+            <option value="1h">1 hora</option>
+            <option value="24h" selected>24 horas</option>
+            <option value="7d">7 dias</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>Tenant</span>
+          <input id="tenant" class="control" placeholder="tenant_id opcional" />
+        </label>
+
+        <label class="field">
+          <span>Assistant</span>
+          <input id="assistant" class="control" placeholder="assistant_id opcional" />
+        </label>
+      </div>
+
+      <div class="toolbar-actions">
+        <div class="context-block">
+          <span class="label">Contexto</span>
+          <strong id="active-context">Janela 24 horas · visão geral</strong>
+        </div>
+        <button id="refresh-btn" class="button button-secondary" type="button">Atualizar</button>
+        <button id="sync-btn" class="button button-primary" type="button">Sincronizar custos</button>
+      </div>
+    </section>
+
+    <main class="dashboard-stack">
+      <section class="metrics-grid metrics-grid-primary" aria-label="Métricas principais">
+        <article class="metric-card metric-card-highlight">
+          <span class="label">Total de calls</span>
+          <strong id="k-total" class="metric-value">0</strong>
+          <span id="k-window" class="metric-note">Janela 24 horas</span>
+        </article>
+
+        <article class="metric-card">
+          <span class="label">Resolução automática</span>
+          <strong id="k-success-rate" class="metric-value">0%</strong>
+          <span id="k-success-count" class="metric-note">0 calls resolvidas</span>
+        </article>
+
+        <article class="metric-card">
+          <span class="label">Handoff</span>
+          <strong id="k-handoff-rate" class="metric-value">0%</strong>
+          <span id="k-handoff-count" class="metric-note">0 transferências</span>
+        </article>
+
+        <article class="metric-card">
+          <span class="label">Custo total</span>
+          <strong id="k-cost" class="metric-value metric-mono">US$ 0,00</strong>
+          <span id="k-cost-calls" class="metric-note">0 calls com custo</span>
+        </article>
+      </section>
+
+      <section class="metrics-grid metrics-grid-secondary" aria-label="Métricas complementares">
+        <article class="metric-card metric-card-compact">
+          <span class="label">Falha</span>
+          <strong id="k-failure-rate" class="metric-value">0%</strong>
+          <span id="k-failure-count" class="metric-note">0 chamadas falhas</span>
+        </article>
+
+        <article class="metric-card metric-card-compact">
+          <span class="label">Cobertura de custo</span>
+          <strong id="k-coverage" class="metric-value">0%</strong>
+          <span id="k-coverage-meta" class="metric-note">Sem correlação ainda</span>
+        </article>
+
+        <article class="metric-card metric-card-compact">
+          <span class="label">Custo médio / call</span>
+          <strong id="k-cost-avg" class="metric-value metric-mono">US$ 0,00</strong>
+          <span class="metric-note">Baseado nas calls sincronizadas</span>
+        </article>
+
+        <article class="metric-card metric-card-compact">
+          <span class="label">Duração média</span>
+          <strong id="k-duration" class="metric-value metric-mono">0 ms</strong>
+          <span class="metric-note">Tempo médio por execução</span>
+        </article>
+      </section>
+
+      <section class="main-grid">
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>Panorama da janela</h2>
+              <p>Volume, handoff e custo ao longo do tempo.</p>
+            </div>
+          </div>
+
+          <div class="chart-stack">
+            <div>
+              <div class="section-kicker">
+                <span>Calls e handoff</span>
+              </div>
+              <div id="calls-timeline" class="timeline-list"></div>
+            </div>
+
+            <div>
+              <div class="section-kicker">
+                <span>Custo por bucket</span>
+              </div>
+              <div id="cost-timeline" class="timeline-list"></div>
+            </div>
+          </div>
+        </article>
+
+        <aside class="sidebar-stack">
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Resumo executivo</h2>
+                <p>Leitura curta do que mais pede atenção.</p>
+              </div>
+            </div>
+            <div id="signal-summary" class="summary-list"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Alertas</h2>
+                <p>Sinais derivados das métricas principais.</p>
+              </div>
+            </div>
+            <div id="alerts-list" class="alerts-list"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Destaques por tool</h2>
+                <p>Quem está puxando volume, risco e custo.</p>
+              </div>
+            </div>
+            <div id="focus-list" class="focus-list"></div>
+          </article>
+        </aside>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>Desempenho por tool</h2>
+            <p>Visão direta das ferramentas com maior impacto operacional.</p>
+          </div>
+        </div>
+
+        <div class="table-shell">
+          <table class="ops-table">
+            <thead>
+              <tr>
+                <th>Tool</th>
+                <th>Total</th>
+                <th>Resolução</th>
+                <th>Falha</th>
+                <th>Handoff</th>
+                <th>Custo total</th>
+                <th>Custo / call</th>
+              </tr>
+            </thead>
+            <tbody id="tools-table"></tbody>
+          </table>
+          <div id="table-empty" class="empty-state hidden">
+            Nenhuma tool encontrada para os filtros atuais.
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script id="dashboard-bootstrap" type="application/json">__DASHBOARD_BOOTSTRAP__</script>
+  <script type="module" src="/static/dashboard/dashboard.js"></script>
+</body>
+</html>

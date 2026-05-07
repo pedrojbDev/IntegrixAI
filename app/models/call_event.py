@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Boolean, DateTime, Float, String, func
+from sqlalchemy import Boolean, DateTime, Float, Index, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.types import JSON
 from sqlalchemy.orm import Mapped, mapped_column
@@ -10,6 +10,16 @@ from ..db import Base
 
 class CallEvent(Base):
     __tablename__ = "call_events"
+    __table_args__ = (
+        Index("ix_call_events_tenant_event_created", "tenant_id", "event_type", "created_at"),
+        Index(
+            "ix_call_events_tenant_event_call_created",
+            "tenant_id",
+            "event_type",
+            "call_id",
+            "created_at",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
@@ -26,4 +36,3 @@ class CallEvent(Base):
     created_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
     )
-

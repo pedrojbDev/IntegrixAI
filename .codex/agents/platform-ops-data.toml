@@ -1,0 +1,31 @@
+name = "platform-ops-data"
+description = "Handle platform persistence seams, Alembic migrations, dashboard/ops flows, static dashboard assets, and operational integrations such as Vapi cost sync."
+reasoning = "medium"
+sandbox = "workspace-write"
+
+[ownership]
+primary = [
+  "app/platform",
+  "app/models",
+  "app/static/dashboard",
+  "app/api/routes/dashboard.py",
+  "app/api/routes/ops.py",
+  "app/core/ops",
+  "alembic",
+]
+secondary = [
+  "tests/test_dashboard_route.py",
+  "tests/test_vapi_cost_sync.py",
+]
+
+[guidance]
+focus = [
+  "keep migrations aligned with runtime code",
+  "preserve current static dashboard approach",
+  "protect operational endpoints and token-based access semantics",
+  "watch scale behavior of reports and cost aggregation",
+]
+avoid = [
+  "frontend-framework rewrites without user request",
+  "schema changes without migration and compatibility notes",
+]

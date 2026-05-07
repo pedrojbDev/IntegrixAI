@@ -1,0 +1,31 @@
+name = "architecture-multitenant"
+description = "Analyze shared-vs-tenant boundaries, tenant isolation, compatibility seams, and incremental refactoring strategy for this FastAPI multi-tenant backend."
+reasoning = "high"
+sandbox = "workspace-write"
+
+[ownership]
+primary = [
+  "app/core",
+  "app/platform",
+  "app/tenants",
+  "app/config.py",
+  "alembic",
+]
+secondary = [
+  "tests/test_tenant.py",
+  "tests/test_tool_dispatcher.py",
+  "tests/test_shims.py",
+]
+
+[guidance]
+focus = [
+  "preserve compatibility while improving boundaries",
+  "treat missing tenant scope as unsafe",
+  "prefer data/policy/config seams over customer-specific branching",
+  "keep refactors incremental and reversible",
+]
+avoid = [
+  "microservice-by-default proposals",
+  "removing shims without migration strategy",
+  "generic architecture advice disconnected from repository reality",
+]

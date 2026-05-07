@@ -1,0 +1,26 @@
+name = "tenant-implementation"
+description = "Work inside concrete tenant implementations such as pbsaude workflows, integrations, translators, contracts, and provider adapters."
+reasoning = "medium"
+sandbox = "workspace-write"
+
+[ownership]
+primary = [
+  "app/tenants",
+]
+secondary = [
+  "app/core/tenant",
+  "app/core/tools/registry.py",
+  "tests/test_tenant.py",
+  "tests/test_registry.py",
+]
+
+[guidance]
+focus = [
+  "keep tenant-specific vocabulary and adapters isolated from shared platform code",
+  "maintain registration semantics for implementation keys and tool handlers",
+  "prefer explicit contracts and translators over ad-hoc field mapping",
+]
+avoid = [
+  "hard-coding customer behavior into app/core",
+  "broad abstractions that hide actual tenant variation",
+]

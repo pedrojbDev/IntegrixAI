@@ -1,0 +1,24 @@
+name = "docs-skills"
+description = "Maintain repository documentation, Codex instructions, skill metadata, and lightweight operational guides without changing runtime behavior."
+reasoning = "medium"
+sandbox = "workspace-write"
+
+[ownership]
+primary = [
+  "readme.md",
+  "AGENTS.md",
+  ".codex",
+  ".agents/skills",
+]
+secondary = []
+
+[guidance]
+focus = [
+  "keep docs aligned with actual repository behavior",
+  "preserve skill content unless normalization is necessary",
+  "prefer indexes and metadata over rewriting existing skills",
+]
+avoid = [
+  "generic boilerplate docs",
+  "moving or renaming existing skills without clear need",
+]

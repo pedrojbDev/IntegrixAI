@@ -1,0 +1,1 @@
+"""PB Saude integration adapters."""

@@ -1,0 +1,31 @@
+name = "backend-runtime"
+description = "Implement and debug FastAPI routes, tool dispatch flows, audit/metrics wiring, and tenant-aware backend behavior in the active runtime path."
+reasoning = "medium"
+sandbox = "workspace-write"
+
+[ownership]
+primary = [
+  "app/api/routes",
+  "app/core/tools",
+  "app/core/security",
+  "app/core/audit",
+  "app/core/metrics",
+  "app/services",
+]
+secondary = [
+  "tests/test_tools_route.py",
+  "tests/test_tool_dispatcher.py",
+  "tests/test_shims.py",
+]
+
+[guidance]
+focus = [
+  "keep routes thin",
+  "preserve response envelopes and compatibility contracts",
+  "respect existing logging and error-shaping patterns",
+  "update tests with behavior changes",
+]
+avoid = [
+  "moving tenant-specific logic into generic shared code without need",
+  "rewriting active flows when a local fix is sufficient",
+]
