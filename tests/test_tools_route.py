@@ -195,6 +195,46 @@ class ToolsRouteTests(unittest.TestCase):
         self.assertEqual("tool_name invalido", body["results"][0]["result"]["error"]["message"])
         get_data_provider.assert_not_called()
 
+    def test_tools_route_processes_valid_tool_when_batch_contains_disabled_tool(self) -> None:
+        settings = Settings(_env_file=None, tenant_map={"+5511999999999": "tenant_a"})
+        app.dependency_overrides[get_settings] = lambda: settings
+        client = TestClient(app)
+
+        with patch(
+            "app.tenants.pbsaude.workflows.authenticate_member.get_data_provider"
+        ) as get_data_provider:
+            response = client.post(
+                "/tools",
+                json={
+                    "message": {
+                        "call": {"id": "call_123", "to": "+5511999999999"},
+                        "toolCallList": [
+                            {
+                                "id": "tc_handoff",
+                                "name": "handoff_human",
+                                "arguments": {"reason": "fallback"},
+                            },
+                            {
+                                "id": "tc_auth",
+                                "name": "authenticate_member",
+                                "arguments": {
+                                    "cpf": "12345678901",
+                                    "birthdate": "1990-01-01",
+                                },
+                            },
+                        ],
+                    }
+                },
+            )
+
+        self.assertEqual(200, response.status_code)
+        body = response.json()
+        self.assertEqual(2, len(body["results"]))
+        self.assertTrue(body["results"][0]["result"]["ok"])
+        self.assertFalse(body["results"][1]["result"]["ok"])
+        self.assertEqual("tool_name invalido", body["results"][1]["result"]["error"]["message"])
+        get_data_provider.assert_not_called()
+
     def test_tools_route_rejects_missing_webhook_secret(self) -> None:
         settings = Settings(
             _env_file=None,
@@ -289,7 +329,11 @@ class ToolsRouteTests(unittest.TestCase):
         app.dependency_overrides[get_settings] = lambda: settings
         client = TestClient(app)
 
-        with patch("app.core.tools.dispatcher.record_call_event"):
+        with (
+            patch("app.core.tools.dispatcher.record_call_event"),
+            patch("app.core.tools.dispatcher.get_cached_tool_result", return_value=None),
+            patch("app.core.tools.dispatcher.save_tool_result"),
+        ):
             response = client.post(
                 "/tools",
                 headers={"x-webhook-secret": "secret"},
@@ -318,7 +362,11 @@ class ToolsRouteTests(unittest.TestCase):
         app.dependency_overrides[get_settings] = lambda: settings
         client = TestClient(app)
 
-        with patch("app.core.tools.dispatcher.record_call_event"):
+        with (
+            patch("app.core.tools.dispatcher.record_call_event"),
+            patch("app.core.tools.dispatcher.get_cached_tool_result", return_value=None),
+            patch("app.core.tools.dispatcher.save_tool_result"),
+        ):
             response = client.post(
                 "/tools",
                 headers={"x-webhook-secret": "wrong"},
@@ -344,7 +392,11 @@ class ToolsRouteTests(unittest.TestCase):
         app.dependency_overrides[get_settings] = lambda: settings
         client = TestClient(app)
 
-        with patch("app.core.tools.dispatcher.record_call_event"):
+        with (
+            patch("app.core.tools.dispatcher.record_call_event"),
+            patch("app.core.tools.dispatcher.get_cached_tool_result", return_value=None),
+            patch("app.core.tools.dispatcher.save_tool_result"),
+        ):
             response = client.post(
                 "/tools",
                 headers={"x-webhook-secret": "secret"},
@@ -373,7 +425,11 @@ class ToolsRouteTests(unittest.TestCase):
         app.dependency_overrides[get_settings] = lambda: settings
         client = TestClient(app)
 
-        with patch("app.core.tools.dispatcher.record_call_event"):
+        with (
+            patch("app.core.tools.dispatcher.record_call_event"),
+            patch("app.core.tools.dispatcher.get_cached_tool_result", return_value=None),
+            patch("app.core.tools.dispatcher.save_tool_result"),
+        ):
             response = client.post(
                 "/tools",
                 headers={"x-webhook-secret": "secret"},

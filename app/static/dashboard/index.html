@@ -3,44 +3,46 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Integrix Dashboard</title>
+  <title>Integrix Ops Console</title>
   <meta
     name="description"
-    content="Painel operacional limpo para acompanhar volume, resolução, handoff, falhas e custo."
+    content="Console operacional multi-visão para acompanhar atendimento, custo, auditoria e robustez."
   />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
-    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Libre+Caslon+Display&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
     rel="stylesheet"
   />
   <link rel="stylesheet" href="/static/dashboard/dashboard.css" />
 </head>
 <body>
-  <div class="page-shell">
-    <header class="page-header">
-      <div class="header-copy">
-        <span class="eyebrow">Integrix Dashboard</span>
-        <h1>Operação em foco, sem ruído.</h1>
+  <div class="console-shell">
+    <header class="hero">
+      <div class="hero-copy">
+        <span class="eyebrow">Integrix Ops Console</span>
+        <h1>Operação, diagnóstico e auditoria em uma leitura só.</h1>
         <p>
-          Leitura rápida das métricas que mais importam para atendimento, custo e degradação da
-          operação.
+          Uma console editorial para acompanhar desempenho, custo, robustez operacional e sinais
+          de degradação sem poluição visual.
         </p>
       </div>
 
-      <div class="header-status">
-        <div class="status-block">
-          <span class="label">Saúde da janela</span>
+      <div class="hero-status">
+        <div class="status-card">
+          <span class="label">Saúde operacional</span>
           <strong id="health-badge" class="health-badge health-neutral">Aguardando</strong>
-          <p id="health-summary" class="status-text">Carregando visão operacional.</p>
+          <p id="health-summary" class="status-copy">Carregando o estado geral da operação.</p>
         </div>
-        <div class="status-block">
+        <div class="status-card">
           <span class="label">Última atualização</span>
           <strong id="last-refresh" class="status-value">Ainda não sincronizado</strong>
-          <p id="status-line" class="status-text">Pronto para consultar os dados.</p>
+          <p id="status-line" class="status-copy">Pronto para consultar dados operacionais.</p>
         </div>
       </div>
     </header>
+
+    <section id="global-message" class="global-message hidden" aria-live="polite"></section>
 
     <section class="toolbar">
       <div class="toolbar-fields">
@@ -56,17 +58,17 @@
 
         <label class="field">
           <span>Tenant</span>
-          <input id="tenant" class="control" placeholder="tenant_id opcional" />
+          <input id="tenant" class="control" placeholder="tenant_id" />
         </label>
 
         <label class="field">
           <span>Assistant</span>
-          <input id="assistant" class="control" placeholder="assistant_id opcional" />
+          <input id="assistant" class="control" placeholder="assistant_id" />
         </label>
       </div>
 
       <div class="toolbar-actions">
-        <div class="context-block">
+        <div class="context-box">
           <span class="label">Contexto</span>
           <strong id="active-context">Janela 24 horas · visão geral</strong>
         </div>
@@ -75,145 +77,318 @@
       </div>
     </section>
 
-    <main class="dashboard-stack">
-      <section class="metrics-grid metrics-grid-primary" aria-label="Métricas principais">
-        <article class="metric-card metric-card-highlight">
-          <span class="label">Total de calls</span>
-          <strong id="k-total" class="metric-value">0</strong>
-          <span id="k-window" class="metric-note">Janela 24 horas</span>
-        </article>
+    <nav class="view-nav" aria-label="Seções da console">
+      <button class="view-tab is-active" data-view="overview" type="button">Visão Geral</button>
+      <button class="view-tab" data-view="diagnostics" type="button">Diagnóstico</button>
+      <button class="view-tab" data-view="audit" type="button">Auditoria</button>
+    </nav>
 
-        <article class="metric-card">
-          <span class="label">Resolução automática</span>
-          <strong id="k-success-rate" class="metric-value">0%</strong>
-          <span id="k-success-count" class="metric-note">0 calls resolvidas</span>
-        </article>
+    <main class="views">
+      <section id="view-overview" class="view-section is-active">
+        <section class="kpi-grid">
+          <article class="kpi-card kpi-card-highlight">
+            <span class="label">Total de calls</span>
+            <strong id="k-total" class="kpi-value">0</strong>
+            <span id="k-window" class="kpi-note">Janela 24 horas</span>
+          </article>
 
-        <article class="metric-card">
-          <span class="label">Handoff</span>
-          <strong id="k-handoff-rate" class="metric-value">0%</strong>
-          <span id="k-handoff-count" class="metric-note">0 transferências</span>
-        </article>
+          <article class="kpi-card">
+            <span class="label">Resolução automática</span>
+            <strong id="k-success-rate" class="kpi-value">0%</strong>
+            <span id="k-success-count" class="kpi-note">0 calls resolvidas</span>
+          </article>
 
-        <article class="metric-card">
-          <span class="label">Custo total</span>
-          <strong id="k-cost" class="metric-value metric-mono">US$ 0,00</strong>
-          <span id="k-cost-calls" class="metric-note">0 calls com custo</span>
-        </article>
-      </section>
+          <article class="kpi-card">
+            <span class="label">Handoff</span>
+            <strong id="k-handoff-rate" class="kpi-value">0%</strong>
+            <span id="k-handoff-count" class="kpi-note">0 transferências</span>
+          </article>
 
-      <section class="metrics-grid metrics-grid-secondary" aria-label="Métricas complementares">
-        <article class="metric-card metric-card-compact">
-          <span class="label">Falha</span>
-          <strong id="k-failure-rate" class="metric-value">0%</strong>
-          <span id="k-failure-count" class="metric-note">0 chamadas falhas</span>
-        </article>
+          <article class="kpi-card">
+            <span class="label">Custo total</span>
+            <strong id="k-cost" class="kpi-value kpi-mono">US$ 0,00</strong>
+            <span id="k-cost-calls" class="kpi-note">0 calls com custo</span>
+          </article>
 
-        <article class="metric-card metric-card-compact">
-          <span class="label">Cobertura de custo</span>
-          <strong id="k-coverage" class="metric-value">0%</strong>
-          <span id="k-coverage-meta" class="metric-note">Sem correlação ainda</span>
-        </article>
+          <article class="kpi-card kpi-card-soft">
+            <span class="label">Falha</span>
+            <strong id="k-failure-rate" class="kpi-value">0%</strong>
+            <span id="k-failure-count" class="kpi-note">0 chamadas falhas</span>
+          </article>
 
-        <article class="metric-card metric-card-compact">
-          <span class="label">Custo médio / call</span>
-          <strong id="k-cost-avg" class="metric-value metric-mono">US$ 0,00</strong>
-          <span class="metric-note">Baseado nas calls sincronizadas</span>
-        </article>
+          <article class="kpi-card kpi-card-soft">
+            <span class="label">Cobertura de custo</span>
+            <strong id="k-coverage" class="kpi-value">0%</strong>
+            <span id="k-coverage-meta" class="kpi-note">Sem correlação ainda</span>
+          </article>
 
-        <article class="metric-card metric-card-compact">
-          <span class="label">Duração média</span>
-          <strong id="k-duration" class="metric-value metric-mono">0 ms</strong>
-          <span class="metric-note">Tempo médio por execução</span>
-        </article>
-      </section>
+          <article class="kpi-card kpi-card-soft">
+            <span class="label">Custo médio / call</span>
+            <strong id="k-cost-avg" class="kpi-value kpi-mono">US$ 0,00</strong>
+            <span class="kpi-note">Baseado nas calls sincronizadas</span>
+          </article>
 
-      <section class="main-grid">
-        <article class="panel">
+          <article class="kpi-card kpi-card-soft">
+            <span class="label">Duração média</span>
+            <strong id="k-duration" class="kpi-value kpi-mono">0 ms</strong>
+            <span class="kpi-note">Tempo médio por execução</span>
+          </article>
+        </section>
+
+        <section class="overview-grid">
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Panorama da janela</h2>
+                <p>Volume, handoff e custo distribuídos no tempo.</p>
+              </div>
+            </div>
+            <div class="section-stack">
+              <div>
+                <div class="section-kicker">Calls e handoff</div>
+                <div id="calls-timeline" class="timeline-list"></div>
+              </div>
+              <div>
+                <div class="section-kicker">Custo por bucket</div>
+                <div id="cost-timeline" class="timeline-list"></div>
+              </div>
+            </div>
+          </article>
+
+          <aside class="panel-stack">
+            <article class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2>Leitura rápida</h2>
+                  <p>Resumo curto do que importa agora.</p>
+                </div>
+              </div>
+              <div id="signal-summary" class="summary-list"></div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2>Destaques por tool</h2>
+                  <p>Quem concentra volume, risco e custo.</p>
+                </div>
+              </div>
+              <div id="focus-list" class="focus-list"></div>
+            </article>
+          </aside>
+        </section>
+
+        <section class="panel">
           <div class="panel-header">
             <div>
-              <h2>Panorama da janela</h2>
-              <p>Volume, handoff e custo ao longo do tempo.</p>
+              <h2>Desempenho por tool</h2>
+              <p>Visão direta das ferramentas com maior impacto operacional.</p>
             </div>
           </div>
-
-          <div class="chart-stack">
-            <div>
-              <div class="section-kicker">
-                <span>Calls e handoff</span>
-              </div>
-              <div id="calls-timeline" class="timeline-list"></div>
-            </div>
-
-            <div>
-              <div class="section-kicker">
-                <span>Custo por bucket</span>
-              </div>
-              <div id="cost-timeline" class="timeline-list"></div>
+          <div class="table-shell">
+            <table class="ops-table">
+              <thead>
+                <tr>
+                  <th>Tool</th>
+                  <th>Total</th>
+                  <th>Resolução</th>
+                  <th>Falha</th>
+                  <th>Handoff</th>
+                  <th>Custo total</th>
+                  <th>Custo / call</th>
+                </tr>
+              </thead>
+              <tbody id="tools-table"></tbody>
+            </table>
+            <div id="table-empty" class="empty-state hidden">
+              Nenhuma tool encontrada para os filtros atuais.
             </div>
           </div>
-        </article>
-
-        <aside class="sidebar-stack">
-          <article class="panel">
-            <div class="panel-header">
-              <div>
-                <h2>Resumo executivo</h2>
-                <p>Leitura curta do que mais pede atenção.</p>
-              </div>
-            </div>
-            <div id="signal-summary" class="summary-list"></div>
-          </article>
-
-          <article class="panel">
-            <div class="panel-header">
-              <div>
-                <h2>Alertas</h2>
-                <p>Sinais derivados das métricas principais.</p>
-              </div>
-            </div>
-            <div id="alerts-list" class="alerts-list"></div>
-          </article>
-
-          <article class="panel">
-            <div class="panel-header">
-              <div>
-                <h2>Destaques por tool</h2>
-                <p>Quem está puxando volume, risco e custo.</p>
-              </div>
-            </div>
-            <div id="focus-list" class="focus-list"></div>
-          </article>
-        </aside>
+        </section>
       </section>
 
-      <section class="panel">
-        <div class="panel-header">
-          <div>
-            <h2>Desempenho por tool</h2>
-            <p>Visão direta das ferramentas com maior impacto operacional.</p>
-          </div>
-        </div>
+      <section id="view-diagnostics" class="view-section">
+        <section class="diagnostic-grid">
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Robustez operacional</h2>
+                <p>Estado consolidado de falha, sync, idempotência e repetição de erro.</p>
+              </div>
+            </div>
+            <div class="diagnostic-cards">
+              <article class="summary-card">
+                <span class="label">Saúde</span>
+                <strong id="diag-health-state">Aguardando</strong>
+                <p id="diag-health-copy" class="summary-copy">Sem leitura ainda.</p>
+              </article>
+              <article class="summary-card">
+                <span class="label">Sync de custo</span>
+                <strong id="diag-sync-state">Desconhecido</strong>
+                <p id="diag-sync-age" class="summary-copy">Sem histórico de sincronização.</p>
+              </article>
+              <article class="summary-card">
+                <span class="label">Idempotency hits</span>
+                <strong id="diag-idempotency-hits">0</strong>
+                <p class="summary-copy">Reutilizações persistidas na janela atual.</p>
+              </article>
+              <article class="summary-card">
+                <span class="label">Erros repetidos</span>
+                <strong id="diag-business-errors">0</strong>
+                <p class="summary-copy">Tentativas repetidas de erro de negócio.</p>
+              </article>
+            </div>
+          </article>
 
-        <div class="table-shell">
-          <table class="ops-table">
-            <thead>
-              <tr>
-                <th>Tool</th>
-                <th>Total</th>
-                <th>Resolução</th>
-                <th>Falha</th>
-                <th>Handoff</th>
-                <th>Custo total</th>
-                <th>Custo / call</th>
-              </tr>
-            </thead>
-            <tbody id="tools-table"></tbody>
-          </table>
-          <div id="table-empty" class="empty-state hidden">
-            Nenhuma tool encontrada para os filtros atuais.
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Séries de resiliência</h2>
+                <p>Onde a operação está desgastando.</p>
+              </div>
+            </div>
+            <div class="section-stack">
+              <div>
+                <div class="section-kicker">Falhas por bucket</div>
+                <div id="diag-failed-series" class="timeline-list"></div>
+              </div>
+              <div>
+                <div class="section-kicker">Idempotência por bucket</div>
+                <div id="diag-idempotency-series" class="timeline-list"></div>
+              </div>
+              <div>
+                <div class="section-kicker">Erros repetidos por bucket</div>
+                <div id="diag-business-series" class="timeline-list"></div>
+              </div>
+            </div>
+          </article>
+        </section>
+
+        <section class="diagnostic-grid">
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Tools com pior falha</h2>
+                <p>Prioridades mais claras de correção.</p>
+              </div>
+            </div>
+            <div id="diag-top-failures" class="focus-list"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Tools com maior handoff</h2>
+                <p>Onde a automação mais devolve para humano.</p>
+              </div>
+            </div>
+            <div id="diag-top-handoffs" class="focus-list"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Distribuição de erro de negócio</h2>
+                <p>Acúmulo de tentativas repetidas por tool.</p>
+              </div>
+            </div>
+            <div id="diag-business-tools" class="focus-list"></div>
+          </article>
+        </section>
+      </section>
+
+      <section id="view-audit" class="view-section">
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>Resumo de auditoria</h2>
+              <p>Totais operacionais da janela e trilha recente de eventos.</p>
+            </div>
           </div>
-        </div>
+          <div class="audit-summary-grid">
+            <article class="summary-card">
+              <span class="label">Total</span>
+              <strong id="audit-total-calls">0</strong>
+              <p class="summary-copy">Chamadas auditadas no período.</p>
+            </article>
+            <article class="summary-card">
+              <span class="label">Sucesso</span>
+              <strong id="audit-success-calls">0</strong>
+              <p class="summary-copy">Resoluções automáticas registradas.</p>
+            </article>
+            <article class="summary-card">
+              <span class="label">Falha</span>
+              <strong id="audit-failed-calls">0</strong>
+              <p class="summary-copy">Falhas funcionais ou operacionais.</p>
+            </article>
+            <article class="summary-card">
+              <span class="label">Handoff</span>
+              <strong id="audit-handoff-calls">0</strong>
+              <p class="summary-copy">Transferências para atendimento humano.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>Eventos recentes</h2>
+              <p>Filtre a trilha operacional sem expor payload por padrão.</p>
+            </div>
+          </div>
+
+          <div class="audit-filters">
+            <label class="field">
+              <span>Limite</span>
+              <select id="audit-limit" class="control">
+                <option value="25">25</option>
+                <option value="50" selected>50</option>
+                <option value="100">100</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Tool</span>
+              <input id="audit-tool" class="control" placeholder="tool_name" />
+            </label>
+            <label class="field">
+              <span>Evento</span>
+              <input id="audit-event" class="control" placeholder="event_type" />
+            </label>
+            <label class="field">
+              <span>OK</span>
+              <select id="audit-ok" class="control">
+                <option value="all" selected>Todos</option>
+                <option value="true">Somente OK</option>
+                <option value="false">Somente falha</option>
+              </select>
+            </label>
+            <div class="audit-actions">
+              <button id="audit-refresh-btn" class="button button-secondary" type="button">Atualizar auditoria</button>
+            </div>
+          </div>
+
+          <div class="table-shell">
+            <table class="ops-table audit-table">
+              <thead>
+                <tr>
+                  <th>Horário</th>
+                  <th>Tenant</th>
+                  <th>Tool</th>
+                  <th>Evento</th>
+                  <th>Final state</th>
+                  <th>OK</th>
+                  <th>Erro</th>
+                  <th>Duração</th>
+                  <th>Call ID</th>
+                </tr>
+              </thead>
+              <tbody id="audit-table-body"></tbody>
+            </table>
+            <div id="audit-empty" class="empty-state hidden">
+              Nenhum evento encontrado para os filtros atuais.
+            </div>
+          </div>
+        </section>
       </section>
     </main>
   </div>

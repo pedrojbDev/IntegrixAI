@@ -47,6 +47,9 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn('/static/dashboard/dashboard.js', response.text)
         self.assertIn('"headerName": "x-ops-token"', response.text)
         self.assertIn('"token": "ops-token"', response.text)
+        self.assertIn("Visão Geral", response.text)
+        self.assertIn("Diagnóstico", response.text)
+        self.assertIn("Auditoria", response.text)
         self.assertNotIn("<style>", response.text)
 
     def test_dashboard_accepts_header_token(self) -> None:
@@ -84,6 +87,20 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn('"token": ""', response.text)
         self.assertNotIn('"token": "ops-token"', response.text)
 
+    def test_dashboard_sets_cookie_for_follow_up_ops_requests_in_production(self) -> None:
+        settings = production_settings()
+        app.dependency_overrides[get_settings] = lambda: settings
+        client = TestClient(app)
+
+        dashboard_response = client.get("/dashboard", headers={"x-ops-token": "ops-token"})
+        self.assertEqual(200, dashboard_response.status_code)
+
+        with patch("app.api.routes.ops.get_health", return_value={"health_state": "stable"}):
+            response = client.get("/ops/dashboard/health?tenant_id=tenant_a")
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual({"health_state": "stable"}, response.json())
+
     def test_ops_dashboard_requires_tenant_in_production(self) -> None:
         settings = production_settings()
         app.dependency_overrides[get_settings] = lambda: settings
@@ -118,6 +135,34 @@ class DashboardRouteTests(unittest.TestCase):
 
         self.assertEqual(200, response.status_code)
         self.assertEqual({"tenant_id": "tenant_a"}, response.json())
+
+    def test_ops_health_accepts_tenant_in_production(self) -> None:
+        settings = production_settings()
+        app.dependency_overrides[get_settings] = lambda: settings
+        client = TestClient(app)
+
+        with patch("app.api.routes.ops.get_health", return_value={"health_state": "stable"}):
+            response = client.get(
+                "/ops/dashboard/health?tenant_id=tenant_a",
+                headers={"x-ops-token": "ops-token"},
+            )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual({"health_state": "stable"}, response.json())
+
+    def test_ops_resilience_accepts_tenant_in_production(self) -> None:
+        settings = production_settings()
+        app.dependency_overrides[get_settings] = lambda: settings
+        client = TestClient(app)
+
+        with patch("app.api.routes.ops.get_resilience", return_value={"summary": {"idempotency_hits": 1}}):
+            response = client.get(
+                "/ops/dashboard/resilience?tenant_id=tenant_a",
+                headers={"x-ops-token": "ops-token"},
+            )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual({"summary": {"idempotency_hits": 1}}, response.json())
 
     def test_ops_dashboard_allows_global_query_when_enabled(self) -> None:
         settings = production_settings(ops_allow_global_queries=True)

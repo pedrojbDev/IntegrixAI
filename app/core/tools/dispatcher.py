@@ -21,17 +21,29 @@ from ..tenant.models import TenantResolution
 from ..tenant.resolver import resolve_tenant_details, should_reject_tenant_resolution
 from .contracts import ToolError, ToolResponse
 from .exceptions import BusinessRuleError
+from .idempotency import (
+    get_cached_tool_result,
+    record_business_error_attempt,
+    save_tool_result,
+)
 from .registry import TenantToolRegistry, ToolHandler, tool_registry
+
+BUSINESS_ERROR_MAX_ATTEMPTS = 2
 
 
 @dataclass(slots=True)
 class ParsedToolInvocation:
-    call_id: str
-    to_number: str | None
     tool_call_id: str | None
     tool_name: str
     arguments: dict | None
     arguments_error: str | None = None
+
+
+@dataclass(slots=True)
+class ParsedToolRequest:
+    call_id: str
+    to_number: str | None
+    invocations: list[ParsedToolInvocation]
 
 
 class ToolDispatcher:
@@ -49,8 +61,11 @@ class ToolDispatcher:
         self.log = get_logger()
 
     async def dispatch(self, http_request: Request, payload: dict) -> dict:
-        parsed = self._parse_invocation(payload)
-        resolution = resolve_tenant_details(parsed.to_number, self.settings)
+        parsed_request = self._parse_request(payload)
+        first_tool_name = (
+            parsed_request.invocations[0].tool_name if parsed_request.invocations else "unknown"
+        )
+        resolution = resolve_tenant_details(parsed_request.to_number, self.settings)
         tenant_rejected = should_reject_tenant_resolution(resolution, self.settings)
         tenant_id = "unknown" if tenant_rejected else resolution.tenant_id
         implementation_key = (
@@ -58,39 +73,133 @@ class ToolDispatcher:
             if tenant_rejected
             else self.tenant_config_service.get_implementation_key(tenant_id)
         )
-        started_at = time.perf_counter()
 
         if resolution.used_fallback:
-            self._log_tenant_fallback(parsed.call_id, parsed.tool_name, resolution, tenant_id=tenant_id)
+            self._log_tenant_fallback(
+                parsed_request.call_id,
+                first_tool_name,
+                resolution,
+                tenant_id=tenant_id,
+            )
 
-        def finalize(
-            payload_dict: dict,
-            *,
-            ok: bool,
-            final_state: CallFinalState,
-            event_type: str,
-            error_code: str | None = None,
-        ) -> dict:
-            duration_ms = (time.perf_counter() - started_at) * 1000
+        set_call_context(parsed_request.call_id, tenant_id)
+        try:
+            if not is_webhook_authorized(http_request, self.settings):
+                self.log.warning(
+                    "webhook_unauthorized",
+                    event_type="security",
+                    tenant_id=tenant_id,
+                    call_id=parsed_request.call_id,
+                    tool_name=first_tool_name,
+                    final_state=CallFinalState.TRANSFERIDA_HUMANO,
+                    implementation_key=implementation_key,
+                )
+                return self._record_request_event(
+                    {"results": []},
+                    tenant_id=tenant_id,
+                    call_id=parsed_request.call_id,
+                    tool_name=first_tool_name,
+                    ok=False,
+                    final_state=CallFinalState.TRANSFERIDA_HUMANO,
+                    event_type="webhook_unauthorized",
+                    error_code="UNAUTHORIZED",
+                )
+
+            if tenant_rejected:
+                results = []
+                for parsed in parsed_request.invocations:
+                    results.append(
+                        self._tenant_rejected_result(
+                            parsed,
+                            tenant_id=tenant_id,
+                            call_id=parsed_request.call_id,
+                            resolution=resolution,
+                            implementation_key=implementation_key,
+                        )
+                    )
+                return {"results": results}
+
+            if not parsed_request.invocations:
+                self.log.info(
+                    "event_ignored",
+                    event_type="event_ignored",
+                    tenant_id=tenant_id,
+                    call_id=parsed_request.call_id,
+                    tool_name=first_tool_name,
+                    final_state=CallFinalState.TRANSFERIDA_HUMANO,
+                    implementation_key=implementation_key,
+                )
+                return self._record_request_event(
+                    {"results": []},
+                    tenant_id=tenant_id,
+                    call_id=parsed_request.call_id,
+                    tool_name=first_tool_name,
+                    ok=False,
+                    final_state=CallFinalState.TRANSFERIDA_HUMANO,
+                    event_type="event_ignored",
+                    error_code="IGNORED",
+                )
+
+            results = []
+            for parsed in parsed_request.invocations:
+                results.append(
+                    await self._dispatch_one(
+                        parsed,
+                        call_id=parsed_request.call_id,
+                        tenant_id=tenant_id,
+                        implementation_key=implementation_key,
+                    )
+                )
+            return {"results": results}
+        finally:
+            clear_call_context()
+
+    async def _dispatch_one(
+        self,
+        parsed: ParsedToolInvocation,
+        *,
+        call_id: str,
+        tenant_id: str,
+        implementation_key: str,
+    ) -> dict:
+        cached = get_cached_tool_result(
+            settings=self.settings,
+            tenant_id=tenant_id,
+            call_id=call_id,
+            tool_call_id=parsed.tool_call_id,
+        )
+        if cached is not None:
+            self.log.info(
+                "tool_idempotency_hit",
+                event_type="idempotency_hit",
+                tenant_id=tenant_id,
+                call_id=call_id,
+                tool_call_id=parsed.tool_call_id,
+                tool_name=parsed.tool_name,
+                implementation_key=implementation_key,
+            )
             metrics_store.record(
                 tool_name=parsed.tool_name,
-                ok=ok,
-                final_state=final_state,
-                duration_ms=duration_ms,
+                ok=bool(cached.get("ok")),
+                final_state=CallFinalState(cached["final_state"]),
+                duration_ms=0.0,
             )
             record_call_event(
                 settings=self.settings,
                 tenant_id=tenant_id,
-                call_id=parsed.call_id,
+                call_id=call_id,
+                tool_call_id=parsed.tool_call_id,
                 tool_name=parsed.tool_name,
-                event_type=event_type,
-                final_state=final_state.value,
-                ok=ok,
-                duration_ms=duration_ms,
-                error_code=error_code,
-                payload=payload_dict,
+                event_type="idempotency_hit",
+                final_state=str(cached.get("final_state")),
+                ok=bool(cached.get("ok")),
+                duration_ms=0.0,
+                error_code=(cached.get("error") or {}).get("code") if isinstance(cached.get("error"), dict) else None,
+                payload={"toolCallId": parsed.tool_call_id, "result": cached},
             )
-            return payload_dict
+            return {"toolCallId": parsed.tool_call_id, "result": cached}
+
+        started_at = time.perf_counter()
 
         if parsed.arguments_error is not None:
             error = ToolError(code="VALIDATION", message=parsed.arguments_error)
@@ -98,7 +207,8 @@ class ToolDispatcher:
                 "tool_argument_validation",
                 event_type="validation_error",
                 tenant_id=tenant_id,
-                call_id=parsed.call_id,
+                call_id=call_id,
+                tool_call_id=parsed.tool_call_id,
                 tool_name=parsed.tool_name,
                 final_state=CallFinalState.TRANSFERIDA_HUMANO,
                 message=parsed.arguments_error,
@@ -110,121 +220,84 @@ class ToolDispatcher:
                 error=error,
                 final_state=CallFinalState.TRANSFERIDA_HUMANO,
             )
-            return finalize(
-                self._wrap_result(parsed.tool_call_id, response),
-                ok=response.ok,
-                final_state=response.final_state,
+            return self._finalize_invocation(
+                parsed,
+                response,
+                call_id=call_id,
+                tenant_id=tenant_id,
+                started_at=started_at,
                 event_type="tool_argument_validation",
                 error_code=error.code,
             )
 
-        set_call_context(parsed.call_id, tenant_id)
-        try:
-            if not is_webhook_authorized(http_request, self.settings):
-                self.log.warning(
-                    "webhook_unauthorized",
-                    event_type="security",
-                    tenant_id=tenant_id,
-                    call_id=parsed.call_id,
-                    tool_name=parsed.tool_name,
-                    final_state=CallFinalState.TRANSFERIDA_HUMANO,
-                    implementation_key=implementation_key,
-                )
-                return finalize(
-                    {"results": []},
-                    ok=False,
-                    final_state=CallFinalState.TRANSFERIDA_HUMANO,
-                    event_type="webhook_unauthorized",
-                    error_code="UNAUTHORIZED",
-                )
-
-            if tenant_rejected:
-                self.log.warning(
-                    "tenant_resolution_rejected",
-                    event_type="tenant_resolution_rejected",
-                    tenant_id=tenant_id,
-                    call_id=parsed.call_id,
-                    tool_name=parsed.tool_name,
-                    to_number=resolution.to_number,
-                    resolution_source=resolution.source,
-                    final_state=CallFinalState.TRANSFERIDA_HUMANO,
-                    implementation_key=implementation_key,
-                )
-                error = ToolError(code="VALIDATION", message="tenant nao resolvido")
-                response = ToolResponse(
-                    ok=False,
-                    tool_name=parsed.tool_name,
-                    error=error,
-                    final_state=CallFinalState.TRANSFERIDA_HUMANO,
-                )
-                return finalize(
-                    self._wrap_result(parsed.tool_call_id, response)
-                    if parsed.tool_call_id
-                    else {"results": []},
-                    ok=response.ok,
-                    final_state=response.final_state,
-                    event_type="tenant_resolution_rejected",
-                    error_code=error.code,
-                )
-
-            if parsed.tool_call_id is None or parsed.tool_name == "unknown" or parsed.arguments is None:
-                self.log.info(
-                    "event_ignored",
-                    event_type="event_ignored",
-                    tenant_id=tenant_id,
-                    call_id=parsed.call_id,
-                    tool_name=parsed.tool_name,
-                    final_state=CallFinalState.TRANSFERIDA_HUMANO,
-                    implementation_key=implementation_key,
-                )
-                return finalize(
-                    {"results": []},
-                    ok=False,
-                    final_state=CallFinalState.TRANSFERIDA_HUMANO,
-                    event_type="event_ignored",
-                    error_code="IGNORED",
-                )
-
-            handler = self.registry.get_handler(implementation_key, parsed.tool_name)
-            if handler is None:
-                self.log.warning(
-                    "tool_not_found",
-                    event_type="validation_error",
-                    tenant_id=tenant_id,
-                    call_id=parsed.call_id,
-                    tool_name=parsed.tool_name,
-                    final_state=CallFinalState.TRANSFERIDA_HUMANO,
-                    implementation_key=implementation_key,
-                )
-                error = ToolError(code="VALIDATION", message="tool_name invalido")
-                response = ToolResponse(
-                    ok=False,
-                    tool_name=parsed.tool_name,
-                    error=error,
-                    final_state=CallFinalState.TRANSFERIDA_HUMANO,
-                )
-                return finalize(
-                    self._wrap_result(parsed.tool_call_id, response),
-                    ok=response.ok,
-                    final_state=response.final_state,
-                    event_type="tool_not_found",
-                    error_code=error.code,
-                )
-
-            response = await self._run_handler(
-                handler,
-                parsed=parsed,
+        if parsed.tool_call_id is None or parsed.tool_name == "unknown" or parsed.arguments is None:
+            self.log.info(
+                "event_ignored",
+                event_type="event_ignored",
                 tenant_id=tenant_id,
+                call_id=call_id,
+                tool_call_id=parsed.tool_call_id,
+                tool_name=parsed.tool_name,
+                final_state=CallFinalState.TRANSFERIDA_HUMANO,
                 implementation_key=implementation_key,
             )
-        finally:
-            clear_call_context()
+            response = ToolResponse(
+                ok=False,
+                tool_name=parsed.tool_name,
+                error=ToolError(code="VALIDATION", message="tool call invalido"),
+                final_state=CallFinalState.TRANSFERIDA_HUMANO,
+            )
+            return self._finalize_invocation(
+                parsed,
+                response,
+                call_id=call_id,
+                tenant_id=tenant_id,
+                started_at=started_at,
+                event_type="event_ignored",
+                error_code="IGNORED",
+            )
 
+        handler = self.registry.get_handler(implementation_key, parsed.tool_name)
+        if handler is None:
+            self.log.warning(
+                "tool_not_found",
+                event_type="validation_error",
+                tenant_id=tenant_id,
+                call_id=call_id,
+                tool_call_id=parsed.tool_call_id,
+                tool_name=parsed.tool_name,
+                final_state=CallFinalState.TRANSFERIDA_HUMANO,
+                implementation_key=implementation_key,
+            )
+            error = ToolError(code="VALIDATION", message="tool_name invalido")
+            response = ToolResponse(
+                ok=False,
+                tool_name=parsed.tool_name,
+                error=error,
+                final_state=CallFinalState.TRANSFERIDA_HUMANO,
+            )
+            return self._finalize_invocation(
+                parsed,
+                response,
+                call_id=call_id,
+                tenant_id=tenant_id,
+                started_at=started_at,
+                event_type="tool_not_found",
+                error_code=error.code,
+            )
+
+        response = await self._run_handler(
+            handler,
+            parsed=parsed,
+            call_id=call_id,
+            tenant_id=tenant_id,
+            implementation_key=implementation_key,
+        )
         self.log.info(
             "tool_completed",
             event_type="tool_completed",
             tenant_id=tenant_id,
-            call_id=parsed.call_id,
+            call_id=call_id,
             tool_name=parsed.tool_name,
             final_state=response.final_state,
             ok=response.ok,
@@ -232,12 +305,53 @@ class ToolDispatcher:
             implementation_key=implementation_key,
         )
         error_code = response.error.code if response.error else None
-        return finalize(
-            self._wrap_result(parsed.tool_call_id, response),
-            ok=response.ok,
-            final_state=response.final_state,
+        return self._finalize_invocation(
+            parsed,
+            response,
+            call_id=call_id,
+            tenant_id=tenant_id,
+            started_at=started_at,
             event_type="tool_completed",
             error_code=error_code,
+        )
+
+    def _tenant_rejected_result(
+        self,
+        parsed: ParsedToolInvocation,
+        *,
+        tenant_id: str,
+        call_id: str,
+        resolution: TenantResolution,
+        implementation_key: str,
+    ) -> dict:
+        self.log.warning(
+            "tenant_resolution_rejected",
+            event_type="tenant_resolution_rejected",
+            tenant_id=tenant_id,
+            call_id=call_id,
+            tool_call_id=parsed.tool_call_id,
+            tool_name=parsed.tool_name,
+            to_number=resolution.to_number,
+            resolution_source=resolution.source,
+            final_state=CallFinalState.TRANSFERIDA_HUMANO,
+            implementation_key=implementation_key,
+        )
+        error = ToolError(code="VALIDATION", message="tenant nao resolvido")
+        response = ToolResponse(
+            ok=False,
+            tool_name=parsed.tool_name,
+            error=error,
+            final_state=CallFinalState.TRANSFERIDA_HUMANO,
+        )
+        return self._finalize_invocation(
+            parsed,
+            response,
+            call_id=call_id,
+            tenant_id=tenant_id,
+            started_at=time.perf_counter(),
+            event_type="tenant_resolution_rejected",
+            error_code=error.code,
+            save_idempotency=False,
         )
 
     async def _run_handler(
@@ -245,6 +359,7 @@ class ToolDispatcher:
         handler,
         *,
         parsed: ParsedToolInvocation,
+        call_id: str,
         tenant_id: str,
         implementation_key: str,
     ) -> ToolResponse:
@@ -252,7 +367,7 @@ class ToolDispatcher:
             data, final_state = await handler(
                 parsed.arguments or {},
                 self.settings,
-                parsed.call_id,
+                call_id,
                 tenant_id,
             )
             return ToolResponse(
@@ -266,7 +381,8 @@ class ToolDispatcher:
                 "tool_argument_validation",
                 event_type="validation_error",
                 tenant_id=tenant_id,
-                call_id=parsed.call_id,
+                call_id=call_id,
+                tool_call_id=parsed.tool_call_id,
                 tool_name=parsed.tool_name,
                 final_state=CallFinalState.TRANSFERIDA_HUMANO,
                 message=str(exc),
@@ -279,15 +395,35 @@ class ToolDispatcher:
                 final_state=CallFinalState.TRANSFERIDA_HUMANO,
             )
         except BusinessRuleError as exc:
+            attempt = record_business_error_attempt(
+                settings=self.settings,
+                tenant_id=tenant_id,
+                call_id=call_id,
+                tool_name=parsed.tool_name,
+                field=exc.field,
+                upstream_code=exc.code,
+            )
+            retryable = exc.retryable and (
+                not exc.handoff_after_retry or attempt < BUSINESS_ERROR_MAX_ATTEMPTS
+            )
+            final_state = (
+                CallFinalState.RESOLVIDA_AUTOMATICO
+                if retryable
+                else CallFinalState.TRANSFERIDA_HUMANO
+            )
             self.log.warning(
                 "tool_business_validation",
                 event_type="business_error",
                 tenant_id=tenant_id,
-                call_id=parsed.call_id,
+                call_id=call_id,
+                tool_call_id=parsed.tool_call_id,
                 tool_name=parsed.tool_name,
-                final_state=CallFinalState.RESOLVIDA_AUTOMATICO,
+                final_state=final_state,
                 upstream_code=exc.code,
                 field=exc.field,
+                retryable=retryable,
+                attempt=attempt,
+                max_attempts=BUSINESS_ERROR_MAX_ATTEMPTS,
                 message=exc.message,
                 implementation_key=implementation_key,
             )
@@ -295,20 +431,23 @@ class ToolDispatcher:
                 ok=False,
                 error=ToolError(code="VALIDATION", message=exc.message),
                 data={
-                    "retryable": True,
+                    "retryable": retryable,
                     "field": exc.field,
                     "upstream_code": exc.code,
+                    "attempt": attempt,
+                    "max_attempts": BUSINESS_ERROR_MAX_ATTEMPTS,
                     **(exc.details or {}),
                 },
                 tool_name=parsed.tool_name,
-                final_state=CallFinalState.RESOLVIDA_AUTOMATICO,
+                final_state=final_state,
             )
         except TimeoutError as exc:
             self.log.error(
                 "tool_timeout",
                 event_type="error",
                 tenant_id=tenant_id,
-                call_id=parsed.call_id,
+                call_id=call_id,
+                tool_call_id=parsed.tool_call_id,
                 tool_name=parsed.tool_name,
                 final_state=CallFinalState.TRANSFERIDA_HUMANO,
                 message=str(exc),
@@ -317,6 +456,7 @@ class ToolDispatcher:
             return ToolResponse(
                 ok=False,
                 error=ToolError(code="TIMEOUT", message=str(exc)),
+                data={"retryable": False},
                 tool_name=parsed.tool_name,
                 final_state=CallFinalState.TRANSFERIDA_HUMANO,
             )
@@ -326,7 +466,8 @@ class ToolDispatcher:
                 "tool_http_exception",
                 event_type="error",
                 tenant_id=tenant_id,
-                call_id=parsed.call_id,
+                call_id=call_id,
+                tool_call_id=parsed.tool_call_id,
                 tool_name=parsed.tool_name,
                 final_state=CallFinalState.TRANSFERIDA_HUMANO,
                 status_code=exc.status_code,
@@ -336,6 +477,7 @@ class ToolDispatcher:
             return ToolResponse(
                 ok=False,
                 error=ToolError(code=error_code, message=str(exc.detail)),
+                data={"retryable": False},
                 tool_name=parsed.tool_name,
                 final_state=CallFinalState.TRANSFERIDA_HUMANO,
             )
@@ -344,7 +486,8 @@ class ToolDispatcher:
                 "tool_validation",
                 event_type="validation_error",
                 tenant_id=tenant_id,
-                call_id=parsed.call_id,
+                call_id=call_id,
+                tool_call_id=parsed.tool_call_id,
                 tool_name=parsed.tool_name,
                 final_state=CallFinalState.TRANSFERIDA_HUMANO,
                 message=str(exc),
@@ -361,7 +504,8 @@ class ToolDispatcher:
                 "tool_upstream_503",
                 event_type="error",
                 tenant_id=tenant_id,
-                call_id=parsed.call_id,
+                call_id=call_id,
+                tool_call_id=parsed.tool_call_id,
                 tool_name=parsed.tool_name,
                 final_state=CallFinalState.TRANSFERIDA_HUMANO,
                 message=str(exc),
@@ -370,6 +514,7 @@ class ToolDispatcher:
             return ToolResponse(
                 ok=False,
                 error=ToolError(code="UPSTREAM_503", message=str(exc)),
+                data={"retryable": False},
                 tool_name=parsed.tool_name,
                 final_state=CallFinalState.TRANSFERIDA_HUMANO,
             )
@@ -393,13 +538,10 @@ class ToolDispatcher:
             resolution_source=resolution.source,
         )
 
-    def _parse_invocation(self, payload: dict) -> ParsedToolInvocation:
+    def _parse_request(self, payload: dict) -> ParsedToolRequest:
         call_id = str(uuid.uuid4())
         to_number = None
-        tool_call_id = None
-        tool_name = "unknown"
-        arguments: dict | None = None
-        arguments_error: str | None = None
+        invocations: list[ParsedToolInvocation] = []
 
         message = payload.get("message") if isinstance(payload, dict) else None
         container = message if isinstance(message, dict) else payload
@@ -411,25 +553,43 @@ class ToolDispatcher:
                 to_number = call.get("to")
 
             tool_list = container.get("toolCallList")
-            if tool_list and isinstance(tool_list, list) and len(tool_list) > 0:
-                first = tool_list[0] or {}
-                tool_call_id = first.get("id")
-                tool_name = first.get("name") or "unknown"
-                if "function" in first and isinstance(first.get("function"), dict):
-                    tool_name = first["function"].get("name") or tool_name
-                    arguments_raw = first["function"].get("arguments")
-                else:
-                    arguments_raw = first.get("arguments")
-                try:
-                    arguments = self._parse_arguments(arguments_raw)
-                except ValueError as exc:
-                    arguments_error = str(exc)
+            if tool_list and isinstance(tool_list, list):
+                for item in tool_list:
+                    invocations.append(self._parse_tool_invocation(item))
 
-        return ParsedToolInvocation(
+        return ParsedToolRequest(
             call_id=call_id,
             to_number=to_number,
-            tool_call_id=tool_call_id,
-            tool_name=tool_name,
+            invocations=invocations,
+        )
+
+    def _parse_tool_invocation(self, item: object) -> ParsedToolInvocation:
+        if not isinstance(item, dict):
+            return ParsedToolInvocation(
+                tool_call_id=None,
+                tool_name="unknown",
+                arguments=None,
+                arguments_error="tool call invalido",
+            )
+
+        tool_call_id = item.get("id")
+        tool_name = item.get("name") or "unknown"
+        if "function" in item and isinstance(item.get("function"), dict):
+            tool_name = item["function"].get("name") or tool_name
+            arguments_raw = item["function"].get("arguments")
+        else:
+            arguments_raw = item.get("arguments")
+
+        arguments: dict | None = None
+        arguments_error: str | None = None
+        try:
+            arguments = self._parse_arguments(arguments_raw)
+        except ValueError as exc:
+            arguments_error = str(exc)
+
+        return ParsedToolInvocation(
+            tool_call_id=str(tool_call_id) if tool_call_id is not None else None,
+            tool_name=str(tool_name) if tool_name else "unknown",
             arguments=arguments,
             arguments_error=arguments_error,
         )
@@ -449,7 +609,89 @@ class ToolDispatcher:
 
     @staticmethod
     def _wrap_result(tool_call_id: str | None, result: ToolResponse) -> dict:
-        return {"results": [{"toolCallId": tool_call_id, "result": result.model_dump()}]}
+        return {"results": [{"toolCallId": tool_call_id, "result": result.model_dump(mode="json")}]}
+
+    def _finalize_invocation(
+        self,
+        parsed: ParsedToolInvocation,
+        response: ToolResponse,
+        *,
+        call_id: str,
+        tenant_id: str,
+        started_at: float,
+        event_type: str,
+        error_code: str | None = None,
+        save_idempotency: bool = True,
+    ) -> dict:
+        duration_ms = (time.perf_counter() - started_at) * 1000
+        result_payload = response.model_dump(mode="json")
+        wrapped = {"toolCallId": parsed.tool_call_id, "result": result_payload}
+        metrics_store.record(
+            tool_name=parsed.tool_name,
+            ok=response.ok,
+            final_state=response.final_state,
+            duration_ms=duration_ms,
+        )
+        record_call_event(
+            settings=self.settings,
+            tenant_id=tenant_id,
+            call_id=call_id,
+            tool_call_id=parsed.tool_call_id,
+            tool_name=parsed.tool_name,
+            event_type=event_type,
+            final_state=response.final_state.value,
+            ok=response.ok,
+            duration_ms=duration_ms,
+            error_code=error_code,
+            payload=wrapped,
+        )
+        if save_idempotency:
+            save_tool_result(
+                settings=self.settings,
+                tenant_id=tenant_id,
+                call_id=call_id,
+                tool_call_id=parsed.tool_call_id,
+                tool_name=parsed.tool_name,
+                ok=response.ok,
+                final_state=response.final_state,
+                error_code=error_code,
+                duration_ms=duration_ms,
+                result_payload=result_payload,
+            )
+        return wrapped
+
+    def _record_request_event(
+        self,
+        payload_dict: dict,
+        *,
+        tenant_id: str,
+        call_id: str,
+        tool_name: str,
+        ok: bool,
+        final_state: CallFinalState,
+        event_type: str,
+        error_code: str | None = None,
+    ) -> dict:
+        metrics_store.record(
+            tool_name=tool_name,
+            ok=ok,
+            final_state=final_state,
+            duration_ms=0.0,
+        )
+        record_call_event(
+            settings=self.settings,
+            tenant_id=tenant_id,
+            call_id=call_id,
+            tool_call_id=None,
+            tool_name=tool_name,
+            event_type=event_type,
+            final_state=final_state.value,
+            ok=ok,
+            duration_ms=0.0,
+            error_code=error_code,
+            payload=payload_dict,
+        )
+        return payload_dict
 
     def _coerce_registry(
         self,

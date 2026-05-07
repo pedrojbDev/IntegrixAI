@@ -4,6 +4,8 @@ from fastapi import Depends, HTTPException, Request, status
 
 from ...config import Settings, get_settings
 
+OPS_SESSION_COOKIE_NAME = "integrix_ops_session"
+
 
 def _check_ops_token(provided: str | None, settings: Settings) -> None:
     if not settings.ops_dashboard_token:
@@ -22,6 +24,8 @@ def require_ops_token(
 ) -> str:
     header_name = settings.ops_token_header
     provided = request.headers.get(header_name)
+    if not provided:
+        provided = request.cookies.get(OPS_SESSION_COOKIE_NAME)
     _check_ops_token(provided, settings)
     return provided or ""
 
@@ -32,6 +36,8 @@ def require_ops_token_with_query(
 ) -> str:
     header_name = settings.ops_token_header
     provided = request.headers.get(header_name)
+    if not provided:
+        provided = request.cookies.get(OPS_SESSION_COOKIE_NAME)
     if not provided and not settings.is_production:
         provided = request.query_params.get("token")
     _check_ops_token(provided, settings)

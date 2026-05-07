@@ -6,6 +6,7 @@ from ....utils.enums import CallFinalState
 from ..catalog import get_specialty_catalog
 from ..contracts import SearchProvidersRequest, SearchProvidersResponse
 from ..integration.client import BusinessRuleError, ServiceUnavailable, get_data_provider
+from ..integration.translator import normalize_cpf
 from ..mappings import TOOL_SEARCH_PROVIDERS, mask_cpf
 
 log = get_logger()
@@ -19,6 +20,24 @@ async def search_providers(
 ) -> tuple[dict, CallFinalState]:
     provider = get_data_provider(settings)
     payload = SearchProvidersRequest(**args, call_id=call_id, to_number=None)
+    if not normalize_cpf(payload.cpf or ""):
+        raise BusinessRuleError(
+            code="CPF_INVALIDO",
+            field="cpf",
+            message="CPF deve conter 11 digitos",
+        )
+    if not payload.city:
+        raise BusinessRuleError(
+            code="CIDADE_INVALIDA",
+            field="cidade",
+            message="Cidade obrigatoria para busca de rede",
+        )
+    if not payload.query:
+        raise BusinessRuleError(
+            code="ESPECIALIDADE_INVALIDA",
+            field="especialidade",
+            message="Especialidade obrigatoria para busca de rede",
+        )
     catalog = get_specialty_catalog(settings)
     if catalog.is_enabled:
         canonical_specialty = catalog.resolve(payload.query)

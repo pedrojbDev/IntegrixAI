@@ -21,6 +21,7 @@ SENSITIVE_KEYS = {"cpf", "token", "secret", "authorization", "password"}
 class AuditEventPayload:
     tenant_id: str
     call_id: str
+    tool_call_id: str | None
     tool_name: str
     event_type: str
     final_state: str | None
@@ -112,6 +113,7 @@ def _build_event_payload(
     *,
     tenant_id: str | None,
     call_id: str | None,
+    tool_call_id: str | None = None,
     tool_name: str,
     event_type: str,
     final_state: str | None,
@@ -123,6 +125,7 @@ def _build_event_payload(
     return AuditEventPayload(
         tenant_id=tenant_id or "unknown",
         call_id=call_id or "unknown",
+        tool_call_id=tool_call_id,
         tool_name=tool_name,
         event_type=event_type,
         final_state=final_state,
@@ -144,6 +147,7 @@ def _write_audit_events(events: list[AuditEventPayload]) -> None:
                 CallEvent(
                     tenant_id=event.tenant_id,
                     call_id=event.call_id,
+                    tool_call_id=event.tool_call_id,
                     tool_name=event.tool_name,
                     event_type=event.event_type,
                     final_state=event.final_state,
@@ -216,6 +220,7 @@ def record_call_event(
     settings: Settings,
     tenant_id: str | None,
     call_id: str | None,
+    tool_call_id: str | None = None,
     tool_name: str,
     event_type: str,
     final_state: str | None,
@@ -231,6 +236,7 @@ def record_call_event(
     event = _build_event_payload(
         tenant_id=tenant_id,
         call_id=call_id,
+        tool_call_id=tool_call_id,
         tool_name=tool_name,
         event_type=event_type,
         final_state=final_state,

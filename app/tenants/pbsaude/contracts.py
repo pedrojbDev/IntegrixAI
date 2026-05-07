@@ -1,6 +1,6 @@
 from datetime import date
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 from ...utils.enums import AuthLevel, AuthorizationStatus, CallFinalState
 
@@ -54,6 +54,21 @@ class SearchProvidersRequest(ToolBase):
         validation_alias=AliasChoices("neighborhood", "bairro"),
     )
     query: str = Field(validation_alias=AliasChoices("query", "especialidade"))
+
+    @field_validator("city", "query", mode="before")
+    @classmethod
+    def strip_required_text(cls, value):
+        if value is None:
+            return value
+        return str(value).strip()
+
+    @field_validator("neighborhood", "tipo_atendimento", mode="before")
+    @classmethod
+    def strip_optional_text(cls, value):
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
 
 
 class SearchProvidersResponse(BaseModel):
