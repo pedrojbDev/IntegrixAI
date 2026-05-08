@@ -12,6 +12,7 @@ from ....utils.enums import AuthLevel, AuthorizationStatus
 from ..contracts import Provider
 from .auth import build_external_api_auth, resolve_external_api_tenant_config
 from .client import BusinessRuleError, DataProvider, ServiceUnavailable
+from .http_client import post_json_with_retries
 from .translator import (
     as_optional_string,
     as_string,
@@ -42,6 +43,7 @@ class ExternalApiDataProvider(DataProvider):
     def search_providers(
         self,
         tenant_id: str,
+        call_id: str,
         city: str,
         neighborhood: str | None,
         query: str,
@@ -76,18 +78,27 @@ class ExternalApiDataProvider(DataProvider):
         url = self._build_url(config.base_url, config.provider_search_path)
 
         try:
-            with httpx.Client(timeout=config.timeout_seconds) as client:
-                response = client.post(url, json=payload, headers=headers, auth=auth)
+            response = post_json_with_retries(
+                settings=self.settings,
+                tenant_id=tenant_id,
+                call_id=call_id,
+                url=url,
+                path=config.provider_search_path,
+                payload=payload,
+                headers=headers,
+                auth=auth,
+                timeout_seconds=config.timeout_seconds,
+            )
         except httpx.TimeoutException as exc:
             raise TimeoutError("Timeout na consulta da API externa de rede") from exc
         except httpx.RequestError as exc:
             raise ServiceUnavailable("Falha de comunicacao com API externa") from exc
 
-        data = parse_external_api_json(response)
         if response.status_code in (401, 403):
             raise ServiceUnavailable("Falha de autenticacao na API externa")
         if response.status_code >= 500:
             raise ServiceUnavailable("API externa indisponivel")
+        data = parse_external_api_json(response)
         if response.status_code >= 400:
             if is_business_error(data):
                 raise BusinessRuleError(

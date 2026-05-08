@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     external_api_password: str | None = None
     external_api_provider_search_path: str = "/rest02/TNSCallCenter/busca-rede"
     external_api_timeout_seconds: float = 3.0
+    external_api_max_retries: int = 1
+    external_api_retry_backoff_seconds: float = 0.2
+    external_api_max_connections: int = 50
+    external_api_max_keepalive_connections: int = 20
     provider_max_results: int = 3
     external_api_tenant_configs: dict[str, dict[str, str | float | bool | None]] = Field(
         default_factory=dict
@@ -188,6 +192,26 @@ class Settings(BaseSettings):
     @classmethod
     def clamp_provider_max_results(cls, value: int) -> int:
         return max(1, min(10, value))
+
+    @field_validator("external_api_max_retries")
+    @classmethod
+    def clamp_external_api_max_retries(cls, value: int) -> int:
+        return max(0, min(3, value))
+
+    @field_validator("external_api_retry_backoff_seconds")
+    @classmethod
+    def clamp_external_api_retry_backoff_seconds(cls, value: float) -> float:
+        return max(0.0, min(2.0, value))
+
+    @field_validator("external_api_max_connections")
+    @classmethod
+    def clamp_external_api_max_connections(cls, value: int) -> int:
+        return max(1, min(500, value))
+
+    @field_validator("external_api_max_keepalive_connections")
+    @classmethod
+    def clamp_external_api_max_keepalive_connections(cls, value: int) -> int:
+        return max(0, min(500, value))
 
     @model_validator(mode="after")
     def validate_production_settings(self):

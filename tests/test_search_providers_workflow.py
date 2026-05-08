@@ -75,7 +75,8 @@ class SearchProvidersWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(CallFinalState.RESOLVIDA_AUTOMATICO, final_state)
         self.assertEqual({"providers": []}, data)
         provider.search_providers.assert_called_once()
-        self.assertIsNone(provider.search_providers.call_args.args[2])
+        self.assertEqual("call_123", provider.search_providers.call_args.args[1])
+        self.assertIsNone(provider.search_providers.call_args.args[3])
 
 
 if __name__ == "__main__":

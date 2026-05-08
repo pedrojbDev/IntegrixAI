@@ -46,6 +46,7 @@ class MockDataProvider(DataProvider):
     def search_providers(
         self,
         tenant_id: str,
+        call_id: str,
         city: str,
         neighborhood: str | None,
         query: str,

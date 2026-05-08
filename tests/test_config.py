@@ -102,6 +102,20 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(1, settings.call_events_retention_days)
         self.assertEqual(1, settings.vapi_cost_retention_days)
 
+    def test_external_api_resilience_settings_are_clamped(self) -> None:
+        settings = Settings(
+            _env_file=None,
+            external_api_max_retries=99,
+            external_api_retry_backoff_seconds=99,
+            external_api_max_connections=0,
+            external_api_max_keepalive_connections=-1,
+        )
+
+        self.assertEqual(3, settings.external_api_max_retries)
+        self.assertEqual(2.0, settings.external_api_retry_backoff_seconds)
+        self.assertEqual(1, settings.external_api_max_connections)
+        self.assertEqual(0, settings.external_api_max_keepalive_connections)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -10,6 +10,7 @@ from .api.routes.tools import router as tools_router
 from .config import get_settings
 from .core.audit.service import stop_audit_worker
 from .logging import setup_logging
+from .tenants.pbsaude.integration.http_client import close_external_api_client
 
 settings = get_settings()
 setup_logging(settings.log_level)
@@ -25,6 +26,7 @@ app.include_router(health_router)
 @app.on_event("shutdown")
 def shutdown_audit_worker() -> None:
     stop_audit_worker()
+    close_external_api_client()
 
 
 if __name__ == "__main__":

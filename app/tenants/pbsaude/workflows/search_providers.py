@@ -57,6 +57,7 @@ async def search_providers(
             asyncio.to_thread(
                 provider.search_providers,
                 tenant_id,
+                call_id,
                 payload.city,
                 payload.neighborhood,
                 canonical_specialty,
