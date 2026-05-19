@@ -1,6 +1,6 @@
 # Integrix AI Call Center Pilot
 
-Backend em `FastAPI` para orquestracao de tool-calls de voz, com suporte a multi-tenant por DID, modo mock para piloto, integracao externa para busca de rede credenciada, trilha de auditoria em banco, metricas operacionais e dashboard protegido por token.
+Backend em `FastAPI` para orquestracao de tool-calls de voz, com suporte a multi-tenant por DID, modo mock para piloto, integracao externa para busca de rede credenciada, trilha de auditoria em banco, metricas operacionais e console operacional React protegido por sessao ops.
 
 ## Visao geral
 
@@ -11,8 +11,8 @@ Alem do fluxo principal, o backend possui:
 - metricas em memoria para baseline operacional;
 - auditoria opcional em Postgres;
 - sincronizacao de custos de chamadas na Vapi;
-- endpoints de dashboard para visao consolidada de volume, handoff e custo por tool;
-- UI HTML embutida em `/dashboard`.
+- endpoints de dashboard para visao consolidada de volume, handoff, diagnostico, auditoria e custo por tool;
+- frontend React/Vite servido em producao por `/dashboard`.
 
 ## Principais capacidades
 
@@ -39,16 +39,18 @@ Alem do fluxo principal, o backend possui:
 - Psycopg 3
 - HTTPX
 - Structlog
+- React + Vite + TypeScript no diretorio `frontend/`
+- Tailwind CSS, TanStack Query, React Hook Form, Zod, Recharts e Lucide React
 
 ## Estrutura do projeto
 
 ```text
 app/
-  api/
-    dashboard.py        # pagina HTML do dashboard
+  api/routes/
+    dashboard.py        # serving da SPA em /dashboard
     ops.py              # endpoints operacionais protegidos
-    routes.py           # endpoint principal /tools
-    security.py         # validacao de token do dashboard/ops
+    ops_session.py      # sessao HttpOnly da console
+    tools.py            # endpoint principal /tools
   models/
     call_event.py       # auditoria de tool-calls
     ops_sync_state.py   # cursor de sync operacional
@@ -68,6 +70,9 @@ app/
   db.py                 # engine/session SQLAlchemy
   logging.py            # logs estruturados JSON
   main.py               # bootstrap FastAPI
+frontend/
+  src/                  # React SPA da console operacional
+  dist/                 # build Vite servido por FastAPI em producao
 alembic/
   versions/             # migrations
 requirements.txt
@@ -103,12 +108,30 @@ requirements.txt
 
 ## Instalacao
 
+### Backend
+
 ```bash
 python -m venv venv
 venv\Scripts\activate
 pip install -r requirements.txt
 copy .env.example .env
 ```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+```
+
+O frontend usa Vite em desenvolvimento e chamadas relativas em producao. `VITE_API_BASE_URL` e opcional; defina apenas se o frontend for publicado separado do backend.
+
+```env
+VITE_API_BASE_URL=http://localhost:8000
+VITE_APP_BASENAME=/
+```
+
+Para o build servido pelo FastAPI em `/dashboard`, o basename padrao de producao ja e `/dashboard`.
 
 ## Configuracao
 
@@ -203,7 +226,7 @@ alembic upgrade head
 ### Observacoes
 
 - Os endpoints `/ops/audit/*`, `/ops/dashboard/*` e `/ops/costs/sync` exigem `DB_ENABLED=true`.
-- O dashboard HTML em `/dashboard` tambem depende de `OPS_DASHBOARD_TOKEN` configurado.
+- A console em `/dashboard` depende de `OPS_DASHBOARD_TOKEN` configurado para criar sessao ops.
 
 ## Execucao local
 
@@ -322,6 +345,18 @@ Caracteristicas importantes:
 
 Todos os endpoints abaixo exigem o token enviado no header definido por `OPS_TOKEN_HEADER`.
 
+### POST `/ops/session`
+
+Cria a sessao HttpOnly usada pela console React. Recebe `{ "token": "..." }`, valida contra `OPS_DASHBOARD_TOKEN` e define o cookie `integrix_ops_session`.
+
+### GET `/ops/session`
+
+Retorna `{ "authenticated": true }` quando o cookie ou header ops e valido.
+
+### DELETE `/ops/session`
+
+Remove o cookie de sessao da console.
+
 ### GET `/ops/baseline`
 
 Retorna metricas em memoria acumuladas desde o boot da aplicacao.
@@ -369,35 +404,74 @@ Retorna serie temporal e resumo de custo em USD.
 
 Retorna performance e custo por tool, fazendo correlacao por `call_id`.
 
-## Dashboard HTML
+## Console operacional React
 
 ### GET `/dashboard`
 
-Serve uma pagina HTML embutida para operacao. O acesso pode ser feito de duas formas:
+Serve a SPA React em producao a partir de `frontend/dist`.
 
-- header com o token operacional;
-- query string `?token=...`.
+Autenticacao:
+
+- em desenvolvimento, a console exibe tela de login e envia o token para `POST /ops/session`;
+- em desenvolvimento, `/dashboard?token=...` ainda pode inicializar a sessao para compatibilidade;
+- em producao, `?token=` e rejeitado por seguranca;
+- em producao, use login pela SPA ou header `OPS_TOKEN_HEADER` para bootstrap controlado;
+- o token nao deve ser salvo em `localStorage` ou `sessionStorage`.
 
 Funcionalidades da UI:
 
 - KPIs de volume, handoff, duracao e custo
 - series temporais
-- tabela de custo por tool
+- tabela de performance por tool
+- visao de diagnostico operacional
+- visao de auditoria recente
 - filtro por `tenant_id`
 - filtro por `assistant_id`
 - botao de sync de custos
-- refresh automatico a cada 45 segundos
+- refresh manual e estado de sessao
 
-Exemplo:
+### Rodar em desenvolvimento
+
+Terminal 1, backend:
+
+```bash
+venv\Scripts\activate
+uvicorn app.main:app --reload
+```
+
+Terminal 2, frontend:
+
+```bash
+cd frontend
+npm run dev
+```
+
+Acesse o Vite em `http://localhost:5173`. O proxy encaminha `/ops`, `/health` e `/tools` para o backend.
+
+### Build e serving em producao
+
+```bash
+cd frontend
+npm run build
+```
+
+O build fica em `frontend/dist`. Com esse diretorio presente, o FastAPI serve:
 
 ```text
-http://localhost:8000/dashboard?token=troque-este-token
+/dashboard
+/dashboard/diagnostics
+/dashboard/audit
+/dashboard/assets/*
 ```
+
+Rotas de API como `/ops/*`, `/health` e `/tools` nao sao interceptadas pelo fallback da SPA.
 
 ## Seguranca
 
 - O endpoint `/tools` pode validar segredo via `WEBHOOK_SECRET`.
-- Os endpoints `/ops/*` e `/dashboard` exigem `OPS_DASHBOARD_TOKEN`.
+- Os endpoints `/ops/*` exigem `OPS_DASHBOARD_TOKEN` via header ou cookie HttpOnly da sessao ops.
+- `POST /ops/session` possui limitador simples em memoria por IP antes da validacao do token.
+- Em producao, `/dashboard?token=...` nao e aceito.
 - Payloads persistidos no banco passam por masking de chaves sensiveis como `cpf`, `token`, `secret`, `authorization` e `password`.
 - O token operacional e comparado com `hmac.compare_digest`.
 
@@ -465,15 +539,15 @@ Persistidas:
 3. Copiar `.env.example` para `.env`.
 4. Ajustar pelo menos `DATA_MODE`, `DB_ENABLED` e `OPS_DASHBOARD_TOKEN`.
 5. Se usar banco, executar `alembic upgrade head`.
-6. Iniciar a aplicacao com `uvicorn`.
-7. Validar `GET /health`.
-8. Testar `POST /tools`.
-9. Se usar ops, acessar `/dashboard?token=...`.
+6. Instalar dependencias do frontend em `frontend/`.
+7. Rodar `npm run build` em `frontend/` para gerar `frontend/dist`.
+8. Iniciar a aplicacao com `uvicorn`.
+9. Validar `GET /health`.
+10. Testar `POST /tools`.
+11. Se usar ops, acessar `/dashboard` e autenticar pela tela da console.
 
 ## Proximos passos recomendados
 
-- adicionar testes automatizados para rotas e services;
 - criar exemplos versionados de payload para cada tool;
 - alinhar `.env.example` com os defaults reais do codigo;
-- separar o dashboard HTML em frontend dedicado se ele crescer;
 - adicionar autenticacao e status reais no provider externo.

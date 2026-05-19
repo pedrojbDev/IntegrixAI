@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from .api.routes.dashboard import router as dashboard_router
 from .api.routes.health import router as health_router
 from .api.routes.ops import router as ops_router
+from .api.routes.ops_session import router as ops_session_router
 from .api.routes.tools import router as tools_router
 from .config import get_settings
 from .core.audit.service import stop_audit_worker
@@ -18,6 +19,7 @@ setup_logging(settings.log_level)
 app = FastAPI(title=settings.app_name)
 app.mount("/static", StaticFiles(directory=Path(__file__).resolve().parent / "static"), name="static")
 app.include_router(tools_router)
+app.include_router(ops_session_router)
 app.include_router(ops_router)
 app.include_router(dashboard_router)
 app.include_router(health_router)

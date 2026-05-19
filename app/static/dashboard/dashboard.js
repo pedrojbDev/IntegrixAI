@@ -31,6 +31,13 @@ const state = {
   activeView: loadStoredView(),
   filters: loadStoredFilters(),
   audit: loadStoredAuditFilters(),
+  cache: {
+    health: null,
+    overview: null,
+    diagnostics: null,
+    audit: null,
+  },
+  requestSeq: 0,
 }
 
 const refs = {
@@ -45,6 +52,13 @@ const refs = {
   healthSummary: document.getElementById("health-summary"),
   lastRefresh: document.getElementById("last-refresh"),
   statusLine: document.getElementById("status-line"),
+  overviewHeroCopy: document.getElementById("overview-hero-copy"),
+  overviewHeroStat: document.getElementById("overview-hero-stat"),
+  overviewHeroMeta: document.getElementById("overview-hero-meta"),
+  diagHeroCopy: document.getElementById("diag-hero-copy"),
+  auditHeroCopy: document.getElementById("audit-hero-copy"),
+  auditHeroStat: document.getElementById("audit-hero-stat"),
+  auditHeroMeta: document.getElementById("audit-hero-meta"),
   viewTabs: [...document.querySelectorAll("[data-view]")],
   views: {
     overview: document.getElementById("view-overview"),
@@ -77,6 +91,8 @@ const refs = {
   diagSyncAge: document.getElementById("diag-sync-age"),
   diagIdempotencyHits: document.getElementById("diag-idempotency-hits"),
   diagBusinessErrors: document.getElementById("diag-business-errors"),
+  diagCoverage: document.getElementById("diag-coverage"),
+  diagCoverageCopy: document.getElementById("diag-coverage-copy"),
   diagFailedSeries: document.getElementById("diag-failed-series"),
   diagIdempotencySeries: document.getElementById("diag-idempotency-series"),
   diagBusinessSeries: document.getElementById("diag-business-series"),
@@ -100,8 +116,12 @@ hydrateControls()
 bindEvents()
 applyContextText()
 applyActiveView()
-refreshAll()
-window.setInterval(refreshAll, bootstrap.refreshIntervalMs || 45_000)
+renderHeaderHealth(emptyHealthModel())
+renderOverview(emptyOverviewModel())
+renderDiagnostics(emptyDiagnosticsModel())
+renderAudit(emptyAuditModel())
+refreshActiveView()
+window.setInterval(() => refreshActiveView(false), bootstrap.refreshIntervalMs || 45_000)
 
 function readBootstrap() {
   const element = document.getElementById("dashboard-bootstrap")
@@ -181,40 +201,29 @@ function hydrateControls() {
 }
 
 function bindEvents() {
-  refs.refreshBtn.addEventListener("click", () => refreshAll(true))
+  refs.refreshBtn.addEventListener("click", () => refreshActiveView(true, true))
   refs.syncBtn.addEventListener("click", syncCosts)
-  refs.auditRefreshBtn.addEventListener("click", () => refreshAll(true))
+  refs.auditRefreshBtn.addEventListener("click", () => refreshActiveView(true, true))
 
-  refs.window.addEventListener("change", () => {
-    syncFiltersFromControls()
-    refreshAll(true)
-  })
+  refs.window.addEventListener("change", handleFilterMutation)
 
   for (const field of [refs.tenant, refs.assistant]) {
-    field.addEventListener("change", () => {
-      syncFiltersFromControls()
-      refreshAll(true)
-    })
+    field.addEventListener("change", handleFilterMutation)
     field.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
-        syncFiltersFromControls()
-        refreshAll(true)
+        handleFilterMutation()
       }
     })
   }
 
   for (const field of [refs.auditLimit, refs.auditTool, refs.auditEvent, refs.auditOk]) {
-    field.addEventListener("change", () => {
-      syncAuditFiltersFromControls()
-      refreshAll(true)
-    })
+    field.addEventListener("change", handleAuditFilterMutation)
   }
 
   for (const field of [refs.auditTool, refs.auditEvent]) {
     field.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
-        syncAuditFiltersFromControls()
-        refreshAll(true)
+        handleAuditFilterMutation()
       }
     })
   }
@@ -224,7 +233,26 @@ function bindEvents() {
       state.activeView = button.dataset.view
       persistView()
       applyActiveView()
+      applyContextText()
+      renderActiveViewFromCache()
+      if (!hasDataForView(state.activeView)) {
+        refreshActiveView(false, true)
+      }
     })
+  }
+}
+
+function handleFilterMutation() {
+  syncFiltersFromControls()
+  invalidateViewCache()
+  refreshActiveView(true, true)
+}
+
+function handleAuditFilterMutation() {
+  syncAuditFiltersFromControls()
+  state.cache.audit = null
+  if (state.activeView === "audit") {
+    refreshActiveView(true, true)
   }
 }
 
@@ -248,12 +276,19 @@ function syncAuditFiltersFromControls() {
   persistAuditFilters()
 }
 
+function invalidateViewCache() {
+  state.cache.health = null
+  state.cache.overview = null
+  state.cache.diagnostics = null
+  state.cache.audit = null
+}
+
 function applyContextText() {
   const parts = [`Janela ${WINDOW_LABELS[state.filters.window]}`]
   if (state.filters.tenant) {
     parts.push(`tenant ${state.filters.tenant}`)
   } else {
-    parts.push("visão geral")
+    parts.push(viewName(state.activeView).toLowerCase())
   }
   if (state.filters.assistant) {
     parts.push(`assistant ${state.filters.assistant}`)
@@ -279,47 +314,72 @@ function setActionState() {
   refs.auditRefreshBtn.textContent = state.loading ? "Atualizando..." : "Atualizar auditoria"
 }
 
-async function refreshAll(manual = false) {
+function renderActiveViewFromCache() {
+  if (state.cache.health) {
+    renderHeaderHealth(state.cache.health)
+  }
+
+  if (state.activeView === "overview") {
+    renderOverview(state.cache.overview || emptyOverviewModel())
+  } else if (state.activeView === "diagnostics") {
+    renderDiagnostics(state.cache.diagnostics || emptyDiagnosticsModel())
+  } else {
+    renderAudit(state.cache.audit || emptyAuditModel())
+  }
+}
+
+function hasDataForView(view) {
+  if (view === "overview") {
+    return Boolean(state.cache.overview)
+  }
+  if (view === "diagnostics") {
+    return Boolean(state.cache.diagnostics)
+  }
+  return Boolean(state.cache.audit)
+}
+
+async function refreshActiveView(manual = false, force = false) {
   syncFiltersFromControls()
   syncAuditFiltersFromControls()
+
+  if (state.loading && !force) {
+    return
+  }
+
   state.loading = true
+  const requestId = ++state.requestSeq
   setActionState()
   hideGlobalMessage()
   refs.statusLine.textContent = manual
-    ? "Atualização manual em andamento."
-    : "Atualização automática em andamento."
+    ? `Atualização manual da ${viewName(state.activeView).toLowerCase()} em andamento.`
+    : `Atualização da ${viewName(state.activeView).toLowerCase()} em andamento.`
 
   try {
-    const [overview, costs, tools, health, resilience, auditSummary, auditRecent] = await Promise.all([
-      apiGet("/ops/dashboard/overview"),
-      apiGet("/ops/dashboard/costs"),
-      apiGet("/ops/dashboard/tools"),
-      apiGet("/ops/dashboard/health"),
-      apiGet("/ops/dashboard/resilience"),
-      apiGet("/ops/audit/summary", {
-        since_minutes: WINDOW_TO_MINUTES[state.filters.window],
-      }),
-      apiGet("/ops/audit/recent", {
-        limit: state.audit.limit,
-        tool_name: state.audit.toolName || undefined,
-        event_type: state.audit.eventType || undefined,
-        ok: state.audit.ok === "all" ? undefined : state.audit.ok,
-      }),
-    ])
+    const model = await fetchViewBundle(state.activeView)
+    if (requestId !== state.requestSeq) {
+      return
+    }
 
-    renderConsole({
-      overview,
-      costs,
-      tools,
-      health,
-      resilience,
-      auditSummary,
-      auditRecent,
-    })
+    state.cache.health = model.health
+    if (state.activeView === "overview") {
+      state.cache.overview = model.overview
+      renderOverview(model.overview)
+    } else if (state.activeView === "diagnostics") {
+      state.cache.diagnostics = model.diagnostics
+      renderDiagnostics(model.diagnostics)
+    } else {
+      state.cache.audit = model.audit
+      renderAudit(model.audit)
+    }
+
+    renderHeaderHealth(model.health)
     refs.lastRefresh.textContent = `Atualizado às ${new Date().toLocaleTimeString("pt-BR")}`
-    refs.statusLine.textContent = "Console operacional atualizada com sucesso."
+    refs.statusLine.textContent = `${viewName(state.activeView)} carregada com sucesso.`
   } catch (error) {
-    if (error.status === 400 && error.detail === "tenant_id obrigatorio em producao") {
+    if (requestId !== state.requestSeq) {
+      return
+    }
+    if (isTenantRequiredError(error)) {
       renderTenantRequiredState()
     } else {
       renderFailure(error)
@@ -327,8 +387,65 @@ async function refreshAll(manual = false) {
     refs.lastRefresh.textContent = "Falha ao atualizar"
     refs.statusLine.textContent = `Falha ao carregar dados: ${error.message}`
   } finally {
-    state.loading = false
-    setActionState()
+    if (requestId === state.requestSeq) {
+      state.loading = false
+      setActionState()
+    }
+  }
+}
+
+async function fetchViewBundle(view) {
+  if (view === "overview") {
+    const [health, overview, costs, tools] = await Promise.all([
+      apiGet("/ops/dashboard/health"),
+      apiGet("/ops/dashboard/overview"),
+      apiGet("/ops/dashboard/costs"),
+      apiGet("/ops/dashboard/tools"),
+    ])
+    return {
+      health,
+      overview: {
+        overview,
+        costs,
+        tools: tools.items || [],
+        health,
+      },
+    }
+  }
+
+  if (view === "diagnostics") {
+    const [health, resilience] = await Promise.all([
+      apiGet("/ops/dashboard/health"),
+      apiGet("/ops/dashboard/resilience"),
+    ])
+    return {
+      health,
+      diagnostics: {
+        health,
+        resilience,
+      },
+    }
+  }
+
+  const [health, auditSummary, auditRecent] = await Promise.all([
+    apiGet("/ops/dashboard/health"),
+    apiGet("/ops/audit/summary", {
+      since_minutes: WINDOW_TO_MINUTES[state.filters.window],
+    }),
+    apiGet("/ops/audit/recent", {
+      limit: state.audit.limit,
+      tool_name: state.audit.toolName || undefined,
+      event_type: state.audit.eventType || undefined,
+      ok: state.audit.ok === "all" ? undefined : state.audit.ok,
+    }),
+  ])
+  return {
+    health,
+    audit: {
+      health,
+      auditSummary,
+      auditRecent,
+    },
   }
 }
 
@@ -350,9 +467,11 @@ async function syncCosts() {
 
     const payload = await response.json()
     refs.statusLine.textContent = `Sync concluído: ${payload.result.processed} processadas, ${payload.result.created} novas.`
-    await refreshAll(true)
+    invalidateViewCache()
+    await refreshActiveView(true, true)
   } catch (error) {
     refs.statusLine.textContent = `Sync falhou: ${error.message}`
+    showGlobalMessage(`Não foi possível sincronizar os custos: ${error.message}`)
   } finally {
     state.syncing = false
     setActionState()
@@ -406,11 +525,8 @@ function buildHeaders() {
   return { [bootstrap.headerName || "x-ops-token"]: bootstrap.token }
 }
 
-function renderConsole(model) {
-  renderHeaderHealth(model.health)
-  renderOverview(model)
-  renderDiagnostics(model)
-  renderAudit(model)
+function isTenantRequiredError(error) {
+  return error.status === 400 && error.detail === "tenant_id obrigatorio em producao"
 }
 
 function renderHeaderHealth(health) {
@@ -423,7 +539,8 @@ function renderHeaderHealth(health) {
 function renderOverview(model) {
   const overview = model.overview
   const costs = model.costs
-  const tools = model.tools.items
+  const tools = model.tools
+  const health = model.health
   const totalCalls = Number(overview.kpis.total_calls || 0)
   const successCalls = Number(overview.kpis.success_calls || 0)
   const failedCalls = Number(overview.kpis.failed_calls || 0)
@@ -451,51 +568,64 @@ function renderOverview(model) {
   refs.costAvg.textContent = formatUsd(costs.summary.avg_cost_per_call_usd || 0)
   refs.duration.textContent = formatDuration(overview.kpis.avg_duration_ms || 0)
 
+  refs.overviewHeroCopy.textContent = totalCalls > 0
+    ? `A janela atual registrou ${numberFmt.format(totalCalls)} calls com ${formatPercent(successRate)} de resolução automática.`
+    : "Nenhuma call encontrada para os filtros atuais."
+  refs.overviewHeroStat.textContent = mapHealthState(health.health_state).label
+  refs.overviewHeroMeta.textContent = buildHealthSummary(health)
+
   renderSummaryCards(refs.signalSummary, buildOverviewSignals(model))
   renderFocusCards(refs.focusList, buildOverviewFocusItems(tools))
   renderTimelineList(refs.callsTimeline, overview.series || [], {
     mode: "calls",
-    window: state.filters.window,
+    window: overview.window,
     emptyText: "Sem buckets de chamadas para a janela atual.",
   })
   renderTimelineList(refs.costTimeline, costs.series || [], {
     mode: "cost",
-    window: state.filters.window,
+    window: overview.window,
     emptyText: "Nenhum bucket de custo disponível para os filtros atuais.",
   })
   renderToolsTable(tools)
 }
 
 function renderDiagnostics(model) {
-  const { label } = mapHealthState(model.health.health_state)
-  refs.diagHealthState.textContent = label
-  refs.diagHealthCopy.textContent = buildHealthSummary(model.health)
-  refs.diagSyncState.textContent = formatSyncState(model.health.sync.freshness_state)
-  refs.diagSyncAge.textContent = buildSyncAge(model.health.sync)
-  refs.diagIdempotencyHits.textContent = numberFmt.format(model.resilience.summary.idempotency_hits || 0)
-  refs.diagBusinessErrors.textContent = numberFmt.format(model.resilience.summary.repeated_business_errors || 0)
+  const { health, resilience } = model
+  const counters = health.counters || {}
 
-  renderTimelineList(refs.diagFailedSeries, model.resilience.series.failed_calls || [], {
+  refs.diagHeroCopy.textContent = buildDiagnosticHeroCopy(health, resilience)
+  refs.diagHealthState.textContent = mapHealthState(health.health_state).label
+  refs.diagHealthCopy.textContent = buildHealthSummary(health)
+  refs.diagSyncState.textContent = formatSyncState(health.sync?.freshness_state)
+  refs.diagSyncAge.textContent = buildSyncAge(health.sync)
+  refs.diagIdempotencyHits.textContent = numberFmt.format(resilience.summary.idempotency_hits || 0)
+  refs.diagBusinessErrors.textContent = numberFmt.format(resilience.summary.repeated_business_errors || 0)
+  refs.diagCoverage.textContent = formatPercent(counters.coverage_pct || 0)
+  refs.diagCoverageCopy.textContent = counters.total_calls > 0
+    ? `${numberFmt.format(counters.calls_with_cost || 0)} de ${numberFmt.format(counters.total_calls || 0)} calls com custo associado.`
+    : "Sem correlação suficiente."
+
+  renderTimelineList(refs.diagFailedSeries, resilience.series.failed_calls || [], {
     mode: "diagnostic",
     window: state.filters.window,
     emptyText: "Nenhum bucket com falha registrada.",
   })
-  renderTimelineList(refs.diagIdempotencySeries, model.resilience.series.idempotency_hits || [], {
+  renderTimelineList(refs.diagIdempotencySeries, resilience.series.idempotency_hits || [], {
     mode: "diagnostic",
     window: state.filters.window,
     emptyText: "Nenhum hit de idempotência na janela.",
   })
-  renderTimelineList(refs.diagBusinessSeries, model.resilience.series.repeated_business_errors || [], {
+  renderTimelineList(refs.diagBusinessSeries, resilience.series.repeated_business_errors || [], {
     mode: "diagnostic",
     window: state.filters.window,
     emptyText: "Nenhuma repetição de erro de negócio na janela.",
   })
 
-  renderFocusCards(refs.diagTopFailures, buildDiagnosticFocus(model.resilience.top_failure_tools || [], "Falha"))
-  renderFocusCards(refs.diagTopHandoffs, buildDiagnosticFocus(model.resilience.top_handoff_tools || [], "Handoff"))
+  renderFocusCards(refs.diagTopFailures, buildDiagnosticFocus(resilience.top_failure_tools || [], "Falha"))
+  renderFocusCards(refs.diagTopHandoffs, buildDiagnosticFocus(resilience.top_handoff_tools || [], "Handoff"))
   renderFocusCards(
     refs.diagBusinessTools,
-    (model.resilience.business_error_tools || []).map((item) => ({
+    (resilience.business_error_tools || []).map((item) => ({
       label: "Erro repetido",
       title: item.tool_name,
       meta: `${numberFmt.format(item.retries)} repetições`,
@@ -507,15 +637,24 @@ function renderDiagnostics(model) {
 
 function renderAudit(model) {
   const totals = model.auditSummary.totals || {}
+  const recentItems = model.auditRecent.items || []
+
+  refs.auditHeroCopy.textContent = totals.total_calls > 0
+    ? `A trilha recente reúne ${numberFmt.format(totals.total_calls)} chamadas auditadas na janela.`
+    : "Nenhuma chamada auditada encontrada para os filtros atuais."
+  refs.auditHeroStat.textContent = recentItems.length > 0 ? "Trilha disponível" : "Sem eventos"
+  refs.auditHeroMeta.textContent = recentItems.length > 0
+    ? `${numberFmt.format(recentItems.length)} eventos retornados nesta consulta.`
+    : "Ajuste os filtros para ampliar a busca."
+
   refs.auditTotalCalls.textContent = numberFmt.format(totals.total_calls || 0)
   refs.auditSuccessCalls.textContent = numberFmt.format(totals.success_calls || 0)
   refs.auditFailedCalls.textContent = numberFmt.format(totals.failed_calls || 0)
   refs.auditHandoffCalls.textContent = numberFmt.format(totals.handoff_calls || 0)
 
   refs.auditTableBody.replaceChildren()
-  const items = model.auditRecent.items || []
-  refs.auditEmpty.classList.toggle("hidden", items.length > 0)
-  for (const item of items) {
+  refs.auditEmpty.classList.toggle("hidden", recentItems.length > 0)
+  for (const item of recentItems) {
     const row = document.createElement("tr")
     appendCell(row, formatDateTime(item.created_at))
     appendCell(row, item.tenant_id || "unknown")
@@ -532,104 +671,33 @@ function renderAudit(model) {
 
 function renderTenantRequiredState() {
   showGlobalMessage("Informe um tenant para consultar a console neste ambiente de produção.")
-  const health = {
-    health_state: "no_data",
-    sync: { freshness_state: "unknown", freshness_seconds: null, last_synced_at: null },
-    counters: {
-      total_calls: 0,
-      failed_calls: 0,
-      handoff_calls: 0,
-      calls_with_cost: 0,
-      repeated_business_errors: 0,
-      idempotency_hits: 0,
-      coverage_pct: 0,
-    },
-  }
+  const health = emptyHealthModel()
   renderHeaderHealth(health)
-  renderOverview({
-    overview: { window: state.filters.window, kpis: { total_calls: 0, success_calls: 0, failed_calls: 0, handoff_calls: 0, avg_duration_ms: 0 }, series: [] },
-    costs: { summary: { total_cost_usd: 0, calls_with_cost: 0, avg_cost_per_call_usd: 0 }, series: [] },
-    tools: { items: [] },
-    health,
-    resilience: {
-      summary: { idempotency_hits: 0, repeated_business_errors: 0 },
-      series: { failed_calls: [], idempotency_hits: [], repeated_business_errors: [] },
-      top_failure_tools: [],
-      top_handoff_tools: [],
-      business_error_tools: [],
-    },
-    auditSummary: { totals: { total_calls: 0, success_calls: 0, failed_calls: 0, handoff_calls: 0 } },
-    auditRecent: { items: [] },
-  })
+  renderOverview(emptyOverviewModel())
+  renderDiagnostics(emptyDiagnosticsModel())
+  renderAudit(emptyAuditModel())
+  refs.overviewHeroCopy.textContent = "Defina um tenant para carregar a visão geral em produção."
+  refs.diagHeroCopy.textContent = "Defina um tenant para carregar o diagnóstico em produção."
+  refs.auditHeroCopy.textContent = "Defina um tenant para carregar a auditoria em produção."
 }
 
 function renderFailure(error) {
   showGlobalMessage(`Não foi possível carregar a console: ${error.message}`)
-  renderHeaderHealth({
-    health_state: "critical",
-    sync: { freshness_state: "unknown", freshness_seconds: null, last_synced_at: null },
-    counters: {
-      total_calls: 0,
-      failed_calls: 0,
-      handoff_calls: 0,
-      calls_with_cost: 0,
-      repeated_business_errors: 0,
-      idempotency_hits: 0,
-      coverage_pct: 0,
-    },
-  })
-  renderSummaryCards(refs.signalSummary, [
-    {
-      label: "Estado da console",
-      value: "Erro",
-      caption: "A shell carregou, mas os dados operacionais não puderam ser consultados.",
-    },
-    {
-      label: "Próximo passo",
-      value: "Revisar acesso",
-      caption: "Confirme token, cookie de sessão, banco habilitado e disponibilidade das rotas /ops.",
-    },
-    {
-      label: "Ação sugerida",
-      value: "Nova tentativa",
-      caption: "Atualize a página após corrigir a conectividade operacional.",
-    },
-  ])
-  renderFocusCards(refs.focusList, [], "Sem destaques enquanto a leitura estiver indisponível.")
-  renderTimelineList(refs.callsTimeline, [], {
-    mode: "calls",
-    window: state.filters.window,
-    emptyText: "Sem dados para exibir.",
-  })
-  renderTimelineList(refs.costTimeline, [], {
-    mode: "cost",
-    window: state.filters.window,
-    emptyText: "Sem dados para exibir.",
-  })
-  renderToolsTable([])
+  renderHeaderHealth({ ...emptyHealthModel(), health_state: "critical" })
+  renderOverview(emptyOverviewModel())
+  renderDiagnostics(emptyDiagnosticsModel())
+  renderAudit(emptyAuditModel())
+  refs.overviewHeroCopy.textContent = "A shell carregou, mas a visão geral não pôde ser consultada."
+  refs.diagHeroCopy.textContent = "O diagnóstico está indisponível até a conectividade operacional ser restabelecida."
+  refs.auditHeroCopy.textContent = "A trilha de auditoria não pôde ser carregada."
+  refs.auditHeroStat.textContent = "Erro"
+  refs.auditHeroMeta.textContent = "Revise token, cookie de sessão, banco e rotas /ops."
   refs.diagHealthState.textContent = "Crítico"
   refs.diagHealthCopy.textContent = error.message
-  refs.diagSyncState.textContent = "Indisponível"
-  refs.diagSyncAge.textContent = "Sem leitura."
-  refs.diagIdempotencyHits.textContent = "0"
-  refs.diagBusinessErrors.textContent = "0"
-  renderTimelineList(refs.diagFailedSeries, [], { mode: "diagnostic", window: state.filters.window, emptyText: "Sem leitura." })
-  renderTimelineList(refs.diagIdempotencySeries, [], { mode: "diagnostic", window: state.filters.window, emptyText: "Sem leitura." })
-  renderTimelineList(refs.diagBusinessSeries, [], { mode: "diagnostic", window: state.filters.window, emptyText: "Sem leitura." })
-  renderFocusCards(refs.diagTopFailures, [], "Sem leitura.")
-  renderFocusCards(refs.diagTopHandoffs, [], "Sem leitura.")
-  renderFocusCards(refs.diagBusinessTools, [], "Sem leitura.")
-  refs.auditTotalCalls.textContent = "0"
-  refs.auditSuccessCalls.textContent = "0"
-  refs.auditFailedCalls.textContent = "0"
-  refs.auditHandoffCalls.textContent = "0"
-  refs.auditTableBody.replaceChildren()
-  refs.auditEmpty.classList.remove("hidden")
 }
 
 function buildOverviewSignals(model) {
-  const overview = model.overview
-  const health = model.health
+  const { overview, costs, health } = model
   const totalCalls = Number(overview.kpis.total_calls || 0)
   return [
     {
@@ -638,16 +706,16 @@ function buildOverviewSignals(model) {
       caption: buildHealthSummary(health),
     },
     {
-      label: "Cobertura financeira",
+      label: "Cobertura de custo",
       value: totalCalls > 0
-        ? `${numberFmt.format(model.costs.summary.calls_with_cost || 0)} / ${numberFmt.format(totalCalls)}`
+        ? `${numberFmt.format(costs.summary.calls_with_cost || 0)} / ${numberFmt.format(totalCalls)}`
         : "0 / 0",
       caption: "Calls com custo sincronizado na janela atual.",
     },
     {
       label: "Duração média",
       value: formatDuration(overview.kpis.avg_duration_ms || 0),
-      caption: "Tempo médio registrado nas últimas execuções consolidadas.",
+      caption: "Tempo médio das execuções consolidadas.",
     },
   ]
 }
@@ -698,6 +766,14 @@ function buildDiagnosticFocus(items, labelPrefix) {
       : formatPercent(item.failure_rate_pct || 0),
     caption: `${numberFmt.format(item.total_calls || 0)} execuções observadas.`,
   }))
+}
+
+function buildDiagnosticHeroCopy(health, resilience) {
+  const counters = health.counters || {}
+  if (!counters.total_calls) {
+    return "Sem volume suficiente para avaliar robustez na janela atual."
+  }
+  return `${numberFmt.format(counters.failed_calls || 0)} falhas, ${numberFmt.format(resilience.summary.repeated_business_errors || 0)} erros repetidos e ${numberFmt.format(resilience.summary.idempotency_hits || 0)} reaproveitamentos registrados.`
 }
 
 function renderSummaryCards(container, cards) {
@@ -751,7 +827,7 @@ function renderTimelineList(container, items, options) {
     ),
   )
 
-  const visible = items.slice(-10)
+  const visible = items.slice(-8)
   for (const item of visible) {
     const row = document.createElement("article")
     row.className = "timeline-row"
@@ -929,6 +1005,89 @@ function buildText(tagName, className, text) {
   return element
 }
 
+function emptyHealthModel() {
+  return {
+    health_state: "no_data",
+    sync: {
+      freshness_state: "unknown",
+      freshness_seconds: null,
+      last_synced_at: null,
+    },
+    counters: {
+      total_calls: 0,
+      failed_calls: 0,
+      handoff_calls: 0,
+      calls_with_cost: 0,
+      repeated_business_errors: 0,
+      idempotency_hits: 0,
+      coverage_pct: 0,
+    },
+  }
+}
+
+function emptyOverviewModel() {
+  return {
+    overview: {
+      window: state.filters.window,
+      kpis: {
+        total_calls: 0,
+        success_calls: 0,
+        failed_calls: 0,
+        handoff_calls: 0,
+        avg_duration_ms: 0,
+      },
+      series: [],
+    },
+    costs: {
+      summary: {
+        total_cost_usd: 0,
+        calls_with_cost: 0,
+        avg_cost_per_call_usd: 0,
+      },
+      series: [],
+    },
+    tools: [],
+    health: state.cache.health || emptyHealthModel(),
+  }
+}
+
+function emptyDiagnosticsModel() {
+  return {
+    health: state.cache.health || emptyHealthModel(),
+    resilience: {
+      summary: {
+        idempotency_hits: 0,
+        repeated_business_errors: 0,
+      },
+      series: {
+        failed_calls: [],
+        idempotency_hits: [],
+        repeated_business_errors: [],
+      },
+      top_failure_tools: [],
+      top_handoff_tools: [],
+      business_error_tools: [],
+    },
+  }
+}
+
+function emptyAuditModel() {
+  return {
+    health: state.cache.health || emptyHealthModel(),
+    auditSummary: {
+      totals: {
+        total_calls: 0,
+        success_calls: 0,
+        failed_calls: 0,
+        handoff_calls: 0,
+      },
+    },
+    auditRecent: {
+      items: [],
+    },
+  }
+}
+
 function rateOf(numerator, denominator) {
   const base = Number(denominator || 0)
   if (base <= 0) {
@@ -987,4 +1146,15 @@ function formatDateTime(timestamp) {
     hour: "2-digit",
     minute: "2-digit",
   })
+}
+
+function viewName(view) {
+  switch (view) {
+    case "diagnostics":
+      return "Diagnóstico"
+    case "audit":
+      return "Auditoria"
+    default:
+      return "Visão Geral"
+  }
 }

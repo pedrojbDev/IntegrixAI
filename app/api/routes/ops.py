@@ -226,6 +226,7 @@ async def audit_summary(
 
 @router.post("/costs/sync")
 async def sync_vapi_costs(settings: Settings = Depends(get_settings)):
+    # TODO: add CSRF protection if the ops dashboard becomes externally exposed.
     _assert_db_enabled(settings)
     session = SessionLocal()
     try:

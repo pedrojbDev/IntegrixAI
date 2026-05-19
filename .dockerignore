@@ -1,0 +1,14 @@
+.git
+.codex
+.agents
+venv
+__pycache__
+**/__pycache__
+*.pyc
+.env
+.env.*
+!.env.production.example
+*.log
+uvicorn-test.*
+.pytest_cache
+.mypy_cache

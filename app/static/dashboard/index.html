@@ -6,7 +6,7 @@
   <title>Integrix Ops Console</title>
   <meta
     name="description"
-    content="Console operacional multi-visão para acompanhar atendimento, custo, auditoria e robustez."
+    content="Painel operacional para acompanhar volume, custo, falha, handoff e auditoria."
   />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -18,27 +18,27 @@
 </head>
 <body>
   <div class="console-shell">
-    <header class="hero">
-      <div class="hero-copy">
+    <header class="topbar">
+      <div class="brand-block">
         <span class="eyebrow">Integrix Ops Console</span>
-        <h1>Operação, diagnóstico e auditoria em uma leitura só.</h1>
+        <h1>Leitura clara da operação.</h1>
         <p>
-          Uma console editorial para acompanhar desempenho, custo, robustez operacional e sinais
-          de degradação sem poluição visual.
+          Volume, custo, falha, handoff e auditoria em uma interface mais limpa e
+          previsível.
         </p>
       </div>
 
-      <div class="hero-status">
-        <div class="status-card">
-          <span class="label">Saúde operacional</span>
+      <div class="status-strip">
+        <article class="status-card">
+          <span class="label">Saúde da operação</span>
           <strong id="health-badge" class="health-badge health-neutral">Aguardando</strong>
-          <p id="health-summary" class="status-copy">Carregando o estado geral da operação.</p>
-        </div>
-        <div class="status-card">
+          <p id="health-summary" class="status-copy">Carregando o panorama operacional.</p>
+        </article>
+        <article class="status-card">
           <span class="label">Última atualização</span>
           <strong id="last-refresh" class="status-value">Ainda não sincronizado</strong>
-          <p id="status-line" class="status-copy">Pronto para consultar dados operacionais.</p>
-        </div>
+          <p id="status-line" class="status-copy">Pronto para consultar os dados.</p>
+        </article>
       </div>
     </header>
 
@@ -69,8 +69,8 @@
 
       <div class="toolbar-actions">
         <div class="context-box">
-          <span class="label">Contexto</span>
-          <strong id="active-context">Janela 24 horas · visão geral</strong>
+          <span class="label">Contexto ativo</span>
+          <strong id="active-context">Janela 24 horas | visão geral</strong>
         </div>
         <button id="refresh-btn" class="button button-secondary" type="button">Atualizar</button>
         <button id="sync-btn" class="button button-primary" type="button">Sincronizar custos</button>
@@ -85,8 +85,23 @@
 
     <main class="views">
       <section id="view-overview" class="view-section is-active">
-        <section class="kpi-grid">
-          <article class="kpi-card kpi-card-highlight">
+        <section class="hero-panel">
+          <div>
+            <span class="section-kicker">Resumo da janela</span>
+            <h2>As métricas principais vêm primeiro.</h2>
+            <p id="overview-hero-copy" class="panel-copy">
+              Carregando sinais de volume, eficiência e custo.
+            </p>
+          </div>
+          <div class="hero-stat">
+            <span class="label">Leitura rápida</span>
+            <strong id="overview-hero-stat">Aguardando dados</strong>
+            <p id="overview-hero-meta" class="status-copy">Sem consolidação ainda.</p>
+          </div>
+        </section>
+
+        <section class="kpi-grid kpi-grid-primary">
+          <article class="kpi-card kpi-card-strong">
             <span class="label">Total de calls</span>
             <strong id="k-total" class="kpi-value">0</strong>
             <span id="k-window" class="kpi-note">Janela 24 horas</span>
@@ -109,7 +124,9 @@
             <strong id="k-cost" class="kpi-value kpi-mono">US$ 0,00</strong>
             <span id="k-cost-calls" class="kpi-note">0 calls com custo</span>
           </article>
+        </section>
 
+        <section class="kpi-grid kpi-grid-secondary">
           <article class="kpi-card kpi-card-soft">
             <span class="label">Falha</span>
             <strong id="k-failure-rate" class="kpi-value">0%</strong>
@@ -123,9 +140,9 @@
           </article>
 
           <article class="kpi-card kpi-card-soft">
-            <span class="label">Custo médio / call</span>
+            <span class="label">Custo médio por call</span>
             <strong id="k-cost-avg" class="kpi-value kpi-mono">US$ 0,00</strong>
-            <span class="kpi-note">Baseado nas calls sincronizadas</span>
+            <span class="kpi-note">Base nas calls com custo sincronizado</span>
           </article>
 
           <article class="kpi-card kpi-card-soft">
@@ -135,54 +152,55 @@
           </article>
         </section>
 
-        <section class="overview-grid">
+        <section class="overview-layout">
           <article class="panel">
             <div class="panel-header">
               <div>
-                <h2>Panorama da janela</h2>
-                <p>Volume, handoff e custo distribuídos no tempo.</p>
+                <h2>Chamadas e handoff</h2>
+                <p class="panel-copy">Como o volume e a transferência evoluíram na janela.</p>
               </div>
             </div>
-            <div class="section-stack">
-              <div>
-                <div class="section-kicker">Calls e handoff</div>
-                <div id="calls-timeline" class="timeline-list"></div>
-              </div>
-              <div>
-                <div class="section-kicker">Custo por bucket</div>
-                <div id="cost-timeline" class="timeline-list"></div>
-              </div>
-            </div>
+            <div id="calls-timeline" class="timeline-list"></div>
           </article>
 
-          <aside class="panel-stack">
-            <article class="panel">
-              <div class="panel-header">
-                <div>
-                  <h2>Leitura rápida</h2>
-                  <p>Resumo curto do que importa agora.</p>
-                </div>
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Custo por bucket</h2>
+                <p class="panel-copy">Leitura direta do gasto nas chamadas sincronizadas.</p>
               </div>
-              <div id="signal-summary" class="summary-list"></div>
-            </article>
+            </div>
+            <div id="cost-timeline" class="timeline-list"></div>
+          </article>
+        </section>
 
-            <article class="panel">
-              <div class="panel-header">
-                <div>
-                  <h2>Destaques por tool</h2>
-                  <p>Quem concentra volume, risco e custo.</p>
-                </div>
+        <section class="signal-layout">
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Resumo executivo</h2>
+                <p class="panel-copy">Leitura curta do que importa agora.</p>
               </div>
-              <div id="focus-list" class="focus-list"></div>
-            </article>
-          </aside>
+            </div>
+            <div id="signal-summary" class="summary-list"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Destaques por tool</h2>
+                <p class="panel-copy">Volume, custo e risco concentrados.</p>
+              </div>
+            </div>
+            <div id="focus-list" class="focus-list"></div>
+          </article>
         </section>
 
         <section class="panel">
           <div class="panel-header">
             <div>
               <h2>Desempenho por tool</h2>
-              <p>Visão direta das ferramentas com maior impacto operacional.</p>
+              <p class="panel-copy">Tabela enxuta com as tools de maior impacto operacional.</p>
             </div>
           </div>
           <div class="table-shell">
@@ -208,68 +226,81 @@
       </section>
 
       <section id="view-diagnostics" class="view-section">
-        <section class="diagnostic-grid">
+        <section class="hero-panel hero-panel-compact">
+          <div>
+            <span class="section-kicker">Diagnóstico</span>
+            <h2>Onde a operação está desgastando.</h2>
+            <p id="diag-hero-copy" class="panel-copy">
+              Carregando leitura de robustez, sync e repetição de erro.
+            </p>
+          </div>
+          <div class="hero-stat">
+            <span class="label">Saúde consolidada</span>
+            <strong id="diag-health-state">Aguardando</strong>
+            <p id="diag-health-copy" class="status-copy">Sem leitura ainda.</p>
+          </div>
+        </section>
+
+        <section class="diagnostic-summary-grid">
+          <article class="summary-card">
+            <span class="label">Sync de custo</span>
+            <strong id="diag-sync-state">Desconhecido</strong>
+            <p id="diag-sync-age" class="summary-copy">Sem histórico de sincronização.</p>
+          </article>
+          <article class="summary-card">
+            <span class="label">Idempotency hits</span>
+            <strong id="diag-idempotency-hits">0</strong>
+            <p class="summary-copy">Reaproveitamentos registrados na janela.</p>
+          </article>
+          <article class="summary-card">
+            <span class="label">Erros repetidos</span>
+            <strong id="diag-business-errors">0</strong>
+            <p class="summary-copy">Tentativas repetidas de erro de negócio.</p>
+          </article>
+          <article class="summary-card">
+            <span class="label">Cobertura de custo</span>
+            <strong id="diag-coverage">0%</strong>
+            <p id="diag-coverage-copy" class="summary-copy">Sem correlação suficiente.</p>
+          </article>
+        </section>
+
+        <section class="diagnostic-layout">
           <article class="panel">
             <div class="panel-header">
               <div>
-                <h2>Robustez operacional</h2>
-                <p>Estado consolidado de falha, sync, idempotência e repetição de erro.</p>
+                <h2>Falhas por bucket</h2>
+                <p class="panel-copy">Onde a janela acumulou maior degradação.</p>
               </div>
             </div>
-            <div class="diagnostic-cards">
-              <article class="summary-card">
-                <span class="label">Saúde</span>
-                <strong id="diag-health-state">Aguardando</strong>
-                <p id="diag-health-copy" class="summary-copy">Sem leitura ainda.</p>
-              </article>
-              <article class="summary-card">
-                <span class="label">Sync de custo</span>
-                <strong id="diag-sync-state">Desconhecido</strong>
-                <p id="diag-sync-age" class="summary-copy">Sem histórico de sincronização.</p>
-              </article>
-              <article class="summary-card">
-                <span class="label">Idempotency hits</span>
-                <strong id="diag-idempotency-hits">0</strong>
-                <p class="summary-copy">Reutilizações persistidas na janela atual.</p>
-              </article>
-              <article class="summary-card">
-                <span class="label">Erros repetidos</span>
-                <strong id="diag-business-errors">0</strong>
-                <p class="summary-copy">Tentativas repetidas de erro de negócio.</p>
-              </article>
-            </div>
+            <div id="diag-failed-series" class="timeline-list"></div>
           </article>
 
           <article class="panel">
             <div class="panel-header">
               <div>
-                <h2>Séries de resiliência</h2>
-                <p>Onde a operação está desgastando.</p>
+                <h2>Resiliência por bucket</h2>
+                <p class="panel-copy">Idempotência e erros repetidos ao longo do tempo.</p>
               </div>
             </div>
-            <div class="section-stack">
+            <div class="stack-list">
               <div>
-                <div class="section-kicker">Falhas por bucket</div>
-                <div id="diag-failed-series" class="timeline-list"></div>
-              </div>
-              <div>
-                <div class="section-kicker">Idempotência por bucket</div>
+                <span class="section-kicker">Idempotência</span>
                 <div id="diag-idempotency-series" class="timeline-list"></div>
               </div>
               <div>
-                <div class="section-kicker">Erros repetidos por bucket</div>
+                <span class="section-kicker">Erros repetidos</span>
                 <div id="diag-business-series" class="timeline-list"></div>
               </div>
             </div>
           </article>
         </section>
 
-        <section class="diagnostic-grid">
+        <section class="signal-layout">
           <article class="panel">
             <div class="panel-header">
               <div>
                 <h2>Tools com pior falha</h2>
-                <p>Prioridades mais claras de correção.</p>
+                <p class="panel-copy">Prioridade objetiva de correção.</p>
               </div>
             </div>
             <div id="diag-top-failures" class="focus-list"></div>
@@ -279,7 +310,7 @@
             <div class="panel-header">
               <div>
                 <h2>Tools com maior handoff</h2>
-                <p>Onde a automação mais devolve para humano.</p>
+                <p class="panel-copy">Onde a automação mais devolve para humano.</p>
               </div>
             </div>
             <div id="diag-top-handoffs" class="focus-list"></div>
@@ -288,8 +319,8 @@
           <article class="panel">
             <div class="panel-header">
               <div>
-                <h2>Distribuição de erro de negócio</h2>
-                <p>Acúmulo de tentativas repetidas por tool.</p>
+                <h2>Erros repetidos por tool</h2>
+                <p class="panel-copy">Acúmulo de tentativas repetidas por ferramenta.</p>
               </div>
             </div>
             <div id="diag-business-tools" class="focus-list"></div>
@@ -298,42 +329,49 @@
       </section>
 
       <section id="view-audit" class="view-section">
-        <section class="panel">
-          <div class="panel-header">
-            <div>
-              <h2>Resumo de auditoria</h2>
-              <p>Totais operacionais da janela e trilha recente de eventos.</p>
-            </div>
+        <section class="hero-panel hero-panel-compact">
+          <div>
+            <span class="section-kicker">Auditoria</span>
+            <h2>Trilha recente de eventos.</h2>
+            <p id="audit-hero-copy" class="panel-copy">
+              Carregando resumo operacional e eventos recentes.
+            </p>
           </div>
-          <div class="audit-summary-grid">
-            <article class="summary-card">
-              <span class="label">Total</span>
-              <strong id="audit-total-calls">0</strong>
-              <p class="summary-copy">Chamadas auditadas no período.</p>
-            </article>
-            <article class="summary-card">
-              <span class="label">Sucesso</span>
-              <strong id="audit-success-calls">0</strong>
-              <p class="summary-copy">Resoluções automáticas registradas.</p>
-            </article>
-            <article class="summary-card">
-              <span class="label">Falha</span>
-              <strong id="audit-failed-calls">0</strong>
-              <p class="summary-copy">Falhas funcionais ou operacionais.</p>
-            </article>
-            <article class="summary-card">
-              <span class="label">Handoff</span>
-              <strong id="audit-handoff-calls">0</strong>
-              <p class="summary-copy">Transferências para atendimento humano.</p>
-            </article>
+          <div class="hero-stat">
+            <span class="label">Estado da trilha</span>
+            <strong id="audit-hero-stat">Aguardando dados</strong>
+            <p id="audit-hero-meta" class="status-copy">Sem leitura ainda.</p>
           </div>
+        </section>
+
+        <section class="audit-summary-grid">
+          <article class="summary-card">
+            <span class="label">Total</span>
+            <strong id="audit-total-calls">0</strong>
+            <p class="summary-copy">Chamadas auditadas no período.</p>
+          </article>
+          <article class="summary-card">
+            <span class="label">Sucesso</span>
+            <strong id="audit-success-calls">0</strong>
+            <p class="summary-copy">Resoluções automáticas registradas.</p>
+          </article>
+          <article class="summary-card">
+            <span class="label">Falha</span>
+            <strong id="audit-failed-calls">0</strong>
+            <p class="summary-copy">Falhas funcionais ou operacionais.</p>
+          </article>
+          <article class="summary-card">
+            <span class="label">Handoff</span>
+            <strong id="audit-handoff-calls">0</strong>
+            <p class="summary-copy">Transferências para atendimento humano.</p>
+          </article>
         </section>
 
         <section class="panel">
           <div class="panel-header">
             <div>
               <h2>Eventos recentes</h2>
-              <p>Filtre a trilha operacional sem expor payload por padrão.</p>
+              <p class="panel-copy">Filtre a trilha operacional sem abrir payload por padrão.</p>
             </div>
           </div>
 
