@@ -16,7 +16,7 @@ from app.tenants.pbsaude.integration.http_client import (
 def settings(**overrides):
     values = {
         "_env_file": None,
-        "external_api_base_url": "https://customer-api.example",
+        "external_api_base_url": "https://api.customer-prod.internal",
         "external_api_auth_type": "none",
         "external_api_max_retries": 1,
         "external_api_retry_backoff_seconds": 0,

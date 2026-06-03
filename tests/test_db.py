@@ -9,7 +9,7 @@ class DatabaseEngineTests(unittest.TestCase):
     def test_postgres_engine_uses_configured_pool_settings(self) -> None:
         settings = Settings(
             _env_file=None,
-            database_url="postgresql+psycopg://app:secret@db.example.com:5432/integrix",
+            database_url="postgresql+psycopg://app:secret@db.prod.internal:5432/integrix",
             db_pool_size=7,
             db_max_overflow=3,
             db_pool_timeout_seconds=4.5,

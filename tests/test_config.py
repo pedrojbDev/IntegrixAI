@@ -9,14 +9,14 @@ def production_settings(**overrides):
     values = {
         "_env_file": None,
         "environment": "production",
-        "database_url": "postgresql+psycopg://app:secret@db.example.com:5432/integrix",
+        "database_url": "postgresql+psycopg://app:secret@db.prod.internal:5432/integrix",
         "db_enabled": True,
         "data_mode": "external_api",
         "tenant_map": {"+5511999999999": "tenant_a"},
         "webhook_secret": "secret",
         "ops_dashboard_token": "ops-token",
         "audit_write_mode": "async",
-        "external_api_base_url": "https://customer-api.example",
+        "external_api_base_url": "https://api.customer-prod.internal",
         "external_api_auth_type": "basic",
         "external_api_username": "user",
         "external_api_password": "password",
@@ -77,6 +77,19 @@ class SettingsTests(unittest.TestCase):
     def test_production_requires_async_audit(self) -> None:
         with self.assertRaisesRegex(ValidationError, "AUDIT_WRITE_MODE=async"):
             production_settings(audit_write_mode="sync")
+
+    def test_production_rejects_placeholder_secrets(self) -> None:
+        with self.assertRaisesRegex(ValidationError, "placeholder production values"):
+            production_settings(webhook_secret="replace-with-strong-vapi-webhook-secret")
+
+    def test_production_rejects_placeholder_external_api_values(self) -> None:
+        with self.assertRaisesRegex(ValidationError, "placeholder production values"):
+            production_settings(
+                database_url="postgresql+psycopg://integrix:replace-with-strong-postgres-password@postgres:5432/integrix",
+                external_api_base_url="https://customer-api.example",
+                external_api_username="replace-with-upstream-user",
+                external_api_password="replace-with-upstream-password",
+            )
 
     def test_db_and_audit_settings_are_clamped(self) -> None:
         settings = Settings(

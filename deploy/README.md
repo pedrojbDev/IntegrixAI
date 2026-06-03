@@ -60,6 +60,11 @@ VAPI_API_KEY
 
 Use `ENVIRONMENT=production`, `DB_ENABLED=true`, `DATA_MODE=external_api` e `AUDIT_WRITE_MODE=async`.
 
+Os valores de exemplo com `replace-with-...` e dominios `.example` sao placeholders.
+Em `ENVIRONMENT=production`, o backend recusa esses valores e nao inicia ate que sejam trocados por segredos, dominio e credenciais reais.
+
+Voce nao precisa editar `deploy/Caddyfile` para o caso padrao. O Caddy usa `DOMAIN` e `CADDY_EMAIL` do `.env.production`, abre HTTPS automaticamente e encaminha as requisicoes para o container `app`.
+
 ## 5. Subir Serviços
 
 ```bash

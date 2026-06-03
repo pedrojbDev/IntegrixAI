@@ -15,7 +15,7 @@ def production_settings(**overrides):
     values = {
         "_env_file": None,
         "environment": "production",
-        "database_url": "postgresql+psycopg://app:secret@db.example.com:5432/integrix",
+        "database_url": "postgresql+psycopg://app:secret@db.prod.internal:5432/integrix",
         "db_enabled": True,
         "data_mode": "external_api",
         "default_tenant": "tenant_default",
@@ -23,7 +23,7 @@ def production_settings(**overrides):
         "webhook_secret": "secret",
         "ops_dashboard_token": "ops-token",
         "audit_write_mode": "async",
-        "external_api_base_url": "https://customer-api.example",
+        "external_api_base_url": "https://api.customer-prod.internal",
         "external_api_auth_type": "basic",
         "external_api_username": "user",
         "external_api_password": "password",

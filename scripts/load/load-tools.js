@@ -15,6 +15,9 @@ const SEARCH_CIDADE = __ENV.SEARCH_CIDADE || "feira de santana";
 const SEARCH_BAIRRO = __ENV.SEARCH_BAIRRO || "Centro";
 
 const toolOkRate = new Rate("tool_ok_rate");
+const upstreamSuccessRate = new Rate("upstream_success_rate");
+const upstream500Rate = new Rate("upstream_500_rate");
+const fallbackRate = new Rate("fallback_rate");
 
 if (!WEBHOOK_SECRET) {
   throw new Error("WEBHOOK_SECRET is required for /tools load tests.");
@@ -53,6 +56,9 @@ export const options = {
     http_req_duration: ["p(95)<2000", "p(99)<3000"],
     checks: ["rate>0.99"],
     tool_ok_rate: ["rate>0.99"],
+    upstream_success_rate: ["rate>0.99"],
+    upstream_500_rate: ["rate<0.01"],
+    fallback_rate: ["rate<0.01"],
   },
   scenarios: {
     tools_ramp: {
@@ -189,9 +195,27 @@ export default function () {
   });
 
   const result = body?.results?.[0]?.result;
+  const errorCode = result?.error?.code || "none";
+  const finalState = result?.final_state || "unknown";
+  const isUpstream500 = errorCode === "UPSTREAM_503";
+  const isFallback = finalState === "TRANSFERIDA_HUMANO";
+  const isUpstreamSuccess = result?.ok === true && !isFallback;
+
   toolOkRate.add(result?.ok === true, {
-    error_code: result?.error?.code || "none",
-    final_state: result?.final_state || "unknown",
+    error_code: errorCode,
+    final_state: finalState,
+  });
+  upstreamSuccessRate.add(isUpstreamSuccess, {
+    error_code: errorCode,
+    final_state: finalState,
+  });
+  upstream500Rate.add(isUpstream500, {
+    error_code: errorCode,
+    final_state: finalState,
+  });
+  fallbackRate.add(isFallback, {
+    error_code: errorCode,
+    final_state: finalState,
   });
 
   thinkTime();

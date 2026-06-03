@@ -6,6 +6,29 @@ from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+_PLACEHOLDER_MARKERS = (
+    "replace-with",
+    "replace_with",
+    "changeme",
+    "change-me",
+    "placeholder",
+    "example.com",
+    ".example",
+    "seudominio.com",
+    "<",
+    ">",
+)
+
+
+def _looks_like_placeholder(value: object) -> bool:
+    if value is None:
+        return False
+    text = str(value).strip().lower()
+    if not text:
+        return False
+    return any(marker in text for marker in _PLACEHOLDER_MARKERS)
+
+
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
@@ -247,6 +270,21 @@ class Settings(BaseSettings):
             missing.append("CHAOS_LATENCY_MS=0")
         if "localhost" in self.database_url.lower():
             missing.append("non-local DATABASE_URL")
+
+        placeholder_fields = [
+            ("DATABASE_URL", self.database_url),
+            ("WEBHOOK_SECRET", self.webhook_secret),
+            ("OPS_DASHBOARD_TOKEN", self.ops_dashboard_token),
+            ("EXTERNAL_API_BASE_URL", self.external_api_base_url),
+            ("PROTHEUS_BASE_URL", self.protheus_base_url),
+            ("EXTERNAL_API_TOKEN", self.external_api_token),
+            ("EXTERNAL_API_USERNAME", self.external_api_username),
+            ("EXTERNAL_API_PASSWORD", self.external_api_password),
+            ("VAPI_API_KEY", self.vapi_api_key),
+        ]
+        placeholders = [name for name, value in placeholder_fields if _looks_like_placeholder(value)]
+        if placeholders:
+            missing.append("placeholder production values: " + ", ".join(placeholders))
 
         if missing:
             raise ValueError(

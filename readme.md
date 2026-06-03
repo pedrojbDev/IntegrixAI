@@ -674,19 +674,18 @@ O codigo de `authenticate_member` e `get_authorization_status` existe, mas a pol
 
 ### 2. Console React em producao no container
 
-O backend so serve a SPA React em producao se `frontend/dist` existir. Porem o `Dockerfile` atual copia:
+O backend so serve a SPA React em producao se `frontend/dist` existir.
 
-- `requirements.txt`
-- `alembic/`
-- `app/`
-- `scripts/`
+O `Dockerfile` atual resolve isso com build multi-stage:
 
-Ele nao copia `frontend/` nem `frontend/dist`.
+- instala dependencias do frontend
+- executa `npm run build`
+- copia `frontend/dist` para a imagem final Python
 
 Na pratica, isso significa:
 
-- em producao, o endpoint `/dashboard` pode retornar `503` dentro da imagem atual
-- para servir a console no container, a imagem precisa ser ajustada para incluir o build do frontend, ou esse diretio precisa ser montado
+- a imagem de producao ja sai pronta para servir `/dashboard`
+- para desenvolvimento local fora do Docker, ainda faz sentido rodar `npm install` e `npm run build` em `frontend/` quando quiser validar a SPA separadamente
 
 ### 3. Modo externo
 
@@ -734,7 +733,7 @@ python scripts\smoke_local.py --base-url http://127.0.0.1:8000
 3. Copiar `.env.example` para `.env` e ajustar valores.
 4. Se usar DB, executar `alembic upgrade head`.
 5. Instalar dependencias do frontend em `frontend/`.
-6. Rodar `npm run build` para gerar `frontend/dist` se quiser servir a console pelo backend.
+6. Rodar `npm run build` para gerar `frontend/dist` se quiser validar a console localmente fora do Docker.
 7. Subir o backend com `uvicorn`.
 8. Validar `GET /health`.
 9. Rodar `python -m unittest discover -s tests`.
