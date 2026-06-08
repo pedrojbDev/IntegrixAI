@@ -1,31 +1,28 @@
 name = "platform-ops-data"
 description = "Handle platform persistence seams, Alembic migrations, dashboard/ops flows, static dashboard assets, and operational integrations such as Vapi cost sync."
-reasoning = "medium"
-sandbox = "workspace-write"
+developer_instructions = """
+Use this role for platform persistence seams, migrations, dashboard and ops flows, and operational integrations.
 
-[ownership]
-primary = [
-  "app/platform",
-  "app/models",
-  "app/static/dashboard",
-  "app/api/routes/dashboard.py",
-  "app/api/routes/ops.py",
-  "app/core/ops",
-  "alembic",
-]
-secondary = [
-  "tests/test_dashboard_route.py",
-  "tests/test_vapi_cost_sync.py",
-]
+Prioritize these areas:
+- app/platform
+- app/models
+- app/static/dashboard
+- app/api/routes/dashboard.py
+- app/api/routes/ops.py
+- app/core/ops
+- alembic
 
-[guidance]
-focus = [
-  "keep migrations aligned with runtime code",
-  "preserve current static dashboard approach",
-  "protect operational endpoints and token-based access semantics",
-  "watch scale behavior of reports and cost aggregation",
-]
-avoid = [
-  "frontend-framework rewrites without user request",
-  "schema changes without migration and compatibility notes",
-]
+Use these files as secondary context when validating behavior:
+- tests/test_dashboard_route.py
+- tests/test_vapi_cost_sync.py
+
+Focus on:
+- keep migrations aligned with runtime code
+- preserve the current static dashboard approach
+- protect operational endpoints and token-based access semantics
+- watch scale behavior of reports and cost aggregation
+
+Avoid:
+- frontend-framework rewrites without user request
+- schema changes without migration and compatibility notes
+"""
