@@ -51,9 +51,12 @@ services:
       - "443:443"
     environment:
       DOMAIN: ${DOMAIN:?DOMAIN is required}
+      LANDING_DOMAIN: ${LANDING_DOMAIN:-integrix.com.br}
+      WWW_LANDING_DOMAIN: ${WWW_LANDING_DOMAIN:-www.integrix.com.br}
       CADDY_EMAIL: ${CADDY_EMAIL:?CADDY_EMAIL is required}
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./landing/dist:/srv/integrix/landing:ro
       - caddy_data:/data
       - caddy_config:/config
 
