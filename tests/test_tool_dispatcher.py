@@ -111,6 +111,52 @@ class ToolDispatcherTests(unittest.IsolatedAsyncioTestCase):
             result["results"][0]["result"]["error"],
         )
 
+    async def test_dispatch_resolves_tenant_from_assistant_id_when_to_number_is_missing(self) -> None:
+        settings = Settings(
+            _env_file=None,
+            environment="production",
+            database_url="postgresql+psycopg://app:secret@db.prod.internal:5432/integrix",
+            db_enabled=True,
+            data_mode="external_api",
+            tenant_map={},
+            tenant_assistant_map={"assistant_123": "tenant_a"},
+            webhook_secret="secret",
+            ops_dashboard_token="ops-token",
+            audit_write_mode="async",
+            external_api_base_url="https://api.customer-prod.internal",
+            external_api_auth_type="basic",
+            external_api_username="user",
+            external_api_password="password",
+        )
+        handler = AsyncMock(return_value=({"status": "queued"}, CallFinalState.TRANSFERIDA_HUMANO))
+        registry = TenantToolRegistry()
+        registry.register("pbsaude", "handoff_human", handler)
+        dispatcher = ToolDispatcher(settings, registry=registry)
+        request = SimpleNamespace(headers={"x-webhook-secret": "secret"})
+        payload = {
+            "message": {
+                "call": {"id": "call_123", "to": None, "assistantId": "assistant_123"},
+                "toolCallList": [
+                    {
+                        "id": "tc_001",
+                        "name": "handoff_human",
+                        "arguments": {"reason": "fallback"},
+                    }
+                ],
+            }
+        }
+
+        with (
+            patch("app.core.tools.dispatcher.metrics_store.record"),
+            patch("app.core.tools.dispatcher.record_call_event"),
+            patch("app.core.tools.dispatcher.set_call_context"),
+            patch("app.core.tools.dispatcher.clear_call_context"),
+        ):
+            result = await dispatcher.dispatch(request, payload)
+
+        handler.assert_awaited_once_with({"reason": "fallback"}, settings, "call_123", "tenant_a")
+        self.assertTrue(result["results"][0]["result"]["ok"])
+
     async def test_dispatch_returns_cached_result_for_duplicate_tool_call(self) -> None:
         session_local = self._session_local()
         settings = Settings(

@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     data_mode: Literal["mock", "external_api", "protheus"] = "mock"
     default_tenant: str = "demo"
     tenant_map: dict[str, str] = Field(default_factory=dict)
+    tenant_assistant_map: dict[str, str] = Field(default_factory=dict)
+    tenant_phone_number_map: dict[str, str] = Field(default_factory=dict)
     default_tenant_implementation: str = "pbsaude"
     tenant_implementation_map: dict[str, str] = Field(default_factory=dict)
     chaos_error_rate: float = 0.0
@@ -98,6 +100,26 @@ class Settings(BaseSettings):
                 return json.loads(value)
             except json.JSONDecodeError as exc:
                 raise ValueError("TENANT_MAP must be a valid JSON object string") from exc
+        return value
+
+    @field_validator("tenant_assistant_map", mode="before")
+    @classmethod
+    def parse_tenant_assistant_map(cls, value):
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError as exc:
+                raise ValueError("TENANT_ASSISTANT_MAP must be a valid JSON object string") from exc
+        return value
+
+    @field_validator("tenant_phone_number_map", mode="before")
+    @classmethod
+    def parse_tenant_phone_number_map(cls, value):
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError as exc:
+                raise ValueError("TENANT_PHONE_NUMBER_MAP must be a valid JSON object string") from exc
         return value
 
     @field_validator("external_api_tenant_configs", mode="before")
@@ -250,8 +272,8 @@ class Settings(BaseSettings):
             missing.append("DB_ENABLED=true")
         if self.audit_write_mode != "async":
             missing.append("AUDIT_WRITE_MODE=async")
-        if not self.tenant_map:
-            missing.append("TENANT_MAP")
+        if not (self.tenant_map or self.tenant_assistant_map or self.tenant_phone_number_map):
+            missing.append("TENANT_MAP or TENANT_ASSISTANT_MAP or TENANT_PHONE_NUMBER_MAP")
         if not self.ops_dashboard_token:
             missing.append("OPS_DASHBOARD_TOKEN")
         if not (self.external_api_base_url or self.protheus_base_url or self.external_api_tenant_configs):

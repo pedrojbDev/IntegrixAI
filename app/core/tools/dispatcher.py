@@ -43,6 +43,8 @@ class ParsedToolInvocation:
 class ParsedToolRequest:
     call_id: str
     to_number: str | None
+    assistant_id: str | None
+    phone_number_id: str | None
     invocations: list[ParsedToolInvocation]
 
 
@@ -65,7 +67,12 @@ class ToolDispatcher:
         first_tool_name = (
             parsed_request.invocations[0].tool_name if parsed_request.invocations else "unknown"
         )
-        resolution = resolve_tenant_details(parsed_request.to_number, self.settings)
+        resolution = resolve_tenant_details(
+            parsed_request.to_number,
+            self.settings,
+            assistant_id=parsed_request.assistant_id,
+            phone_number_id=parsed_request.phone_number_id,
+        )
         tenant_rejected = should_reject_tenant_resolution(resolution, self.settings)
         tenant_id = "unknown" if tenant_rejected else resolution.tenant_id
         implementation_key = (
@@ -332,6 +339,7 @@ class ToolDispatcher:
             tool_call_id=parsed.tool_call_id,
             tool_name=parsed.tool_name,
             to_number=resolution.to_number,
+            tenant_identifier=resolution.identifier,
             resolution_source=resolution.source,
             final_state=CallFinalState.TRANSFERIDA_HUMANO,
             implementation_key=implementation_key,
@@ -535,12 +543,15 @@ class ToolDispatcher:
             call_id=call_id,
             tool_name=tool_name,
             to_number=resolution.to_number,
+            tenant_identifier=resolution.identifier,
             resolution_source=resolution.source,
         )
 
     def _parse_request(self, payload: dict) -> ParsedToolRequest:
         call_id = str(uuid.uuid4())
         to_number = None
+        assistant_id = None
+        phone_number_id = None
         invocations: list[ParsedToolInvocation] = []
 
         message = payload.get("message") if isinstance(payload, dict) else None
@@ -551,6 +562,22 @@ class ToolDispatcher:
             if isinstance(call, dict):
                 call_id = call.get("id") or call_id
                 to_number = call.get("to")
+                assistant_id = self._first_string(
+                    call.get("assistantId"),
+                    call.get("assistant", {}).get("id") if isinstance(call.get("assistant"), dict) else None,
+                    container.get("assistantId"),
+                    container.get("assistant", {}).get("id") if isinstance(container.get("assistant"), dict) else None,
+                )
+                phone_number_id = self._first_string(
+                    call.get("phoneNumberId"),
+                    call.get("phoneNumber", {}).get("id")
+                    if isinstance(call.get("phoneNumber"), dict)
+                    else None,
+                    container.get("phoneNumberId"),
+                    container.get("phoneNumber", {}).get("id")
+                    if isinstance(container.get("phoneNumber"), dict)
+                    else None,
+                )
 
             tool_list = container.get("toolCallList")
             if tool_list and isinstance(tool_list, list):
@@ -560,6 +587,8 @@ class ToolDispatcher:
         return ParsedToolRequest(
             call_id=call_id,
             to_number=to_number,
+            assistant_id=assistant_id,
+            phone_number_id=phone_number_id,
             invocations=invocations,
         )
 
@@ -606,6 +635,16 @@ class ToolDispatcher:
         if len(arguments_raw) == 0:
             raise ValueError("arguments vazio")
         return arguments_raw
+
+    @staticmethod
+    def _first_string(*values: object) -> str | None:
+        for value in values:
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text:
+                return text
+        return None
 
     @staticmethod
     def _wrap_result(tool_call_id: str | None, result: ToolResponse) -> dict:

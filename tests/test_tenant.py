@@ -69,6 +69,32 @@ class TenantResolutionTests(unittest.TestCase):
         self.assertEqual("missing_to_number", resolution.source)
         self.assertTrue(should_reject_tenant_resolution(resolution, settings))
 
+    def test_resolve_tenant_details_uses_assistant_map_when_to_number_is_missing(self) -> None:
+        settings = production_settings(
+            tenant_map={},
+            tenant_assistant_map={"assistant_123": "tenant_demo"},
+        )
+
+        resolution = resolve_tenant_details(None, settings, assistant_id="assistant_123")
+
+        self.assertEqual("tenant_demo", resolution.tenant_id)
+        self.assertEqual("assistant_map", resolution.source)
+        self.assertFalse(resolution.used_fallback)
+        self.assertFalse(should_reject_tenant_resolution(resolution, settings))
+
+    def test_resolve_tenant_details_uses_phone_number_map_when_to_number_is_missing(self) -> None:
+        settings = production_settings(
+            tenant_map={},
+            tenant_phone_number_map={"phone_number_123": "tenant_demo"},
+        )
+
+        resolution = resolve_tenant_details(None, settings, phone_number_id="phone_number_123")
+
+        self.assertEqual("tenant_demo", resolution.tenant_id)
+        self.assertEqual("phone_number_id_map", resolution.source)
+        self.assertFalse(resolution.used_fallback)
+        self.assertFalse(should_reject_tenant_resolution(resolution, settings))
+
     def test_resolve_tenant_keeps_legacy_contract(self) -> None:
         settings = Settings(_env_file=None, default_tenant="demo", tenant_map={})
 

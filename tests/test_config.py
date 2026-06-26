@@ -56,9 +56,17 @@ class SettingsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, "DB_ENABLED=true"):
             production_settings(db_enabled=False)
 
-    def test_production_requires_tenant_map(self) -> None:
-        with self.assertRaisesRegex(ValidationError, "TENANT_MAP"):
+    def test_production_requires_explicit_tenant_resolution_map(self) -> None:
+        with self.assertRaisesRegex(ValidationError, "TENANT_MAP or TENANT_ASSISTANT_MAP"):
             production_settings(tenant_map={})
+
+    def test_production_accepts_tenant_assistant_map_without_did_map(self) -> None:
+        settings = production_settings(
+            tenant_map={},
+            tenant_assistant_map={"assistant_123": "tenant_a"},
+        )
+
+        self.assertEqual({"assistant_123": "tenant_a"}, settings.tenant_assistant_map)
 
     def test_production_requires_external_api_credentials(self) -> None:
         with self.assertRaisesRegex(ValidationError, "EXTERNAL_API_USERNAME/EXTERNAL_API_PASSWORD"):
