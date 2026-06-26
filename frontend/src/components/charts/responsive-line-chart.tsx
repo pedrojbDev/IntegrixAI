@@ -3,11 +3,11 @@ import {
   AreaChart,
   CartesianGrid,
   Line,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts"
+import { useEffect, useRef, useState } from "react"
 
 import { formatDateTimeBR, formatNumberBR } from "@/lib/format"
 
@@ -24,10 +24,29 @@ type ResponsiveLineChartProps = {
 }
 
 export function ResponsiveLineChart({ data, series }: ResponsiveLineChartProps) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [chartWidth, setChartWidth] = useState(0)
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) {
+      return
+    }
+
+    const updateWidth = () => {
+      setChartWidth(Math.floor(container.clientWidth))
+    }
+    updateWidth()
+
+    const observer = new ResizeObserver(updateWidth)
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [])
+
   return (
-    <div className="h-64 w-full">
-      <ResponsiveContainer height="100%" width="100%">
-        <AreaChart data={data} margin={{ bottom: 0, left: -18, right: 10, top: 8 }}>
+    <div className="h-64 w-full min-w-0" ref={containerRef}>
+      {chartWidth > 0 ? (
+        <AreaChart data={data} height={256} margin={{ bottom: 0, left: -18, right: 10, top: 8 }} width={chartWidth}>
           <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" vertical={false} />
           <XAxis
             dataKey="timestamp"
@@ -77,7 +96,7 @@ export function ResponsiveLineChart({ data, series }: ResponsiveLineChartProps) 
             ),
           )}
         </AreaChart>
-      </ResponsiveContainer>
+      ) : null}
     </div>
   )
 }

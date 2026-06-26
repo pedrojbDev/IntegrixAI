@@ -102,11 +102,17 @@ export const costsSchema = z
         total_cost_usd: numeric,
         calls_with_cost: numeric,
         avg_cost_per_call_usd: numeric,
+        calls_with_duration: numeric,
+        total_duration_seconds: numeric,
+        avg_duration_seconds: numeric,
       })
       .catch({
         total_cost_usd: 0,
         calls_with_cost: 0,
         avg_cost_per_call_usd: 0,
+        calls_with_duration: 0,
+        total_duration_seconds: 0,
+        avg_duration_seconds: 0,
       }),
     series: z
       .array(
@@ -114,6 +120,7 @@ export const costsSchema = z
           timestamp: z.string(),
           calls: numeric,
           cost_usd: numeric,
+          duration_seconds: numeric,
         }),
       )
       .catch([]),

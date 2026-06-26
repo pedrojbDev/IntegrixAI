@@ -5,7 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.core.ops.dashboard_service import get_health, get_resilience
+from app.core.ops.dashboard_service import get_costs, get_health, get_resilience
 from app.db import Base
 from app.models.call_event import CallEvent
 from app.models.ops_sync_state import OpsSyncState
@@ -120,6 +120,12 @@ class DashboardServiceTests(unittest.TestCase):
                 tenant_id="tenant_a",
                 assistant_id="asst_1",
             )
+            costs = get_costs(
+                session,
+                window="24h",
+                tenant_id="tenant_a",
+                assistant_id="asst_1",
+            )
             resilience = get_resilience(
                 session,
                 window="24h",
@@ -131,6 +137,10 @@ class DashboardServiceTests(unittest.TestCase):
         self.assertEqual(1, health["counters"]["idempotency_hits"])
         self.assertEqual(1, health["counters"]["repeated_business_errors"])
         self.assertEqual("fresh", health["sync"]["freshness_state"])
+        self.assertEqual(120.0, costs["summary"]["total_duration_seconds"])
+        self.assertEqual(60.0, costs["summary"]["avg_duration_seconds"])
+        self.assertEqual(2, costs["summary"]["calls_with_duration"])
+        self.assertTrue(costs["series"][0]["duration_seconds"] > 0)
         self.assertEqual(1, resilience["summary"]["idempotency_hits"])
         self.assertEqual(1, resilience["summary"]["repeated_business_errors"])
         self.assertTrue(resilience["series"]["failed_calls"])

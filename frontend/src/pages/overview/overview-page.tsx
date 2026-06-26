@@ -1,4 +1,4 @@
-import { Activity, BadgeDollarSign, CheckCircle2, PhoneForwarded } from "lucide-react"
+import { Activity, BadgeDollarSign, CheckCircle2, Clock3, PhoneForwarded } from "lucide-react"
 import { useCallback } from "react"
 
 import { ResponsiveLineChart } from "@/components/charts/responsive-line-chart"
@@ -11,7 +11,13 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { useDashboardPreferences } from "@/features/shared-dashboard/dashboard-preferences"
 import { useOverviewQueries } from "@/hooks/use-dashboard-queries"
 import { useRefreshEvent } from "@/hooks/use-refresh-event"
-import { formatCurrencyBRL, formatDuration, formatNumberBR, formatPercent } from "@/lib/format"
+import {
+  formatCurrencyUSD,
+  formatDurationMs,
+  formatDurationSeconds,
+  formatNumberBR,
+  formatPercent,
+} from "@/lib/format"
 
 function rate(part: number, total: number) {
   return total > 0 ? (part / total) * 100 : 0
@@ -53,22 +59,28 @@ export function OverviewPage() {
   const handoffRate = rate(overview.kpis.handoffCalls, totalCalls)
   const failureRate = rate(overview.kpis.failedCalls, totalCalls)
   const coverageRate = rate(costs.summary.callsWithCost, totalCalls)
-  const topTool = tools[0]
-
+  const costPerMinute = costs.summary.totalDurationSeconds > 0
+    ? costs.summary.totalCostUsd / (costs.summary.totalDurationSeconds / 60)
+    : 0
   return (
     <div className="space-y-4">
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <StatCard detail="Calls na janela atual" icon={Activity} label="Total de calls" value={formatNumberBR(totalCalls)} />
         <StatCard detail={`${formatNumberBR(overview.kpis.successCalls)} resolvidas`} icon={CheckCircle2} label="Resolução" tone="success" value={formatPercent(successRate)} />
         <StatCard detail={`${formatNumberBR(overview.kpis.handoffCalls)} transferências`} icon={PhoneForwarded} label="Handoff" tone={handoffRate >= 20 ? "warning" : "default"} value={formatPercent(handoffRate)} />
-        <StatCard detail={`${formatNumberBR(costs.summary.callsWithCost)} calls com custo`} icon={BadgeDollarSign} label="Custo total" value={formatCurrencyBRL(costs.summary.totalCostUsd)} />
+        <StatCard detail={`${formatNumberBR(costs.summary.callsWithCost)} calls com custo`} icon={BadgeDollarSign} label="Custo total" value={formatCurrencyUSD(costs.summary.totalCostUsd)} />
       </section>
 
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <StatCard detail={`${formatNumberBR(overview.kpis.failedCalls)} falhas`} label="Falha" tone={failureRate >= 10 ? "danger" : "default"} value={formatPercent(failureRate)} />
         <StatCard detail="Calls com custo sincronizado" label="Cobertura de custo" tone={coverageRate < 80 && totalCalls > 0 ? "warning" : "default"} value={formatPercent(coverageRate)} />
-        <StatCard detail="Base nas chamadas sincronizadas" label="Custo médio por call" value={formatCurrencyBRL(costs.summary.avgCostPerCallUsd)} />
-        <StatCard detail="Tempo médio por execução" label="Duração média" value={formatDuration(overview.kpis.avgDurationMs)} />
+        <StatCard detail="Base nas chamadas sincronizadas" label="Custo médio por call" value={formatCurrencyUSD(costs.summary.avgCostPerCallUsd)} />
+        <StatCard
+          detail={`${formatNumberBR(costs.summary.callsWithDuration)} calls com duração | total ${formatDurationSeconds(costs.summary.totalDurationSeconds)}`}
+          icon={Clock3}
+          label="Tempo médio de ligação"
+          value={formatDurationSeconds(costs.summary.avgDurationSeconds)}
+        />
       </section>
 
       <section className="grid gap-4 xl:grid-cols-2">
@@ -113,7 +125,7 @@ export function OverviewPage() {
           <CardHeader>
             <SectionHeader description="Sinais operacionais calculados a partir da janela." title="Resumo executivo" />
           </CardHeader>
-          <CardContent className="grid gap-3 sm:grid-cols-3">
+          <CardContent className="grid gap-3 sm:grid-cols-4">
             <div className="rounded-md border border-border p-3">
               <p className="text-xs text-muted-foreground">Saúde</p>
               <Badge className="mt-2" variant={health.healthState === "stable" ? "success" : health.healthState === "critical" ? "destructive" : "warning"}>
@@ -125,8 +137,12 @@ export function OverviewPage() {
               <p className="mt-2 text-sm font-medium">{health.sync.freshnessState}</p>
             </div>
             <div className="rounded-md border border-border p-3">
-              <p className="text-xs text-muted-foreground">Tool principal</p>
-              <p className="mt-2 truncate text-sm font-medium">{topTool?.toolName || "Sem volume"}</p>
+              <p className="text-xs text-muted-foreground">Custo/min</p>
+              <p className="mt-2 truncate text-sm font-medium">{formatCurrencyUSD(costPerMinute)}</p>
+            </div>
+            <div className="rounded-md border border-border p-3">
+              <p className="text-xs text-muted-foreground">Tempo médio tool</p>
+              <p className="mt-2 truncate text-sm font-medium">{formatDurationMs(overview.kpis.avgDurationMs)}</p>
             </div>
           </CardContent>
         </Card>

@@ -1,7 +1,8 @@
 export {
-  formatCurrencyBRL,
+  formatCurrencyUSD,
   formatDateTimeBR,
-  formatDuration,
+  formatDurationMs,
+  formatDurationSeconds,
   formatNumberBR,
   formatPercent,
 } from "./format"

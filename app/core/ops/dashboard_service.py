@@ -243,31 +243,46 @@ def get_costs(
         select(
             func.count(VapiCallCost.call_id).label("call_count"),
             func.sum(VapiCallCost.cost_total_usd).label("total_cost_usd"),
+            func.count(VapiCallCost.duration_seconds).label("duration_count"),
+            func.sum(VapiCallCost.duration_seconds).label("total_duration_seconds"),
+            func.avg(VapiCallCost.duration_seconds).label("avg_duration_seconds"),
         ).where(*filters)
     ).one()
     call_count = int(summary.call_count or 0)
     total_cost_usd = round(float(summary.total_cost_usd or 0.0), 6)
     avg_cost_per_call = round(total_cost_usd / call_count, 6) if call_count else 0.0
+    duration_count = int(summary.duration_count or 0)
+    total_duration_seconds = round(float(summary.total_duration_seconds or 0.0), 2)
+    avg_duration_seconds = round(float(summary.avg_duration_seconds or 0.0), 2)
     rows = session.execute(
-        select(VapiCallCost.started_at, VapiCallCost.synced_at, VapiCallCost.cost_total_usd)
+        select(
+            VapiCallCost.started_at,
+            VapiCallCost.synced_at,
+            VapiCallCost.cost_total_usd,
+            VapiCallCost.duration_seconds,
+        )
         .where(*filters)
         .order_by(VapiCallCost.synced_at.asc())
     ).all()
 
-    series_map: dict[str, dict[str, Any]] = defaultdict(lambda: {"calls": 0, "cost_usd": 0.0})
-    for started_at, synced_at, cost_total_usd in rows:
+    series_map: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {"calls": 0, "cost_usd": 0.0, "duration_seconds": 0.0}
+    )
+    for started_at, synced_at, cost_total_usd, duration_seconds in rows:
         point_time = _ensure_utc(started_at) or _ensure_utc(synced_at)
         if point_time is None:
             continue
         bucket = _floor_bucket(point_time, bucket_minutes).isoformat()
         series_map[bucket]["calls"] += 1
         series_map[bucket]["cost_usd"] += float(cost_total_usd or 0.0)
+        series_map[bucket]["duration_seconds"] += float(duration_seconds or 0.0)
 
     series = [
         {
             "timestamp": timestamp,
             "calls": values["calls"],
             "cost_usd": round(values["cost_usd"], 6),
+            "duration_seconds": round(values["duration_seconds"], 2),
         }
         for timestamp, values in sorted(series_map.items())
     ]
@@ -281,6 +296,9 @@ def get_costs(
             "total_cost_usd": total_cost_usd,
             "calls_with_cost": call_count,
             "avg_cost_per_call_usd": avg_cost_per_call,
+            "calls_with_duration": duration_count,
+            "total_duration_seconds": total_duration_seconds,
+            "avg_duration_seconds": avg_duration_seconds,
         },
         "series": series,
     }

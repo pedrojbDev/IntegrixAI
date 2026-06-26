@@ -92,11 +92,15 @@ export function mapCosts(raw: RawCosts): Costs {
       totalCostUsd: raw.summary.total_cost_usd,
       callsWithCost: raw.summary.calls_with_cost,
       avgCostPerCallUsd: raw.summary.avg_cost_per_call_usd,
+      callsWithDuration: raw.summary.calls_with_duration,
+      totalDurationSeconds: raw.summary.total_duration_seconds,
+      avgDurationSeconds: raw.summary.avg_duration_seconds,
     },
     series: raw.series.map((point) => ({
       timestamp: point.timestamp,
       calls: point.calls,
       costUsd: point.cost_usd,
+      durationSeconds: point.duration_seconds,
     })),
   }
 }

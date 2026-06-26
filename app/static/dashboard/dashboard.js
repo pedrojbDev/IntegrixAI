@@ -79,6 +79,7 @@ const refs = {
   coverageMeta: document.getElementById("k-coverage-meta"),
   costAvg: document.getElementById("k-cost-avg"),
   duration: document.getElementById("k-duration"),
+  durationMeta: document.getElementById("k-duration-meta"),
   callsTimeline: document.getElementById("calls-timeline"),
   costTimeline: document.getElementById("cost-timeline"),
   signalSummary: document.getElementById("signal-summary"),
@@ -566,7 +567,9 @@ function renderOverview(model) {
       ? `${numberFmt.format(costs.summary.calls_with_cost || 0)} de ${numberFmt.format(totalCalls)} com custo`
       : "Sem correlação ainda"
   refs.costAvg.textContent = formatUsd(costs.summary.avg_cost_per_call_usd || 0)
-  refs.duration.textContent = formatDuration(overview.kpis.avg_duration_ms || 0)
+  refs.duration.textContent = formatDurationSeconds(costs.summary.avg_duration_seconds || 0)
+  refs.durationMeta.textContent =
+    `${numberFmt.format(costs.summary.calls_with_duration || 0)} calls com duração | total ${formatDurationSeconds(costs.summary.total_duration_seconds || 0)}`
 
   refs.overviewHeroCopy.textContent = totalCalls > 0
     ? `A janela atual registrou ${numberFmt.format(totalCalls)} calls com ${formatPercent(successRate)} de resolução automática.`
@@ -713,9 +716,9 @@ function buildOverviewSignals(model) {
       caption: "Calls com custo sincronizado na janela atual.",
     },
     {
-      label: "Duração média",
-      value: formatDuration(overview.kpis.avg_duration_ms || 0),
-      caption: "Tempo médio das execuções consolidadas.",
+      label: "Tempo médio de ligação",
+      value: formatDurationSeconds(costs.summary.avg_duration_seconds || 0),
+      caption: "Base nas calls Vapi sincronizadas com duração.",
     },
   ]
 }
@@ -876,7 +879,7 @@ function renderTimelineList(container, items, options) {
     } else if (options.mode === "cost") {
       foot.append(
         buildText("span", "", `${numberFmt.format(item.calls || 0)} calls`),
-        buildText("span", "", Number(item.calls || 0) > 0 ? `${formatUsd((item.cost_usd || 0) / item.calls)} por call` : "Sem custo unitário"),
+        buildText("span", "", Number(item.duration_seconds || 0) > 0 ? `${formatDurationSeconds(item.duration_seconds)} de ligação` : "Sem duração"),
       )
     } else {
       foot.append(
@@ -1043,6 +1046,9 @@ function emptyOverviewModel() {
         total_cost_usd: 0,
         calls_with_cost: 0,
         avg_cost_per_call_usd: 0,
+        calls_with_duration: 0,
+        total_duration_seconds: 0,
+        avg_duration_seconds: 0,
       },
       series: [],
     },
@@ -1113,6 +1119,17 @@ function formatDuration(value) {
     return `${(ms / 1_000).toFixed(1).replace(".", ",")} s`
   }
   return `${Math.round(ms)} ms`
+}
+
+function formatDurationSeconds(value) {
+  const seconds = Number(value || 0)
+  if (seconds >= 3600) {
+    return `${(seconds / 3600).toFixed(1).replace(".", ",")} h`
+  }
+  if (seconds >= 60) {
+    return `${(seconds / 60).toFixed(1).replace(".", ",")} min`
+  }
+  return `${Math.round(seconds)} s`
 }
 
 function formatBucket(timestamp, windowKey) {

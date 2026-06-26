@@ -56,11 +56,15 @@ export type Costs = {
     totalCostUsd: number
     callsWithCost: number
     avgCostPerCallUsd: number
+    callsWithDuration: number
+    totalDurationSeconds: number
+    avgDurationSeconds: number
   }
   series: Array<{
     timestamp: string
     calls: number
     costUsd: number
+    durationSeconds: number
   }>
 }
 

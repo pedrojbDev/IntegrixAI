@@ -17,6 +17,30 @@ Use the repository itself as the source of truth:
 5. Tests: unittest-style test suite in [tests](c:/Users/55719/Desktop/IntegrixAI/tests).
 6. Static operational UI: dashboard assets in [app/static/dashboard](c:/Users/55719/Desktop/IntegrixAI/app/static/dashboard).
 
+## Context Documents
+
+Use [docs/INDEX.md](c:/Users/55719/Desktop/IntegrixAI/docs/INDEX.md) as the
+lightweight map for task-specific context. It points agents to the minimum docs
+needed before changing runtime behavior, architecture, tenant safety, operations,
+or compatibility surfaces.
+
+Read these docs when the task touches the matching area:
+
+1. [docs/architecture.md](c:/Users/55719/Desktop/IntegrixAI/docs/architecture.md)
+Use for module boundaries, shared-vs-tenant responsibilities, compatibility
+shims, and persistence ownership.
+
+2. [docs/runtime-flows.md](c:/Users/55719/Desktop/IntegrixAI/docs/runtime-flows.md)
+Use for `/tools`, tenant resolution, dispatch, audit, idempotency, dashboard/ops,
+and Vapi cost sync.
+
+3. [docs/tenant-safety.md](c:/Users/55719/Desktop/IntegrixAI/docs/tenant-safety.md)
+Use for tenant isolation invariants, fallback behavior, tenant-scoped data
+access, logs, audit, cache keys, jobs, syncs, and negative tests.
+
+4. [docs/development.md](c:/Users/55719/Desktop/IntegrixAI/docs/development.md)
+Use for validation commands and test selection by change area.
+
 ## Architectural Shape
 
 Respect these repository responsibilities:
@@ -62,13 +86,16 @@ Keep ORM and migration changes synchronized.
 
 Before concluding meaningful backend changes, prefer running the smallest relevant validation set first:
 
-1. `python -m unittest`
+1. `venv\Scripts\python.exe -m unittest discover -s tests`
 Use for broad project validation when changes are cross-cutting.
 
-2. `python -m unittest tests.test_tool_dispatcher tests.test_tools_route tests.test_tenant`
+2. `venv\Scripts\python.exe -m unittest discover -s tests -p "test_tool_dispatcher.py"`
+   `venv\Scripts\python.exe -m unittest discover -s tests -p "test_tools_route.py"`
+   `venv\Scripts\python.exe -m unittest discover -s tests -p "test_tenant.py"`
 Use when changing dispatch, tenant resolution, contracts, or compatibility behavior.
 
-3. `python -m unittest tests.test_dashboard_route tests.test_vapi_cost_sync`
+3. `venv\Scripts\python.exe -m unittest discover -s tests -p "test_dashboard_route.py"`
+   `venv\Scripts\python.exe -m unittest discover -s tests -p "test_vapi_cost_sync.py"`
 Use when changing dashboard or ops/cost logic.
 
 If a change touches migrations, validate migration files and explain any runtime validation still pending.

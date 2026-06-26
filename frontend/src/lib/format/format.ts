@@ -3,9 +3,9 @@ const percentFormatter = new Intl.NumberFormat("pt-BR", {
   minimumFractionDigits: 1,
   maximumFractionDigits: 1,
 })
-const brlFormatter = new Intl.NumberFormat("pt-BR", {
+const usdFormatter = new Intl.NumberFormat("pt-BR", {
   style: "currency",
-  currency: "BRL",
+  currency: "USD",
   minimumFractionDigits: 2,
   maximumFractionDigits: 6,
 })
@@ -18,11 +18,11 @@ export function formatPercent(value: number | null | undefined) {
   return `${percentFormatter.format(Number(value || 0))}%`
 }
 
-export function formatCurrencyBRL(value: number | null | undefined) {
-  return brlFormatter.format(Number(value || 0))
+export function formatCurrencyUSD(value: number | null | undefined) {
+  return usdFormatter.format(Number(value || 0))
 }
 
-export function formatDuration(value: number | null | undefined) {
+export function formatDurationMs(value: number | null | undefined) {
   const ms = Number(value || 0)
   if (ms >= 60_000) {
     return `${(ms / 60_000).toFixed(1).replace(".", ",")} min`
@@ -31,6 +31,17 @@ export function formatDuration(value: number | null | undefined) {
     return `${(ms / 1_000).toFixed(1).replace(".", ",")} s`
   }
   return `${Math.round(ms)} ms`
+}
+
+export function formatDurationSeconds(value: number | null | undefined) {
+  const seconds = Number(value || 0)
+  if (seconds >= 3600) {
+    return `${(seconds / 3600).toFixed(1).replace(".", ",")} h`
+  }
+  if (seconds >= 60) {
+    return `${(seconds / 60).toFixed(1).replace(".", ",")} min`
+  }
+  return `${Math.round(seconds)} s`
 }
 
 export function formatDateTimeBR(value: string | null | undefined) {

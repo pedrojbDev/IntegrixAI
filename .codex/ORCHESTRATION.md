@@ -3,6 +3,8 @@
 This repository already has project-specific skills in [`.agents/skills`](c:/Users/55719/Desktop/IntegrixAI/.agents/skills) and now has Codex agent metadata in [`.codex/agents`](c:/Users/55719/Desktop/IntegrixAI/.codex/agents).
 Use them conservatively: start from the real code, keep ownership clear, and preserve compatibility seams.
 
+For task-specific repository context, start with [docs/INDEX.md](c:/Users/55719/Desktop/IntegrixAI/docs/INDEX.md). It links to the current architecture, runtime flows, tenant-safety invariants, and validation commands without duplicating `AGENTS.md`.
+
 ## When To Use Each Agent
 
 1. `architecture-multitenant`
@@ -66,7 +68,8 @@ Use for metrics, dashboard logic, and KPI reasoning.
 ### Generate Documentation
 
 1. Use `docs-skills` to update [readme.md](c:/Users/55719/Desktop/IntegrixAI/readme.md), [AGENTS.md](c:/Users/55719/Desktop/IntegrixAI/AGENTS.md), or Codex docs.
-2. Keep documentation synchronized with actual file paths, commands, and current architecture.
+2. Use [docs/INDEX.md](c:/Users/55719/Desktop/IntegrixAI/docs/INDEX.md) as the map for new or updated repository docs.
+3. Keep documentation synchronized with actual file paths, commands, and current architecture.
 
 ## Coordination Rules
 

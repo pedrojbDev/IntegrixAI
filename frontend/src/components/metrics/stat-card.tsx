@@ -18,15 +18,27 @@ const toneClass = {
   danger: "text-destructive",
 }
 
+const accentClass = {
+  default: "bg-primary",
+  success: "bg-success",
+  warning: "bg-warning",
+  danger: "bg-destructive",
+}
+
 export function StatCard({ label, value, detail, icon: Icon, tone = "default" }: StatCardProps) {
   return (
-    <Card className="bg-card/80">
+    <Card className="relative overflow-hidden bg-card/90 shadow-md shadow-background/30">
+      <div className={cn("absolute inset-x-0 top-0 h-1", accentClass[tone])} />
       <CardContent className="p-4">
         <div className="flex items-center justify-between gap-3">
           <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</span>
-          {Icon ? <Icon className={cn("h-4 w-4", toneClass[tone])} aria-hidden="true" /> : null}
+          {Icon ? (
+            <span className="grid h-8 w-8 place-items-center rounded-md border border-border bg-muted/45">
+              <Icon className={cn("h-4 w-4", toneClass[tone])} aria-hidden="true" />
+            </span>
+          ) : null}
         </div>
-        <div className="mt-3 font-mono text-2xl font-semibold tracking-normal">{value}</div>
+        <div className="mt-3 truncate font-mono text-2xl font-semibold tracking-normal">{value}</div>
         {detail ? <p className="mt-2 text-xs text-muted-foreground">{detail}</p> : null}
       </CardContent>
     </Card>

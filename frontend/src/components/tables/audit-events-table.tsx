@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { formatDateTimeBR, formatDuration } from "@/lib/format"
+import { formatDateTimeBR, formatDurationMs } from "@/lib/format"
 import type { AuditEvent } from "@/types/dashboard"
 
 export function AuditEventsTable({ items }: { items: AuditEvent[] }) {
@@ -15,7 +15,7 @@ export function AuditEventsTable({ items }: { items: AuditEvent[] }) {
           <TableHead>Final state</TableHead>
           <TableHead>OK</TableHead>
           <TableHead>Erro</TableHead>
-          <TableHead>Duração</TableHead>
+          <TableHead>Tempo tool</TableHead>
           <TableHead>Call ID</TableHead>
         </TableRow>
       </TableHeader>
@@ -33,7 +33,7 @@ export function AuditEventsTable({ items }: { items: AuditEvent[] }) {
               </Badge>
             </TableCell>
             <TableCell>{item.errorCode || "-"}</TableCell>
-            <TableCell className="font-mono">{formatDuration(item.durationMs)}</TableCell>
+            <TableCell className="font-mono">{formatDurationMs(item.durationMs)}</TableCell>
             <TableCell className="max-w-48 truncate font-mono">{item.callId}</TableCell>
           </TableRow>
         ))}

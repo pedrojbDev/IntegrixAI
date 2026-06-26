@@ -3,6 +3,8 @@
 Project skills are stored in [`.agents/skills`](c:/Users/55719/Desktop/IntegrixAI/.agents/skills).
 They are already Codex-compatible through `SKILL.md`; this file is only a lightweight discovery index.
 
+Use [docs/INDEX.md](c:/Users/55719/Desktop/IntegrixAI/docs/INDEX.md) to choose the repository context docs that should accompany these skills for a given task.
+
 ## Project-Specific Skills
 
 1. `saas-multitenant-architect-writer`
@@ -25,6 +27,8 @@ Metrics, analytics, and KPI reasoning.
 
 7. `integrix-vapi-webhooks`
 Safe Vapi webhook ingestion and event-handling guidance.
+
+Pair tenant-sensitive skills with [docs/tenant-safety.md](c:/Users/55719/Desktop/IntegrixAI/docs/tenant-safety.md) and runtime work with [docs/runtime-flows.md](c:/Users/55719/Desktop/IntegrixAI/docs/runtime-flows.md).
 
 ## Utility Skills
 
