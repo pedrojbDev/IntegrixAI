@@ -137,6 +137,32 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(1, settings.external_api_max_connections)
         self.assertEqual(0, settings.external_api_max_keepalive_connections)
 
+    def test_daily_report_normalizes_recipient_list(self) -> None:
+        settings = Settings(
+            _env_file=None,
+            db_enabled=True,
+            daily_report_enabled=True,
+            daily_report_tenant_id="tenant_a",
+            daily_report_recipients="pedro@example.com; ops@example.com",
+            smtp_host="smtp.mail.test",
+            smtp_from_email="reports@integrix.test",
+        )
+
+        self.assertEqual(
+            ("pedro@example.com", "ops@example.com"),
+            settings.daily_report_recipient_list,
+        )
+        self.assertEqual(7, settings.daily_report_period_days)
+        self.assertEqual(7, settings.daily_report_hour_brasilia)
+
+    def test_daily_report_requires_delivery_configuration_when_enabled(self) -> None:
+        with self.assertRaisesRegex(ValidationError, "Invalid daily report settings"):
+            Settings(_env_file=None, daily_report_enabled=True, db_enabled=True)
+
+    def test_daily_report_rejects_unsupported_period(self) -> None:
+        with self.assertRaisesRegex(ValidationError, "DAILY_REPORT_PERIOD_DAYS"):
+            Settings(_env_file=None, daily_report_period_days=14)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -82,6 +82,19 @@ class Settings(BaseSettings):
     ops_token_header: str = "x-ops-token"
     ops_cost_sync_page_size: int = 100
     ops_cost_sync_lookback_minutes: int = 60
+    daily_report_enabled: bool = False
+    daily_report_recipients: str = ""
+    daily_report_tenant_id: str | None = None
+    daily_report_assistant_id: str | None = None
+    daily_report_period_days: int = 7
+    daily_report_hour_brasilia: int = 7
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_from_email: str | None = None
+    smtp_use_starttls: bool = True
+    smtp_use_ssl: bool = False
     audit_write_mode: Literal["sync", "async"] = "sync"
     audit_queue_max_size: int = 10000
     audit_batch_size: int = 100
@@ -178,6 +191,17 @@ class Settings(BaseSettings):
     def normalize_ops_token_header(cls, value: str) -> str:
         return value.strip().lower()
 
+    @field_validator("daily_report_recipients", mode="before")
+    @classmethod
+    def normalize_daily_report_recipients(cls, value: object) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, (list, tuple, set)):
+            values = [str(item) for item in value]
+        else:
+            values = str(value).replace(";", ",").split(",")
+        return ",".join(item.strip() for item in values if item and item.strip())
+
     @field_validator("ops_cost_sync_page_size")
     @classmethod
     def clamp_ops_cost_sync_page_size(cls, value: int) -> int:
@@ -187,6 +211,27 @@ class Settings(BaseSettings):
     @classmethod
     def clamp_ops_cost_sync_lookback_minutes(cls, value: int) -> int:
         return max(1, min(10080, value))
+
+    @field_validator("daily_report_period_days")
+    @classmethod
+    def validate_daily_report_period_days(cls, value: int) -> int:
+        if value not in {7, 15, 30, 90}:
+            raise ValueError("DAILY_REPORT_PERIOD_DAYS must be one of: 7, 15, 30, 90")
+        return value
+
+    @field_validator("daily_report_hour_brasilia")
+    @classmethod
+    def validate_daily_report_hour_brasilia(cls, value: int) -> int:
+        if not 0 <= value <= 23:
+            raise ValueError("DAILY_REPORT_HOUR_BRASILIA must be between 0 and 23")
+        return value
+
+    @field_validator("smtp_port")
+    @classmethod
+    def validate_smtp_port(cls, value: int) -> int:
+        if not 1 <= value <= 65535:
+            raise ValueError("SMTP_PORT must be between 1 and 65535")
+        return value
 
     @field_validator("db_connect_timeout_seconds")
     @classmethod
@@ -260,6 +305,45 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_production_settings(self):
+        if self.daily_report_enabled:
+            daily_report_missing: list[str] = []
+            recipients = self.daily_report_recipient_list
+            if not self.db_enabled:
+                daily_report_missing.append("DB_ENABLED=true")
+            if not self.daily_report_tenant_id or not self.daily_report_tenant_id.strip():
+                daily_report_missing.append("DAILY_REPORT_TENANT_ID")
+            if not recipients:
+                daily_report_missing.append("DAILY_REPORT_RECIPIENTS")
+            if not self.smtp_host or not self.smtp_host.strip():
+                daily_report_missing.append("SMTP_HOST")
+            if not self.smtp_from_email or not self.smtp_from_email.strip():
+                daily_report_missing.append("SMTP_FROM_EMAIL")
+            if bool(self.smtp_username) != bool(self.smtp_password):
+                daily_report_missing.append("SMTP_USERNAME/SMTP_PASSWORD")
+            if self.smtp_use_starttls and self.smtp_use_ssl:
+                daily_report_missing.append("only one of SMTP_USE_STARTTLS or SMTP_USE_SSL")
+            invalid_recipients = [recipient for recipient in recipients if "@" not in recipient]
+            if invalid_recipients:
+                daily_report_missing.append("valid DAILY_REPORT_RECIPIENTS")
+            smtp_placeholders = [
+                name
+                for name, value in [
+                    ("SMTP_HOST", self.smtp_host),
+                    ("SMTP_USERNAME", self.smtp_username),
+                    ("SMTP_PASSWORD", self.smtp_password),
+                    ("SMTP_FROM_EMAIL", self.smtp_from_email),
+                ]
+                if _looks_like_placeholder(value)
+            ]
+            if smtp_placeholders:
+                daily_report_missing.append(
+                    "placeholder SMTP values: " + ", ".join(smtp_placeholders)
+                )
+            if daily_report_missing:
+                raise ValueError(
+                    "Invalid daily report settings: " + ", ".join(daily_report_missing)
+                )
+
         if not self.is_production:
             return self
 
@@ -317,6 +401,14 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment.strip().lower() == "production"
+
+    @property
+    def daily_report_recipient_list(self) -> tuple[str, ...]:
+        return tuple(
+            recipient.strip()
+            for recipient in self.daily_report_recipients.split(",")
+            if recipient.strip()
+        )
 
 
 @lru_cache

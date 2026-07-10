@@ -10,6 +10,7 @@ from .api.routes.ops_session import router as ops_session_router
 from .api.routes.tools import router as tools_router
 from .config import get_settings
 from .core.audit.service import stop_audit_worker
+from .core.ops.report_scheduler import start_daily_report_scheduler, stop_daily_report_scheduler
 from .logging import setup_logging
 from .tenants.pbsaude.integration.http_client import close_external_api_client
 
@@ -25,8 +26,14 @@ app.include_router(dashboard_router)
 app.include_router(health_router)
 
 
+@app.on_event("startup")
+async def start_operational_schedulers() -> None:
+    start_daily_report_scheduler(settings)
+
+
 @app.on_event("shutdown")
 def shutdown_audit_worker() -> None:
+    stop_daily_report_scheduler()
     stop_audit_worker()
     close_external_api_client()
 
