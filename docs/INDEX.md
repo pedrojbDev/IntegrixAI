@@ -37,10 +37,15 @@ fonte principal de regras operacionais para Codex.
 
 - Leia [runtime-flows.md](runtime-flows.md).
 - Leia [development.md](development.md).
-- Consulte `app/api/routes/ops.py`, `app/core/ops`, `app/models`,
-  `app/static/dashboard` e `alembic`.
+- Para exportacao em PDF, entrega por email ou agendamento, leia tambem
+  [operational-reports.md](operational-reports.md).
+- Consulte `app/api/routes/ops.py`, `app/core/ops`, `app/models`, `frontend` e
+  `alembic`.
 - Valide com `venv\Scripts\python.exe -m unittest discover -s tests -p "test_dashboard_route.py"` e
-  `venv\Scripts\python.exe -m unittest discover -s tests -p "test_vapi_cost_sync.py"`.
+  `venv\Scripts\python.exe -m unittest discover -s tests -p "test_dashboard_service.py"`.
+- Para sincronizacao de custos, inclua `venv\Scripts\python.exe -m unittest discover -s tests -p "test_vapi_cost_sync.py"`.
+- Para entrega diaria, inclua `venv\Scripts\python.exe -m unittest discover -s tests -p "test_daily_report_delivery.py"` e
+  `venv\Scripts\python.exe -m unittest discover -s tests -p "test_config.py"`.
 
 ### Mudancas em persistencia ou migrations
 
@@ -65,5 +70,7 @@ fonte principal de regras operacionais para Codex.
 - [tenant-safety.md](tenant-safety.md): invariantes e riscos de isolamento
   multi-tenant.
 - [development.md](development.md): comandos e criterios de validacao por area.
+- [operational-reports.md](operational-reports.md): exportacao de relatorios,
+  configuracao SMTP e entrega diaria multi-worker.
 - [decisions/README.md](decisions/README.md): ponto de entrada para decisoes
   arquiteturais futuras.

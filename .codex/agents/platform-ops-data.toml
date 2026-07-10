@@ -1,12 +1,13 @@
 name = "platform-ops-data"
-description = "Handle platform persistence seams, Alembic migrations, dashboard/ops flows, static dashboard assets, and operational integrations such as Vapi cost sync."
+description = "Handle platform persistence seams, Alembic migrations, dashboard/ops flows, React dashboard assets, PDF reports, scheduled SMTP delivery, and operational integrations such as Vapi cost sync."
 developer_instructions = """
-Use this role for platform persistence seams, migrations, dashboard and ops flows, and operational integrations.
+Use this role for platform persistence seams, migrations, dashboard and ops flows,
+PDF reports, daily SMTP delivery, and operational integrations.
 
 Prioritize these areas:
 - app/platform
 - app/models
-- app/static/dashboard
+- frontend
 - app/api/routes/dashboard.py
 - app/api/routes/ops.py
 - app/core/ops
@@ -14,15 +15,22 @@ Prioritize these areas:
 
 Use these files as secondary context when validating behavior:
 - tests/test_dashboard_route.py
+- tests/test_dashboard_service.py
+- tests/test_daily_report_delivery.py
+- tests/test_config.py
 - tests/test_vapi_cost_sync.py
 
 Focus on:
 - keep migrations aligned with runtime code
-- preserve the current static dashboard approach
+- preserve the current React operational console approach
+- keep every report query and scheduled delivery explicitly tenant-scoped
 - protect operational endpoints and token-based access semantics
+- keep the daily scheduler safe across multiple workers using the existing lock and persisted run state
+- keep SMTP credentials out of logs, tests, and repository files; do not log recipient addresses
 - watch scale behavior of reports and cost aggregation
 
 Avoid:
 - frontend-framework rewrites without user request
 - schema changes without migration and compatibility notes
+- sending scheduled reports when SMTP or tenant scope is incomplete
 """

@@ -28,7 +28,7 @@ Metrics, analytics, and KPI reasoning.
 7. `integrix-vapi-webhooks`
 Safe Vapi webhook ingestion and event-handling guidance.
 
-Pair tenant-sensitive skills with [docs/tenant-safety.md](c:/Users/55719/Desktop/IntegrixAI/docs/tenant-safety.md) and runtime work with [docs/runtime-flows.md](c:/Users/55719/Desktop/IntegrixAI/docs/runtime-flows.md).
+Pair tenant-sensitive skills with [docs/tenant-safety.md](c:/Users/55719/Desktop/IntegrixAI/docs/tenant-safety.md), runtime work with [docs/runtime-flows.md](c:/Users/55719/Desktop/IntegrixAI/docs/runtime-flows.md), and metrics/report work with [docs/operational-reports.md](c:/Users/55719/Desktop/IntegrixAI/docs/operational-reports.md).
 
 ## Utility Skills
 
@@ -42,4 +42,7 @@ Pydantic model patterns for request/response/data modeling.
 Create or refine project skills.
 
 4. `frontend-design`
-Use only for deliberate UI work; this repository has limited frontend surface area.
+Use only for deliberate UI work in the React operational console.
+
+5. `pdf:pdf`
+Use when changing PDF report layout or when render-and-visual verification is needed.

@@ -60,6 +60,15 @@ VAPI_API_KEY
 
 Use `ENVIRONMENT=production`, `DB_ENABLED=true`, `DATA_MODE=external_api` e `AUDIT_WRITE_MODE=async`.
 
+### Relatório diário por e-mail
+
+Para habilitar o envio automático às 07:00 de Brasília, preencha no
+`.env.production` as variáveis `DAILY_REPORT_TENANT_ID`, `SMTP_HOST`,
+`SMTP_FROM_EMAIL` e, quando necessário, `SMTP_USERNAME` e `SMTP_PASSWORD`.
+Mantenha `DAILY_REPORT_RECIPIENTS=pedrojesuinobatista@gmail.com` e acrescente
+futuros destinatários separados por vírgula. Só então defina
+`DAILY_REPORT_ENABLED=true` e recrie o serviço `app`.
+
 Os valores de exemplo com `replace-with-...` e dominios `.example` sao placeholders.
 Em `ENVIRONMENT=production`, o backend recusa esses valores e nao inicia ate que sejam trocados por segredos, dominio e credenciais reais.
 

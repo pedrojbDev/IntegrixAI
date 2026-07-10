@@ -14,7 +14,8 @@ Use for boundary analysis, migration strategy, tenant-isolation review, or plann
 Use for `/tools`, route handling, dispatch behavior, audit/metrics wiring, and runtime bug fixes.
 
 3. `platform-ops-data`
-Use for dashboard, ops endpoints, models, migrations, cost sync, and static dashboard assets.
+Use for dashboard, ops endpoints, models, migrations, cost sync, PDF reports,
+scheduled SMTP delivery, and the React operational console.
 
 4. `tenant-implementation`
 Use for work inside `app/tenants/*`, including workflows, translators, adapters, and tenant contracts.
@@ -63,7 +64,10 @@ Use for metrics, dashboard logic, and KPI reasoning.
 
 1. Start with `architecture-multitenant` or `integrix-multitenant` to locate the tenant boundary.
 2. Use `backend-runtime` for runtime path fixes.
-3. Use `platform-ops-data` if the issue appears in reports, dashboard data, or sync jobs.
+3. Use `platform-ops-data` if the issue appears in reports, dashboard data, sync
+   jobs, daily delivery, or scheduler behavior. Read
+   [operational-reports.md](c:/Users/55719/Desktop/IntegrixAI/docs/operational-reports.md)
+   before changing report delivery.
 
 ### Generate Documentation
 

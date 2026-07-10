@@ -72,6 +72,15 @@ visoes de auditoria/custos/diagnostico. Mudancas nessa area normalmente tocam:
 Em producao, consultas operacionais sem `tenant_id` dependem de configuracao
 explicita. Preserve limites, filtros e autorizacao operacional.
 
+## Relatório diário por e-mail
+
+Quando `DAILY_REPORT_ENABLED=true`, cada worker inicia um verificador em
+memória. Às 07:00 de `America/Sao_Paulo`, somente o worker que obtiver o lock
+advisory do PostgreSQL cria e envia o relatório. O estado em `ops_sync_state`
+evita novo envio no mesmo dia, inclusive após reinício. O relatório agendado
+exige `DAILY_REPORT_TENANT_ID`; destinatários vêm de
+`DAILY_REPORT_RECIPIENTS` e o transporte usa as variáveis `SMTP_*`.
+
 ## Sync De Custos Vapi
 
 O sync de custos vive em `app/core/ops/cost_sync_service.py` e shims

@@ -231,6 +231,23 @@ As configuracoes sao carregadas de `.env`.
 | `OPS_COST_SYNC_PAGE_SIZE` | `100` | pagina do sync |
 | `OPS_COST_SYNC_LOOKBACK_MINUTES` | `60` | lookback inicial |
 
+### Relatório diário por e-mail
+
+Quando `DAILY_REPORT_ENABLED=true`, a aplicação envia um relatório PDF todos
+os dias às 07:00 no fuso `America/Sao_Paulo`. O relatório usa por padrão os
+últimos 7 dias; escolha `7`, `15`, `30` ou `90` em
+`DAILY_REPORT_PERIOD_DAYS`.
+
+| Variável | Uso |
+|---|---|
+| `DAILY_REPORT_RECIPIENTS` | destinatários separados por vírgula; inclui inicialmente `pedrojesuinobatista@gmail.com` |
+| `DAILY_REPORT_TENANT_ID` | tenant obrigatório para o relatório agendado |
+| `DAILY_REPORT_ASSISTANT_ID` | filtro opcional por assistant |
+| `SMTP_HOST`, `SMTP_PORT` | servidor SMTP de envio |
+| `SMTP_USERNAME`, `SMTP_PASSWORD` | credenciais SMTP, quando exigidas pelo provedor |
+| `SMTP_FROM_EMAIL` | endereço remetente |
+| `SMTP_USE_STARTTLS`, `SMTP_USE_SSL` | modo de transporte SMTP; use apenas um deles |
+
 ## Regras de producao
 
 `app/config.py` valida o ambiente de producao e falha no boot se estes requisitos nao forem atendidos:
@@ -355,6 +372,7 @@ alembic upgrade head
 - `GET /ops/dashboard/tools`
 - `GET /ops/dashboard/health`
 - `GET /ops/dashboard/resilience`
+- `GET /ops/reports/operational.pdf?period_days=7|15|30|90`
 
 ### SPA e assets
 
@@ -491,6 +509,15 @@ Campos sensiveis sao mascarados antes da persistencia:
 - `webhook_unauthorized`
 
 ## Dashboard e analytics
+
+### Relatório operacional em PDF
+
+O painel permite exportar um relatório PDF para os períodos de 7, 15, 30 ou
+90 dias. A exportação respeita os filtros de `tenant_id` e `assistant_id` e
+inclui KPIs, evolução do período, saúde operacional e desempenho por tool.
+
+O mesmo relatório pode ser enviado diariamente por SMTP quando a rotina de
+relatório diário estiver habilitada na configuração da aplicação.
 
 ### `GET /ops/dashboard/overview`
 

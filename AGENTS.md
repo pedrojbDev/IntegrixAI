@@ -15,7 +15,7 @@ Use the repository itself as the source of truth:
 3. Persistence: SQLAlchemy 2 and Alembic in [app/db.py](c:/Users/55719/Desktop/IntegrixAI/app/db.py) and [alembic](c:/Users/55719/Desktop/IntegrixAI/alembic).
 4. Logging: structlog JSON logging in [app/logging.py](c:/Users/55719/Desktop/IntegrixAI/app/logging.py).
 5. Tests: unittest-style test suite in [tests](c:/Users/55719/Desktop/IntegrixAI/tests).
-6. Static operational UI: dashboard assets in [app/static/dashboard](c:/Users/55719/Desktop/IntegrixAI/app/static/dashboard).
+6. Operational UI: React console in [frontend](c:/Users/55719/Desktop/IntegrixAI/frontend), served by FastAPI at `/dashboard`; backend operations live in [app/core/ops](c:/Users/55719/Desktop/IntegrixAI/app/core/ops).
 
 ## Context Documents
 
@@ -41,6 +41,10 @@ access, logs, audit, cache keys, jobs, syncs, and negative tests.
 4. [docs/development.md](c:/Users/55719/Desktop/IntegrixAI/docs/development.md)
 Use for validation commands and test selection by change area.
 
+5. [docs/operational-reports.md](c:/Users/55719/Desktop/IntegrixAI/docs/operational-reports.md)
+Use for dashboard PDF exports, scheduled daily delivery, SMTP configuration, and
+multi-worker safety.
+
 ## Architectural Shape
 
 Respect these repository responsibilities:
@@ -49,7 +53,8 @@ Respect these repository responsibilities:
 Use for concrete HTTP routes and request wiring only.
 
 2. `app/core`
-Use for cross-cutting runtime logic such as tool dispatch, security, metrics, audit, and tenant resolution.
+Use for cross-cutting runtime logic such as tool dispatch, security, metrics, audit,
+tenant resolution, and operational report generation/delivery.
 
 3. `app/platform`
 Use for platform seams intended to outlive a single tenant implementation, such as tenant configuration and feature-flag style services.
@@ -72,8 +77,9 @@ Keep ORM and migration changes synchronized.
 4. Avoid introducing tenant-specific branching into shared core code when a tenant policy, configuration, or tenant implementation seam can express the behavior.
 5. Keep routes thin. Push orchestration into core or tenant workflow layers as appropriate.
 6. When changing persistence, update models, migrations, and affected tests together.
-7. Keep dashboard changes aligned with the current static asset approach unless the user explicitly asks for a frontend rewrite.
+7. Keep dashboard changes aligned with the current React console approach unless the user explicitly asks for a frontend rewrite.
 8. Preserve the repository's current style: direct modules, small focused files, pragmatic comments, and minimal framework ceremony.
+9. Keep report exports and scheduled deliveries tenant-scoped. Scheduled delivery must be safe with multiple app workers; SMTP credentials must not enter logs or source control, and recipient addresses must not enter logs.
 
 ## Multi-Tenant Constraints
 
@@ -97,6 +103,11 @@ Use when changing dispatch, tenant resolution, contracts, or compatibility behav
 3. `venv\Scripts\python.exe -m unittest discover -s tests -p "test_dashboard_route.py"`
    `venv\Scripts\python.exe -m unittest discover -s tests -p "test_vapi_cost_sync.py"`
 Use when changing dashboard or ops/cost logic.
+
+4. `venv\Scripts\python.exe -m unittest discover -s tests -p "test_dashboard_service.py"`
+   `venv\Scripts\python.exe -m unittest discover -s tests -p "test_daily_report_delivery.py"`
+   `venv\Scripts\python.exe -m unittest discover -s tests -p "test_config.py"`
+Use when changing report exports, daily delivery, scheduler behavior, or SMTP settings.
 
 If a change touches migrations, validate migration files and explain any runtime validation still pending.
 
