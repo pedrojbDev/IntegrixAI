@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
-
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import Response
 from sqlalchemy import case, desc, func, select
 
 from ...config import Settings, get_settings
@@ -13,6 +13,7 @@ from ...core.ops.dashboard_service import (
     get_resilience,
     get_tools,
 )
+from ...core.ops.report_service import build_operational_report_pdf
 from ...core.security.ops import require_ops_token
 from ...db import SessionLocal
 from ...logging import get_logger
@@ -236,6 +237,49 @@ async def sync_vapi_costs(settings: Settings = Depends(get_settings)):
     except Exception as exc:
         log.error("ops_cost_sync_failed", event_type="error", message=str(exc))
         raise HTTPException(status_code=502, detail=str(exc))
+    finally:
+        session.close()
+
+
+@router.get("/reports/operational.pdf")
+async def download_operational_report(
+    period_days: int = Query(default=30),
+    tenant_id: str | None = Query(default=None),
+    assistant_id: str | None = Query(default=None),
+    settings: Settings = Depends(get_settings),
+):
+    """Export tenant-scoped operational aggregates as a PDF report."""
+    _assert_db_enabled(settings)
+    _assert_tenant_scope(settings, tenant_id)
+    if period_days not in {7, 15, 30, 90}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="period_days deve ser 7, 15, 30 ou 90",
+        )
+    session = SessionLocal()
+    try:
+        report_pdf = build_operational_report_pdf(
+            session,
+            period_days=period_days,
+            tenant_id=tenant_id,
+            assistant_id=assistant_id,
+        )
+        log.info(
+            "ops_operational_report_exported",
+            event_type="ops_report_export",
+            tenant_id=tenant_id,
+            assistant_id=assistant_id,
+            period_days=period_days,
+        )
+        return Response(
+            content=report_pdf,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="relatorio-operacional-{period_days}-dias.pdf"'
+                )
+            },
+        )
     finally:
         session.close()
 

@@ -4,14 +4,16 @@ import { env } from "@/lib/env/env"
 
 import { ApiError } from "./errors"
 
+type QueryParams = Record<string, string | number | boolean | undefined | null>
+
 type RequestOptions<TSchema extends z.ZodType> = {
   method?: "GET" | "POST" | "DELETE"
   body?: unknown
-  params?: Record<string, string | number | boolean | undefined | null>
+  params?: QueryParams
   schema?: TSchema
 }
 
-function buildUrl(path: string, params?: RequestOptions<z.ZodType>["params"]) {
+function buildUrl(path: string, params?: QueryParams) {
   const base = env.apiBaseUrl || window.location.origin
   const url = new URL(path, base)
 
@@ -25,6 +27,11 @@ function buildUrl(path: string, params?: RequestOptions<z.ZodType>["params"]) {
     return `${url.pathname}${url.search}`
   }
   return url.toString()
+}
+
+function filenameFromDisposition(contentDisposition: string | null, fallback: string) {
+  const match = contentDisposition?.match(/filename="?([^";]+)"?/i)
+  return match?.[1] || fallback
 }
 
 async function readErrorPayload(response: Response) {
@@ -116,6 +123,37 @@ export async function apiRequest<TSchema extends z.ZodType>(
     throw new ApiError({
       kind: "network",
       message: "Não foi possível conectar ao backend.",
+      detail: error,
+    })
+  }
+}
+
+export async function downloadFile(path: string, params: QueryParams, fallbackFilename: string) {
+  try {
+    const response = await fetch(buildUrl(path, params), { credentials: "include" })
+    if (!response.ok) {
+      const error = normalizeHttpError(response.status, await readErrorPayload(response))
+      if (error.kind === "unauthorized") {
+        window.dispatchEvent(new CustomEvent("ops-session-expired"))
+      }
+      throw error
+    }
+
+    const downloadUrl = URL.createObjectURL(await response.blob())
+    const anchor = document.createElement("a")
+    anchor.href = downloadUrl
+    anchor.download = filenameFromDisposition(response.headers.get("content-disposition"), fallbackFilename)
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(downloadUrl)
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error
+    }
+    throw new ApiError({
+      kind: "network",
+      message: "Não foi possível gerar o relatório.",
       detail: error,
     })
   }

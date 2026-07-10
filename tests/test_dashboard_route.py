@@ -205,6 +205,39 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(400, recent.status_code)
         self.assertEqual(400, summary.status_code)
 
+    def test_ops_report_requires_tenant_in_production(self) -> None:
+        client = self._client(production_settings())
+
+        response = client.get("/ops/reports/operational.pdf", headers={"x-ops-token": "ops-token"})
+
+        self.assertEqual(400, response.status_code)
+        self.assertEqual({"detail": "tenant_id obrigatorio em producao"}, response.json())
+
+    def test_ops_report_exports_pdf_with_requested_period(self) -> None:
+        client = self._client(production_settings())
+
+        with patch("app.api.routes.ops.build_operational_report_pdf", return_value=b"%PDF-demo") as report:
+            response = client.get(
+                "/ops/reports/operational.pdf?period_days=30&tenant_id=tenant_a",
+                headers={"x-ops-token": "ops-token"},
+            )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("application/pdf", response.headers.get("content-type"))
+        self.assertIn("relatorio-operacional-30-dias.pdf", response.headers.get("content-disposition", ""))
+        self.assertEqual(b"%PDF-demo", response.content)
+        self.assertEqual(30, report.call_args.kwargs["period_days"])
+
+    def test_ops_report_rejects_unsupported_period(self) -> None:
+        client = self._client(production_settings())
+
+        response = client.get(
+            "/ops/reports/operational.pdf?period_days=10&tenant_id=tenant_a",
+            headers={"x-ops-token": "ops-token"},
+        )
+
+        self.assertEqual(422, response.status_code)
+
     def test_ops_dashboard_accepts_tenant_in_production(self) -> None:
         client = self._client(production_settings())
 

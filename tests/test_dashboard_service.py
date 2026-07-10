@@ -6,6 +6,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.ops.dashboard_service import get_costs, get_health, get_resilience
+from app.core.ops.report_service import build_operational_report_pdf
 from app.db import Base
 from app.models.call_event import CallEvent
 from app.models.ops_sync_state import OpsSyncState
@@ -148,6 +149,38 @@ class DashboardServiceTests(unittest.TestCase):
         self.assertTrue(resilience["series"]["repeated_business_errors"])
         self.assertEqual("search_providers", resilience["top_failure_tools"][0]["tool_name"])
         self.assertEqual("search_providers", resilience["business_error_tools"][0]["tool_name"])
+
+    def test_operational_report_is_a_pdf_for_the_requested_tenant(self) -> None:
+        session_local = self._session_local()
+        now = datetime.now(timezone.utc)
+
+        with session_local() as session:
+            session.add(
+                CallEvent(
+                    tenant_id="tenant_a",
+                    call_id="call_report",
+                    tool_call_id="tc_report",
+                    tool_name="search_providers",
+                    event_type="tool_completed",
+                    final_state="RESOLVIDA_AUTOMATICO",
+                    ok=True,
+                    duration_ms=900,
+                    error_code=None,
+                    payload_masked={},
+                    created_at=now - timedelta(days=2),
+                )
+            )
+            session.commit()
+
+            report_pdf = build_operational_report_pdf(
+                session,
+                period_days=15,
+                tenant_id="tenant_a",
+                assistant_id=None,
+            )
+
+        self.assertTrue(report_pdf.startswith(b"%PDF-"))
+        self.assertGreater(len(report_pdf), 1_000)
 
 
 if __name__ == "__main__":

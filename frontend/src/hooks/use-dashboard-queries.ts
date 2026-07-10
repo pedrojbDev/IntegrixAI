@@ -4,7 +4,8 @@ import { fetchAuditRecent, fetchAuditSummary } from "@/lib/api/audit"
 import { syncCosts } from "@/lib/api/costs"
 import { fetchCosts, fetchHealth, fetchOverview, fetchResilience, fetchTools } from "@/lib/api/dashboard"
 import { normalizeAuditFilters, normalizeDashboardFilters } from "@/lib/api/filters"
-import type { AuditFilters, DashboardFilters } from "@/types/dashboard"
+import { downloadOperationalReport } from "@/lib/api/reports"
+import type { AuditFilters, DashboardFilters, ReportPeriodDays } from "@/types/dashboard"
 
 export function useHealthQuery(filters: DashboardFilters) {
   const normalized = normalizeDashboardFilters(filters)
@@ -71,5 +72,12 @@ export function useSyncCostsMutation() {
         queryClient.invalidateQueries({ queryKey: ["audit-summary"] }),
       ])
     },
+  })
+}
+
+export function useOperationalReportMutation() {
+  return useMutation({
+    mutationFn: ({ filters, periodDays }: { filters: DashboardFilters; periodDays: ReportPeriodDays }) =>
+      downloadOperationalReport(filters, periodDays),
   })
 }

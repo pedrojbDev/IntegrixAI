@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { useTheme } from "@/app/providers/theme-provider"
 import { useLogoutMutation } from "@/features/auth/use-auth"
 import { useDashboardPreferences } from "@/features/shared-dashboard/dashboard-preferences"
-import { useSyncCostsMutation } from "@/hooks/use-dashboard-queries"
+import { useOperationalReportMutation, useSyncCostsMutation } from "@/hooks/use-dashboard-queries"
 
 function titleFromPath(pathname: string) {
   if (pathname.includes("diagnostics")) {
@@ -26,6 +26,7 @@ export function AppShell() {
   const { filters, setFilters, setLastRoute, clearDashboardPreferences } = useDashboardPreferences()
   const { theme, setTheme } = useTheme()
   const syncMutation = useSyncCostsMutation()
+  const reportMutation = useOperationalReportMutation()
   const logoutMutation = useLogoutMutation(clearDashboardPreferences)
 
   useEffect(() => {
@@ -70,8 +71,10 @@ export function AppShell() {
           onChange={setFilters}
           onRefresh={refreshPage}
           onSync={() => syncMutation.mutate()}
+          onExportReport={(periodDays) => reportMutation.mutate({ filters, periodDays })}
           refreshing={false}
           syncing={syncMutation.isPending}
+          exporting={reportMutation.isPending}
         />
         <main className="min-w-0 flex-1 px-4 py-4 lg:px-6">
           <Outlet />

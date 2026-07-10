@@ -12,8 +12,24 @@ from ...models.ops_sync_state import OpsSyncState
 from ...models.tool_invocation import ToolBusinessErrorAttempt
 from ...models.vapi_call_cost import VapiCallCost
 
-WINDOW_TO_MINUTES = {"15m": 15, "1h": 60, "24h": 1440, "7d": 10080}
-WINDOW_BUCKET_MINUTES = {"15m": 1, "1h": 5, "24h": 60, "7d": 360}
+WINDOW_TO_MINUTES = {
+    "15m": 15,
+    "1h": 60,
+    "24h": 1440,
+    "7d": 10080,
+    "15d": 21600,
+    "30d": 43200,
+    "90d": 129600,
+}
+WINDOW_BUCKET_MINUTES = {
+    "15m": 1,
+    "1h": 5,
+    "24h": 60,
+    "7d": 360,
+    "15d": 1440,
+    "30d": 1440,
+    "90d": 1440,
+}
 SYNC_FRESH_SECONDS = 15 * 60
 SYNC_DELAY_SECONDS = 60 * 60
 

@@ -1,18 +1,22 @@
-import { RefreshCw, Search, Zap } from "lucide-react"
+import { FileDown, RefreshCw, Search, Zap } from "lucide-react"
+import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
 import { WINDOW_OPTIONS } from "@/lib/api/filters"
-import type { DashboardFilters } from "@/types/dashboard"
+import { REPORT_PERIOD_OPTIONS } from "@/lib/api/reports"
+import type { DashboardFilters, ReportPeriodDays } from "@/types/dashboard"
 
 type DashboardFilterBarProps = {
   filters: DashboardFilters
   onChange: (filters: DashboardFilters) => void
   onRefresh: () => void
   onSync: () => void
+  onExportReport: (periodDays: ReportPeriodDays) => void
   refreshing?: boolean
   syncing?: boolean
+  exporting?: boolean
 }
 
 export function DashboardFilterBar({
@@ -20,9 +24,13 @@ export function DashboardFilterBar({
   onChange,
   onRefresh,
   onSync,
+  onExportReport,
   refreshing,
   syncing,
+  exporting,
 }: DashboardFilterBarProps) {
+  const [reportPeriodDays, setReportPeriodDays] = useState<ReportPeriodDays>(30)
+
   return (
     <div className="flex flex-col gap-3 border-b border-border bg-background/95 px-4 py-3 backdrop-blur lg:flex-row lg:items-center lg:px-6">
       <div className="grid flex-1 grid-cols-1 gap-3 sm:grid-cols-3">
@@ -65,6 +73,22 @@ export function DashboardFilterBar({
         <Button className="flex-1 lg:flex-none" disabled={syncing} onClick={onSync} type="button">
           <Zap className="h-4 w-4" aria-hidden="true" />
           Sync custos
+        </Button>
+      </div>
+      <div className="flex items-end gap-2 border-t border-border pt-3 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
+        <label className="min-w-28 space-y-1.5">
+          <span className="text-xs font-medium text-muted-foreground">Relatório PDF</span>
+          <Select value={String(reportPeriodDays)} onChange={(event) => setReportPeriodDays(Number(event.target.value) as ReportPeriodDays)}>
+            {REPORT_PERIOD_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </Select>
+        </label>
+        <Button disabled={exporting} onClick={() => onExportReport(reportPeriodDays)} type="button" variant="outline">
+          <FileDown className="h-4 w-4" aria-hidden="true" />
+          {exporting ? "Gerando..." : "Exportar"}
         </Button>
       </div>
     </div>
