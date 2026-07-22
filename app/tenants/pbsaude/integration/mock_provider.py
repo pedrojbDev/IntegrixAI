@@ -80,13 +80,13 @@ class MockDataProvider(DataProvider):
 
     def _seed_providers(self) -> list[Provider]:
         data = [
-            ("ClÃ­nica Alpha", "cardiologia", "Av. Paulista, 1000", "sao paulo", "bela vista", "11 3333-1000"),
-            ("Centro Beta", "ortopedia", "R. Augusta, 55", "sao paulo", "consolaÃ§Ã£o", "11 3333-2000"),
-            ("Hospital Vida", "pronto-socorro", "Av. Brasil, 500", "rio de janeiro", "jardim botÃ¢nico", "21 4000-5000"),
+            ("Clínica Alpha", "cardiologia", "Av. Paulista, 1000", "são paulo", "bela vista", "11 3333-1000"),
+            ("Centro Beta", "ortopedia", "R. Augusta, 55", "são paulo", "consolação", "11 3333-2000"),
+            ("Hospital Vida", "pronto-socorro", "Av. Brasil, 500", "rio de janeiro", "jardim botânico", "21 4000-5000"),
             ("Orto Norte", "ortopedia", "Av. Dom Pedro, 10", "manaus", "centro", "92 3333-9999"),
             ("Cardio Sul", "cardiologia", "R. da Praia, 45", "porto alegre", "centro", "51 4444-8888"),
-            ("Diagnostika", "diagnÃ³stico", "Av. AngÃ©lica, 200", "sao paulo", "santa cecilia", "11 3333-3000"),
-            ("SaÃºde Mais", "clÃ­nico geral", "R. XV de Novembro, 12", "curitiba", "centro", "41 2222-1111"),
+            ("Diagnostika", "diagnóstico", "Av. Angélica, 200", "são paulo", "santa cecilia", "11 3333-3000"),
+            ("Saúde Mais", "clínico geral", "R. XV de Novembro, 12", "curitiba", "centro", "41 2222-1111"),
         ]
         return [
             Provider(

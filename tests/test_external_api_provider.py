@@ -91,7 +91,7 @@ class ExternalApiProviderTests(unittest.TestCase):
             )
 
         self.assertEqual(2, len(fake_client.calls))
-        self.assertEqual("Clinica Alpha", providers[0].name)
+        self.assertEqual("Clínica Alpha", providers[0].name)
 
     def test_request_error_retries_until_limit_then_fails(self) -> None:
         fake_client = FakeClient(

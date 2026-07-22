@@ -5,8 +5,9 @@ from typing import Any
 
 import httpx
 
-from .client import ServiceUnavailable
 from ..contracts import Provider
+from .client import ServiceUnavailable
+from .speech_text import normalize_provider_address, normalize_provider_speech_text
 
 
 def as_string(value: Any, default: str) -> str:
@@ -63,15 +64,27 @@ def normalize_providers(
         address = as_optional_string(item.get("endereco") or item.get("address"))
         if not name or not address:
             continue
+        neighborhood = as_optional_string(item.get("bairro") or item.get("neighborhood"))
+        street_type = as_optional_string(
+            item.get("tipoLogradouro")
+            or item.get("tipo_logradouro")
+            or item.get("streetType")
+            or item.get("street_type")
+        )
 
         providers.append(
             Provider(
-                name=clean_whitespace(name),
-                specialty=query.strip(),
-                address=clean_whitespace(address),
-                city=clean_whitespace(city.strip()),
-                neighborhood=clean_whitespace(neighborhood_value)
-                if (neighborhood_value := as_optional_string(item.get("bairro") or item.get("neighborhood")))
+                name=normalize_provider_speech_text(clean_whitespace(name)),
+                specialty=normalize_provider_speech_text(query.strip()),
+                address=normalize_provider_address(
+                    clean_whitespace(address),
+                    street_type=street_type,
+                    city=city,
+                    neighborhood=neighborhood,
+                ),
+                city=normalize_provider_speech_text(clean_whitespace(city.strip())),
+                neighborhood=normalize_provider_speech_text(clean_whitespace(neighborhood))
+                if neighborhood
                 else None,
                 phone=normalize_phone(as_string(item.get("telefone") or item.get("phone"), "")),
             )
@@ -102,7 +115,7 @@ def normalize_phone(raw_phone: str) -> str:
         return f"({digits[:2]}) {digits[2:6]}-{digits[6:]}"
     if len(digits) == 11:
         return f"({digits[:2]}) {digits[2:7]}-{digits[7:]}"
-    return phone or "Nao informado"
+    return phone or "Não informado"
 
 
 def normalize_cpf(cpf: str) -> str | None:
