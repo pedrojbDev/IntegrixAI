@@ -299,7 +299,7 @@ function Hero() {
             <span className="h-2 w-2 rounded-full bg-brand-green" />
             Atendimento com IA que trabalha por resultado
           </div>
-          <h1 className="reveal reveal-delay-1 mt-7 font-display text-[clamp(3.15rem,7vw,6.6rem)] font-bold leading-[0.93] tracking-[-0.075em] text-brand-ink">
+          <h1 className="reveal reveal-delay-1 mt-7 font-display text-[clamp(3.15rem,7vw,6.6rem)] font-extrabold leading-[0.97] tracking-[-0.055em] text-brand-ink">
             Atenda mais.
             <br />
             <span className="title-accent">Sem inflar</span>
@@ -446,17 +446,30 @@ function ImpactCalculator() {
   const [salary, setSalary] = useState(2500)
   const [overhead, setOverhead] = useState(70)
   const [routineShare, setRoutineShare] = useState(60)
+  const [monthlyMinutes, setMonthlyMinutes] = useState(8000)
+  const [exchangeRate, setExchangeRate] = useState(5.07)
 
   const estimate = useMemo(() => {
     const monthlyTeamCost = people * salary * (1 + overhead / 100)
     const routineCost = monthlyTeamCost * (routineShare / 100)
+    const aiCostPerMinuteUsd = 0.16
+    const monthlyAiCost = monthlyMinutes * aiCostPerMinuteUsd * exchangeRate
+    const monthlySavings = Math.max(0, routineCost - monthlyAiCost)
+    const annualSavings = monthlySavings * 12
+    const savingsPercentage = routineCost > 0 ? (monthlySavings / routineCost) * 100 : 0
 
     return {
       monthlyTeamCost,
       routineCost,
-      annualPotential: routineCost * 12,
+      monthlyAiCost,
+      monthlySavings,
+      annualSavings,
+      savingsPercentage,
+      aiCostPerMinuteUsd,
     }
-  }, [people, salary, overhead, routineShare])
+  }, [people, salary, overhead, routineShare, monthlyMinutes, exchangeRate])
+
+  const hasEstimatedSavings = estimate.monthlySavings > 0
 
   return (
     <section className="bg-brand-cream px-5 py-24 sm:px-8 sm:py-32 lg:px-12" id="calculadora">
@@ -467,81 +480,175 @@ function ImpactCalculator() {
             <h2 className="section-title mt-5">Quanto da sua estrutura está presa ao repetitivo?</h2>
           </div>
           <p className="max-w-2xl text-lg leading-8 text-brand-ink/65 lg:justify-self-end">
-            Ajuste as premissas abaixo. A estimativa mostra o custo da capacidade hoje dedicada a rotinas que podem
-            ser automatizadas — e ajuda a dimensionar onde a IA pode gerar valor primeiro.
+            Compare o custo da rotina atual com uma operação de voz por IA. Você pode ajustar equipe, volume de
+            minutos e câmbio para entender, em valores aproximados, onde existe espaço real para economizar.
           </p>
         </div>
 
         <div className="calculator-shell mt-14">
-          <div className="grid gap-10 p-6 sm:p-9 lg:grid-cols-[1fr_0.88fr] lg:gap-14 lg:p-12">
-            <div className="space-y-10">
-              <RangeControl
-                display={`${people} pessoas`}
-                label="Pessoas dedicadas ao atendimento"
-                max={30}
-                min={1}
-                onChange={setPeople}
-                step={1}
-                value={people}
-              />
-              <RangeControl
-                display={currency.format(salary)}
-                label="Salário médio mensal"
-                max={10000}
-                min={1500}
-                onChange={setSalary}
-                step={100}
-                value={salary}
-              />
-              <RangeControl
-                display={`${overhead}%`}
-                label="Encargos, benefícios e custos indiretos"
-                max={120}
-                min={30}
-                onChange={setOverhead}
-                step={5}
-                value={overhead}
-              />
-              <RangeControl
-                display={`${routineShare}%`}
-                label="Parcela do trabalho que é repetitiva"
-                max={90}
-                min={20}
-                onChange={setRoutineShare}
-                step={5}
-                value={routineShare}
-              />
-            </div>
-
-            <div className="calculator-result">
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-brand-ink/50">Potencial anual analisado</p>
-              <strong className="mt-4 block font-display text-[clamp(3rem,6vw,5.5rem)] font-bold leading-none tracking-[-0.075em] text-brand-ink">
-                {currency.format(estimate.annualPotential)}
-              </strong>
-              <p className="mt-5 max-w-md leading-7 text-brand-ink/65">
-                em capacidade de trabalho repetitivo que pode ser redirecionada para atividades de maior valor.
-              </p>
-
-              <div className="mt-8 grid gap-3 sm:grid-cols-2">
-                <div className="result-mini-card">
-                  <span>Custo mensal da equipe</span>
-                  <strong>{currency.format(estimate.monthlyTeamCost)}</strong>
+          <div className="grid gap-10 p-6 sm:p-9 lg:grid-cols-[0.95fr_1.05fr] lg:gap-14 lg:p-12">
+            <div className="space-y-9">
+              <div className="calculator-input-group">
+                <div className="calculator-group-heading">
+                  <span>1</span>
+                  <div>
+                    <strong>Como funciona hoje</strong>
+                    <p>Estime o custo da estrutura dedicada ao atendimento.</p>
+                  </div>
                 </div>
-                <div className="result-mini-card">
-                  <span>Rotina repetitiva/mês</span>
-                  <strong>{currency.format(estimate.routineCost)}</strong>
+                <div className="mt-8 space-y-9">
+                  <RangeControl
+                    display={`${people} pessoas`}
+                    label="Pessoas dedicadas ao atendimento"
+                    max={30}
+                    min={1}
+                    onChange={setPeople}
+                    step={1}
+                    value={people}
+                  />
+                  <RangeControl
+                    display={currency.format(salary)}
+                    label="Salário médio mensal"
+                    max={10000}
+                    min={1500}
+                    onChange={setSalary}
+                    step={100}
+                    value={salary}
+                  />
+                  <RangeControl
+                    display={`${overhead}%`}
+                    label="Encargos, benefícios e custos indiretos"
+                    max={120}
+                    min={30}
+                    onChange={setOverhead}
+                    step={5}
+                    value={overhead}
+                  />
+                  <RangeControl
+                    display={`${routineShare}%`}
+                    label="Parcela do trabalho que é repetitiva"
+                    max={90}
+                    min={20}
+                    onChange={setRoutineShare}
+                    step={5}
+                    value={routineShare}
+                  />
                 </div>
               </div>
 
+              <div className="calculator-input-group">
+                <div className="calculator-group-heading">
+                  <span>2</span>
+                  <div>
+                    <strong>Quanto a IA atenderia</strong>
+                    <p>Use seu volume de voz e uma cotação de referência.</p>
+                  </div>
+                </div>
+                <div className="mt-8 space-y-9">
+                  <RangeControl
+                    display={`${monthlyMinutes.toLocaleString("pt-BR")} min`}
+                    label="Minutos automatizáveis por mês"
+                    max={50000}
+                    min={1000}
+                    onChange={setMonthlyMinutes}
+                    step={500}
+                    value={monthlyMinutes}
+                  />
+                  <RangeControl
+                    display={`R$ ${exchangeRate.toFixed(2).replace(".", ",")}`}
+                    label="Cotação de referência do dólar"
+                    max={7}
+                    min={4}
+                    onChange={setExchangeRate}
+                    step={0.01}
+                    value={exchangeRate}
+                  />
+                </div>
+                <p className="calculator-reference">
+                  Cálculo usando <strong>US$ 0,16 por minuto</strong> como referência, não como preço contratado ou
+                  garantia de custo.
+                </p>
+              </div>
+            </div>
+
+            <div className="calculator-result">
+              <div className="calculator-result-heading">
+                <span className="result-number">3</span>
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-brand-ink/50">
+                    Economia líquida estimada
+                  </p>
+                  <p className="mt-1 text-sm text-brand-ink/55">Custo atual menos o consumo estimado da IA</p>
+                </div>
+              </div>
+
+              <div className="mt-8">
+                <span className="text-sm font-semibold text-brand-ink/55">Por mês, aproximadamente</span>
+                <strong className="mt-2 block font-display text-[clamp(3rem,6vw,5.5rem)] font-bold leading-none tracking-[-0.055em] text-brand-ink">
+                  {hasEstimatedSavings ? currency.format(estimate.monthlySavings) : "R$ 0"}
+                </strong>
+                {hasEstimatedSavings ? (
+                  <p className="mt-4 inline-flex rounded-full bg-brand-green px-3 py-1.5 text-xs font-bold text-white">
+                    cerca de {Math.round(estimate.savingsPercentage)}% do custo repetitivo atual
+                  </p>
+                ) : (
+                  <p className="mt-4 rounded-xl bg-brand-coral/15 p-3 text-sm font-semibold leading-6 text-brand-ink">
+                    Com essas premissas, o custo estimado da IA supera o custo repetitivo informado. Ajuste o volume ou
+                    solicite uma análise do processo.
+                  </p>
+                )}
+              </div>
+
+              <div className="calculation-breakdown mt-8">
+                <div>
+                  <span>
+                    <small>1</small>
+                    Custo mensal da equipe
+                  </span>
+                  <strong>{currency.format(estimate.monthlyTeamCost)}</strong>
+                </div>
+                <div>
+                  <span>
+                    <small>2</small>
+                    Parte repetitiva desse custo
+                  </span>
+                  <strong>{currency.format(estimate.routineCost)}</strong>
+                </div>
+                <div>
+                  <span>
+                    <small>3</small>
+                    Custo mensal estimado da IA
+                  </span>
+                  <strong className="text-brand-coral">− {currency.format(estimate.monthlyAiCost)}</strong>
+                </div>
+              </div>
+
+              <div className="annual-result">
+                <div>
+                  <span>Em 12 meses</span>
+                  <strong>{currency.format(estimate.annualSavings)}</strong>
+                </div>
+                <p>
+                  {monthlyMinutes.toLocaleString("pt-BR")} min × US$ {estimate.aiCostPerMinuteUsd.toFixed(2)} × R${" "}
+                  {exchangeRate.toFixed(2).replace(".", ",")}
+                </p>
+              </div>
+
+              <p className="mt-5 text-xs leading-5 text-brand-ink/50">
+                Este valor é a diferença entre o custo estimado da rotina repetitiva e o custo variável da IA. Não
+                representa receita adicional nem economia garantida.
+              </p>
+
               <a className="button button-dark mt-8 w-full justify-center" href={contactHref}>
-                Receber uma análise real
+                Validar esta estimativa
                 <ArrowRight className="h-4 w-4" aria-hidden="true" />
               </a>
             </div>
           </div>
           <p className="border-t border-brand-ink/10 px-6 py-5 text-xs leading-5 text-brand-ink/45 sm:px-9 lg:px-12">
-            Simulação educativa, não promessa de economia. Encargos e benefícios variam por regime, convenção e
-            empresa. O diagnóstico considera volume, processo, integrações e custo da solução antes de projetar retorno.
+            Simulação educativa, não promessa de economia. O preço por minuto, a cotação do dólar, impostos, telefonia,
+            implantação e integrações podem alterar o resultado. Encargos e benefícios também variam por regime,
+            convenção e empresa. Uma proposta real depende da análise do processo e do volume contratado.
           </p>
         </div>
       </div>
@@ -826,7 +933,7 @@ function FinalCta() {
       <div className="mx-auto max-w-[1440px] text-center">
         <Sparkles className="mx-auto h-10 w-10 text-brand-ink" aria-hidden="true" />
         <p className="eyebrow mt-7">O próximo atendimento pode custar menos e valer mais</p>
-        <h2 className="mx-auto mt-5 max-w-5xl font-display text-[clamp(3rem,7vw,6.5rem)] font-bold leading-[0.92] tracking-[-0.075em] text-brand-ink">
+        <h2 className="mx-auto mt-5 max-w-5xl font-display text-[clamp(3rem,7vw,6.5rem)] font-extrabold leading-[0.97] tracking-[-0.055em] text-brand-ink">
           Descubra onde a IA gera retorno primeiro.
         </h2>
         <p className="mx-auto mt-7 max-w-2xl text-lg leading-8 text-brand-ink/70">

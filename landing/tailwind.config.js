@@ -16,7 +16,7 @@ export default {
       },
       fontFamily: {
         sans: ["IBM Plex Sans", "sans-serif"],
-        display: ["Bricolage Grotesque", "sans-serif"],
+        display: ["Manrope", "sans-serif"],
       },
     },
   },

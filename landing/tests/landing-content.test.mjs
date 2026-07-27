@@ -19,10 +19,15 @@ test("landing explains financial value without making an unsupported savings pro
 
   assert.match(app, /Encargos, benefícios e custos indiretos/)
   assert.match(app, /Parcela do trabalho que é repetitiva/)
-  assert.match(app, /Potencial anual analisado/)
+  assert.match(app, /Minutos automatizáveis por mês/)
+  assert.match(app, /US\$ 0,16 por minuto/)
+  assert.match(app, /Economia líquida estimada/)
+  assert.match(app, /Custo mensal estimado da IA/)
+  assert.match(app, /Em 12 meses/)
+  assert.match(app, /Não\s+representa receita adicional nem economia garantida/)
   assert.match(app, /Simulação educativa, não promessa de economia/)
-  assert.match(app, /O diagnóstico considera volume, processo, integrações e custo da solução/)
-  assert.doesNotMatch(app, /economia garantida/i)
+  assert.match(app, /implantação e integrações podem alterar o resultado/)
+  assert.doesNotMatch(app, /garantimos economia/i)
 })
 
 test("landing explains the full customer journey in plain language", async () => {
@@ -51,7 +56,7 @@ test("landing uses a distinctive editorial brand system and accessible motion fa
   const css = await readFile(new URL("../src/index.css", import.meta.url), "utf8")
   const tailwind = await readFile(new URL("../tailwind.config.js", import.meta.url), "utf8")
 
-  assert.match(css, /Bricolage Grotesque/)
+  assert.match(css, /Manrope/)
   assert.match(css, /IBM Plex Sans/)
   assert.match(css, /prefers-reduced-motion/)
   assert.match(css, /focus-visible/)

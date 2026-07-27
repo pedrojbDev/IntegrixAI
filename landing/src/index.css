@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..800&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap");
 
 @tailwind base;
 @tailwind components;
@@ -319,7 +319,7 @@ summary:focus-visible {
 .visual-metric strong {
   margin-top: 7px;
   overflow-wrap: anywhere;
-  font-family: "Bricolage Grotesque", sans-serif;
+  font-family: "Manrope", sans-serif;
   font-size: clamp(1.3rem, 3vw, 1.8rem);
   line-height: 1;
   color: white;
@@ -380,12 +380,12 @@ summary:focus-visible {
 }
 
 .section-title {
-  font-family: "Bricolage Grotesque", sans-serif;
+  font-family: "Manrope", sans-serif;
   font-size: clamp(2.65rem, 5vw, 5rem);
-  font-weight: 700;
-  line-height: 0.98;
+  font-weight: 800;
+  line-height: 1.02;
   color: #14241c;
-  letter-spacing: -0.065em;
+  letter-spacing: -0.05em;
 }
 
 .value-card {
@@ -412,6 +412,63 @@ summary:focus-visible {
   border: 1px solid rgba(20, 36, 28, 0.12);
   border-radius: 2rem;
   box-shadow: 0 30px 70px rgba(20, 36, 28, 0.08);
+}
+
+.calculator-input-group {
+  padding: clamp(1.25rem, 3vw, 1.75rem);
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid rgba(20, 36, 28, 0.1);
+  border-radius: 20px;
+}
+
+.calculator-group-heading,
+.calculator-result-heading {
+  display: flex;
+  gap: 13px;
+  align-items: flex-start;
+}
+
+.calculator-group-heading > span,
+.result-number {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  place-items: center;
+  font-family: "Manrope", sans-serif;
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: white;
+  background: #16764b;
+  border-radius: 50%;
+}
+
+.calculator-group-heading strong {
+  display: block;
+  font-family: "Manrope", sans-serif;
+  font-size: 1rem;
+  font-weight: 800;
+  color: #14241c;
+}
+
+.calculator-group-heading p {
+  margin-top: 4px;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: rgba(20, 36, 28, 0.5);
+}
+
+.calculator-reference {
+  padding-top: 18px;
+  margin-top: 24px;
+  font-size: 0.72rem;
+  line-height: 1.6;
+  color: rgba(20, 36, 28, 0.52);
+  border-top: 1px solid rgba(20, 36, 28, 0.1);
+}
+
+.calculator-reference strong {
+  color: #14241c;
 }
 
 .range-control {
@@ -453,29 +510,89 @@ summary:focus-visible {
   border-radius: 24px;
 }
 
-.result-mini-card {
-  padding: 15px;
-  background: rgba(255, 255, 255, 0.58);
-  border: 1px solid rgba(20, 36, 28, 0.08);
-  border-radius: 14px;
+.calculation-breakdown {
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.62);
+  border: 1px solid rgba(20, 36, 28, 0.09);
+  border-radius: 16px;
 }
 
-.result-mini-card span,
-.result-mini-card strong {
-  display: block;
+.calculation-breakdown > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(20, 36, 28, 0.08);
 }
 
-.result-mini-card span {
-  font-size: 0.7rem;
+.calculation-breakdown > div:last-child {
+  border-bottom: 0;
+}
+
+.calculation-breakdown span {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 0.72rem;
   font-weight: 600;
-  color: rgba(20, 36, 28, 0.5);
+  color: rgba(20, 36, 28, 0.55);
 }
 
-.result-mini-card strong {
-  margin-top: 7px;
-  font-family: "Bricolage Grotesque", sans-serif;
-  font-size: 1.1rem;
+.calculation-breakdown small {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  font-size: 0.58rem;
+  font-weight: 800;
+  color: #16764b;
+  background: rgba(22, 118, 75, 0.1);
+  border-radius: 50%;
+}
+
+.calculation-breakdown strong {
+  flex: 0 0 auto;
+  font-family: "Manrope", sans-serif;
+  font-size: 0.88rem;
+  font-weight: 800;
   color: #14241c;
+}
+
+.annual-result {
+  padding: 17px;
+  margin-top: 14px;
+  color: white;
+  background: #14241c;
+  border-radius: 16px;
+}
+
+.annual-result > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.annual-result span {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.56);
+}
+
+.annual-result strong {
+  font-family: "Manrope", sans-serif;
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: #d9ff57;
+}
+
+.annual-result p {
+  padding-top: 11px;
+  margin-top: 11px;
+  font-size: 0.66rem;
+  color: rgba(255, 255, 255, 0.42);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .process-card {
@@ -638,7 +755,7 @@ summary:focus-visible {
   justify-content: space-between;
   gap: 24px;
   padding: 25px 0;
-  font-family: "Bricolage Grotesque", sans-serif;
+  font-family: "Manrope", sans-serif;
   font-size: clamp(1.15rem, 2vw, 1.45rem);
   font-weight: 700;
   color: #14241c;
