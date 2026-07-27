@@ -110,7 +110,7 @@ Use o reconciliador no container para conferir um periodo conhecido (a data
 final e exclusiva):
 
 ```bash
-docker compose -f docker-compose.production.yml --env-file .env.production exec app python scripts/reconcile_vapi_costs.py --start 2026-07-01 --end 2026-07-02 --tenant-id tenant_demo
+docker compose -f docker-compose.production.yml --env-file .env.production exec app python -m scripts.reconcile_vapi_costs --start 2026-07-01 --end 2026-07-02 --tenant-id tenant_demo
 ```
 
 Quando contagens, USD e BRL passarem nos criterios, defina
