@@ -2,40 +2,62 @@ import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 import test from "node:test"
 
-test("landing page uses corporate customer-friendly positioning and navigation targets", async () => {
+test("landing leads with a business outcome and clear conversion paths", async () => {
   const app = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8")
 
-  assert.match(app, /IA de voz para operações de atendimento que exigem controle, integração e rastreabilidade\./)
-  assert.match(app, /acompanhar a operação com segurança, auditoria e indicadores claros/)
+  assert.match(app, /Atenda mais\./)
+  assert.match(app, /Sem inflar/)
+  assert.match(app, /Quero ver na minha empresa/)
+  assert.match(app, /Calcular meu potencial/)
+  assert.match(app, /Agendar meu diagnóstico/)
   assert.match(app, /href=\{opsConsoleUrl\}/)
   assert.match(app, /mailto:contato@integrix\.com\.br/)
-  assert.match(app, /Direcionamento inteligente de chamadas/)
-  assert.match(app, /Painel de gestão operacional/)
-  assert.match(app, /Passagem organizada para atendimento humano/)
 })
 
-test("hero includes a realistic business dashboard mockup", async () => {
+test("landing explains financial value without making an unsupported savings promise", async () => {
   const app = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8")
 
-  assert.match(app, /Atendimentos hoje/)
-  assert.match(app, /Taxa de resolução/)
-  assert.match(app, /Tempo médio/)
-  assert.match(app, /Custo estimado/)
-  assert.match(app, /Últimos atendimentos/)
-  assert.match(app, /Status das integrações/)
-  assert.match(app, /Operação normal/)
-  assert.match(app, /Auditoria ativa/)
-  assert.match(app, /Integrações OK/)
+  assert.match(app, /Encargos, benefícios e custos indiretos/)
+  assert.match(app, /Parcela do trabalho que é repetitiva/)
+  assert.match(app, /Potencial anual analisado/)
+  assert.match(app, /Simulação educativa, não promessa de economia/)
+  assert.match(app, /O diagnóstico considera volume, processo, integrações e custo da solução/)
+  assert.doesNotMatch(app, /economia garantida/i)
 })
 
-test("landing styling is light corporate instead of dark technical", async () => {
+test("landing explains the full customer journey in plain language", async () => {
+  const app = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8")
+
+  assert.match(app, /A gente entende a sua operação/)
+  assert.match(app, /A IA aprende o caminho certo/)
+  assert.match(app, /Você acompanha e melhora/)
+  assert.match(app, /Sem fazer o cliente começar tudo de novo/)
+  assert.match(app, /Uma IA que resolve tarefas, não apenas conversa/)
+  assert.match(app, /Automação com controle\. Não uma caixa-preta\./)
+})
+
+test("landing presents a realistic management interface", async () => {
+  const app = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8")
+
+  assert.match(app, /Atendimento inteligente/)
+  assert.match(app, /atendimentos/)
+  assert.match(app, /resolvidos pela IA/)
+  assert.match(app, /tempo médio/)
+  assert.match(app, /Visão da operação/)
+  assert.match(app, /Operação saudável/)
+})
+
+test("landing uses a distinctive editorial brand system and accessible motion fallback", async () => {
   const css = await readFile(new URL("../src/index.css", import.meta.url), "utf8")
   const tailwind = await readFile(new URL("../tailwind.config.js", import.meta.url), "utf8")
 
-  assert.match(css, /background:\s*#f8fbff/)
-  assert.match(tailwind, /corporate/)
+  assert.match(css, /Bricolage Grotesque/)
+  assert.match(css, /IBM Plex Sans/)
+  assert.match(css, /prefers-reduced-motion/)
+  assert.match(css, /focus-visible/)
+  assert.match(tailwind, /#d9ff57/)
+  assert.match(tailwind, /#14241c/)
   assert.equal(css.includes("color-scheme: dark"), false)
-  assert.equal(css.includes("#070b12"), false)
 })
 
 test("landing page avoids internal jargon and client-specific names", async () => {
@@ -61,6 +83,15 @@ test("landing page avoids internal jargon and client-specific names", async () =
   for (const term of forbiddenTerms) {
     assert.equal(app.includes(term), false, `Unexpected public jargon or internal term: ${term}`)
   }
+})
+
+test("page metadata is written for decision makers, not technical readers", async () => {
+  const html = await readFile(new URL("../index.html", import.meta.url), "utf8")
+
+  assert.match(html, /Atenda mais sem inflar sua equipe/)
+  assert.match(html, /reduzir trabalho repetitivo/)
+  assert.match(html, /og:title/)
+  assert.doesNotMatch(html, /infraestrutura enterprise/i)
 })
 
 test("Vercel configuration keeps the landing as a static SPA", async () => {
