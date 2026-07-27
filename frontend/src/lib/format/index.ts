@@ -1,4 +1,5 @@
 export {
+  formatCurrencyBRL,
   formatCurrencyUSD,
   formatDateTimeBR,
   formatDurationMs,

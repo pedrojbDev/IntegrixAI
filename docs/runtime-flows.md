@@ -59,18 +59,26 @@ expor segredos ou PII desnecessaria.
 
 ## Dashboard E Ops
 
-O console operacional inclui login por token, sessao HttpOnly, endpoints ops e
-visoes de auditoria/custos/diagnostico. Mudancas nessa area normalmente tocam:
+O console operacional usa usuarios persistidos, memberships usuario-tenant,
+sessao opaca em cookie HttpOnly e CSRF em mutacoes. `platform_admin` pode
+selecionar tenants e so recebe visao global quando
+`OPS_ALLOW_GLOBAL_QUERIES=true`; `tenant_user` fica limitado aos memberships.
+`OPS_DASHBOARD_TOKEN` serve exclusivamente ao bootstrap do primeiro
+administrador e nao autentica o dashboard depois disso.
+
+Mudancas nessa area normalmente tocam:
 
 - `app/api/routes/ops.py`;
 - `app/api/routes/ops_session.py`;
 - `app/api/routes/dashboard.py`;
 - `app/core/ops`;
 - `app/core/security/ops.py`;
-- `app/static/dashboard` ou `frontend/`.
+- `frontend/` como fonte ativa da console;
+- `app/static/dashboard` apenas quando a tarefa tocar compatibilidade legada.
 
-Em producao, consultas operacionais sem `tenant_id` dependem de configuracao
-explicita. Preserve limites, filtros e autorizacao operacional.
+Consultas operacionais resolvem o tenant a partir do principal. Escopo ausente,
+conflitante ou fora dos memberships falha fechado. Preserve limites, filtros,
+CSRF, revogacao de sessao e auditoria de autorizacao.
 
 ## Relatório diário por e-mail
 
@@ -79,13 +87,33 @@ memória. Às 07:00 de `America/Sao_Paulo`, somente o worker que obtiver o lock
 advisory do PostgreSQL cria e envia o relatório. O estado em `ops_sync_state`
 evita novo envio no mesmo dia, inclusive após reinício. O relatório agendado
 exige `DAILY_REPORT_TENANT_ID`; destinatários vêm de
-`DAILY_REPORT_RECIPIENTS` e o transporte usa as variáveis `SMTP_*`.
+`DAILY_REPORT_RECIPIENTS` e o transporte usa as variáveis `SMTP_*`. Antes de
+enviar, o fluxo exige sync Vapi e conversao PTAX sem atraso superior a 15
+minutos; em caso contrario registra o bloqueio e tenta no proximo ciclo.
 
 ## Sync De Custos Vapi
 
-O sync de custos vive em `app/core/ops/cost_sync_service.py` e shims
-relacionados. Ele usa estado operacional para cursor e persiste custos em
-modelos SQLAlchemy.
+O sync de custos vive em `app/core/ops/cost_sync_service.py`, roda a cada cinco
+minutos e usa advisory lock PostgreSQL para uma unica execucao entre workers.
+O primeiro ciclo faz backfill de 90 dias por `createdAt`; os seguintes usam
+`updatedAt` com sobreposicao de dez minutos. Janelas saturadas sao subdivididas
+e o cursor so avanca depois do bloco completo.
+
+`vapi_call_costs.started_at` define a janela financeira. `synced_at` e apenas
+metadado operacional. Total ausente permanece `NULL`; zero e valido somente
+quando retornado explicitamente pela Vapi. O total oficial vem de `Call.cost`,
+componentes divergentes geram ajuste, e registros sem tenant resolvido ficam
+fora das metricas de cliente.
+
+USD e a fonte financeira. BRL e derivado pela PTAX de venda do fechamento na
+data da chamada em `America/Sao_Paulo`, usando a ultima data util anterior para
+fim de semana ou feriado. Taxas do dia ainda sem fechamento sao provisorias e
+substituidas posteriormente; falta de taxa deixa BRL nulo.
+
+`OPS_COST_V2_ENABLED=false` mantem valores financeiros ocultos de
+`tenant_user`, mas permite pre-visualizacao administrativa para reconciliacao.
+Somente depois dos criterios de aceite a flag deve ser ativada. Relatorios
+agendados nao sao enviados enquanto ela estiver desativada.
 
 Ao alterar sync, retention ou agregacoes:
 

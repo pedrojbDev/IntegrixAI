@@ -3,7 +3,7 @@ import unittest
 from app.api.routes import router as legacy_tools_router
 from app.api.routes.tools import router as tools_router
 from app.api.security import require_ops_token
-from app.core.security.ops import require_ops_token as core_require_ops_token
+from app.core.security.ops import require_ready_principal
 from app.core.tools.contracts import ToolError as CoreToolError
 from app.core.tools.dispatcher import ToolDispatcher as CoreToolDispatcher
 from app.schemas.tools import AuthenticateRequest, ToolError, VapiMessage
@@ -19,7 +19,7 @@ class ShimTests(unittest.TestCase):
         self.assertIs(ToolDispatcher, CoreToolDispatcher)
 
     def test_security_shim_reexports_core_dependency(self) -> None:
-        self.assertIs(require_ops_token, core_require_ops_token)
+        self.assertIs(require_ops_token, require_ready_principal)
 
     def test_schemas_shim_exposes_shared_and_pbsaude_contracts(self) -> None:
         self.assertIs(ToolError, CoreToolError)

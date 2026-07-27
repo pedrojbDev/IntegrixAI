@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
-import { getSession, login, logout, type LoginInput } from "@/lib/api/auth"
+import { bootstrap, changePassword, getSession, login, logout, type LoginInput } from "@/lib/api/auth"
 import { isApiError } from "@/lib/api/errors"
 
 export function useSessionQuery() {
@@ -24,9 +24,25 @@ export function useLoginMutation() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (input: LoginInput) => login(input),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["session"] })
+    onSuccess: (session) => {
+      queryClient.setQueryData(["session"], session)
     },
+  })
+}
+
+export function useBootstrapMutation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: bootstrap,
+    onSuccess: (session) => queryClient.setQueryData(["session"], session),
+  })
+}
+
+export function useChangePasswordMutation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: changePassword,
+    onSuccess: () => queryClient.clear(),
   })
 }
 

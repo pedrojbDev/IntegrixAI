@@ -58,8 +58,8 @@ def parse_args(env: dict[str, str]) -> argparse.Namespace:
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
     parser.add_argument("--webhook-secret", default=env.get("WEBHOOK_SECRET", ""))
     parser.add_argument("--webhook-secret-header", default=env.get("WEBHOOK_SECRET_HEADER", "x-webhook-secret"))
-    parser.add_argument("--ops-token", default=env.get("OPS_DASHBOARD_TOKEN", ""))
-    parser.add_argument("--ops-token-header", default=env.get("OPS_TOKEN_HEADER", "x-ops-token"))
+    parser.add_argument("--ops-email", default=env.get("OPS_ADMIN_EMAIL", ""))
+    parser.add_argument("--ops-password", default=env.get("OPS_ADMIN_PASSWORD", ""))
     parser.add_argument("--tenant-id", default=tenant_id)
     parser.add_argument("--to-number", default=infer_to_number(env) or "+5511999999999")
     parser.add_argument("--cpf", default="03457351538")
@@ -166,12 +166,16 @@ def check_search(client: httpx.Client, args: argparse.Namespace) -> str:
 
 
 def check_dashboard(client: httpx.Client, args: argparse.Namespace) -> str:
-    if not args.ops_token:
-        raise SmokeFailure("OPS_DASHBOARD_TOKEN ausente; use --ops-token")
+    if not args.ops_email or not args.ops_password:
+        raise SmokeFailure("credenciais ops ausentes; use --ops-email e --ops-password")
+    login = client.post(
+        "/ops/session",
+        json={"email": args.ops_email, "password": args.ops_password},
+    )
+    login.raise_for_status()
     response = client.get(
         "/ops/dashboard/overview",
         params={"tenant_id": args.tenant_id},
-        headers={args.ops_token_header: args.ops_token},
     )
     response.raise_for_status()
     data = response.json()

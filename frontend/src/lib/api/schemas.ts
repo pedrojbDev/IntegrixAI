@@ -2,13 +2,22 @@ import { z } from "zod"
 
 export const sessionResponseSchema = z.object({
   authenticated: z.literal(true),
+  principal: z.object({
+    id: z.string(),
+    email: z.string(),
+    role: z.enum(["platform_admin", "tenant_user"]),
+    tenant_ids: z.array(z.string()),
+    must_change_password: z.boolean(),
+  }),
 }).strict()
 
 export const loginRequestSchema = z.object({
-  token: z.string().min(1, "Informe o token operacional."),
+  email: z.string().email("Informe um email válido."),
+  password: z.string().min(8, "A senha deve ter pelo menos 8 caracteres."),
 }).strict()
 
 const numeric = z.coerce.number().catch(0)
+const nullableNumeric = z.coerce.number().nullable().catch(null)
 const nullableString = z.string().nullable().catch(null)
 
 export const toolPerformanceSchema = z
@@ -21,8 +30,6 @@ export const toolPerformanceSchema = z
     avg_duration_ms: numeric,
     failure_rate_pct: numeric,
     unique_calls: numeric,
-    total_cost_usd: numeric,
-    avg_cost_per_call_usd: numeric,
   })
   .passthrough()
 
@@ -35,27 +42,48 @@ export const healthSchema = z
         last_synced_at: nullableString,
         freshness_seconds: z.number().nullable().catch(null),
         freshness_state: z.string().catch("unknown"),
+        last_error: nullableString,
+        consecutive_failures: numeric,
+        last_run_stats: z
+          .object({
+            processed: numeric,
+            created: numeric,
+            updated: numeric,
+            missing_cost: numeric,
+            unresolved_tenant: numeric,
+            missing_fx: numeric,
+            errors: numeric,
+          })
+          .nullable()
+          .catch(null),
       })
       .catch({
         last_synced_at: null,
         freshness_seconds: null,
         freshness_state: "unknown",
+        last_error: null,
+        consecutive_failures: 0,
+        last_run_stats: null,
       }),
     counters: z
       .object({
         total_calls: numeric,
+        vapi_calls: numeric,
         failed_calls: numeric,
         handoff_calls: numeric,
         calls_with_cost: numeric,
+        calls_without_cost: numeric,
         repeated_business_errors: numeric,
         idempotency_hits: numeric,
         coverage_pct: numeric,
       })
       .catch({
         total_calls: 0,
+        vapi_calls: 0,
         failed_calls: 0,
         handoff_calls: 0,
         calls_with_cost: 0,
+        calls_without_cost: 0,
         repeated_business_errors: 0,
         idempotency_hits: 0,
         coverage_pct: 0,
@@ -97,19 +125,30 @@ export const overviewSchema = z
 
 export const costsSchema = z
   .object({
+    visibility: z.enum(["enabled", "admin_preview", "hidden"]).catch("hidden"),
     summary: z
       .object({
         total_cost_usd: numeric,
+        total_cost_brl: nullableNumeric,
+        vapi_calls: numeric,
         calls_with_cost: numeric,
+        calls_without_cost: numeric,
+        coverage_pct: numeric,
         avg_cost_per_call_usd: numeric,
+        avg_cost_per_call_brl: nullableNumeric,
         calls_with_duration: numeric,
         total_duration_seconds: numeric,
         avg_duration_seconds: numeric,
       })
       .catch({
         total_cost_usd: 0,
+        total_cost_brl: null,
+        vapi_calls: 0,
         calls_with_cost: 0,
+        calls_without_cost: 0,
+        coverage_pct: 0,
         avg_cost_per_call_usd: 0,
+        avg_cost_per_call_brl: null,
         calls_with_duration: 0,
         total_duration_seconds: 0,
         avg_duration_seconds: 0,
@@ -120,7 +159,48 @@ export const costsSchema = z
           timestamp: z.string(),
           calls: numeric,
           cost_usd: numeric,
+          cost_brl: nullableNumeric,
           duration_seconds: numeric,
+          provisional_calls: numeric,
+        }),
+      )
+      .catch([]),
+    fx: z
+      .object({
+        source: z.string().catch("BCB_PTAX"),
+        basis: z.string().catch("closing_sale_rate_on_call_date"),
+        complete: z.boolean().catch(false),
+        provisional_calls: numeric,
+        missing_rate_calls: numeric,
+        last_rate_date: nullableString,
+      })
+      .catch({
+        source: "BCB_PTAX",
+        basis: "closing_sale_rate_on_call_date",
+        complete: false,
+        provisional_calls: 0,
+        missing_rate_calls: 0,
+        last_rate_date: null,
+      }),
+    reconciliation: z
+      .object({
+        operational_calls: numeric,
+        linked_operational_calls: numeric,
+        linkage_coverage_pct: numeric,
+        component_adjustment_calls: numeric,
+      })
+      .catch({
+        operational_calls: 0,
+        linked_operational_calls: 0,
+        linkage_coverage_pct: 0,
+        component_adjustment_calls: 0,
+      }),
+    breakdown: z
+      .array(
+        z.object({
+          category: z.string(),
+          cost_usd: numeric,
+          share_pct: numeric,
         }),
       )
       .catch([]),
@@ -222,6 +302,34 @@ export const costSyncSchema = z
     result: z.object({
       processed: numeric,
       created: numeric,
+      updated: numeric,
+      missing_cost: numeric,
+      unresolved_tenant: numeric,
+      missing_fx: numeric,
+      errors: numeric,
+      locked: z.boolean().catch(false),
     }),
   })
   .passthrough()
+
+export const opsUserSchema = z.object({
+  id: z.string(),
+  email: z.string(),
+  role: z.enum(["platform_admin", "tenant_user"]),
+  tenant_ids: z.array(z.string()),
+  is_active: z.boolean(),
+  must_change_password: z.boolean(),
+  created_at: z.string(),
+  updated_at: z.string(),
+})
+
+export const opsUsersSchema = z.array(opsUserSchema)
+
+export const temporaryPasswordSchema = z.object({
+  temporary_password: z.string(),
+}).passthrough()
+
+export const createdUserSchema = z.object({
+  user: opsUserSchema,
+  temporary_password: z.string(),
+})

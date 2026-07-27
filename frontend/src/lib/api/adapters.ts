@@ -40,8 +40,6 @@ export function mapTool(raw: RawTool): ToolPerformance {
     avgDurationMs: raw.avg_duration_ms,
     failureRatePct: raw.failure_rate_pct,
     uniqueCalls: raw.unique_calls,
-    totalCostUsd: raw.total_cost_usd,
-    avgCostPerCallUsd: raw.avg_cost_per_call_usd,
   }
 }
 
@@ -53,12 +51,27 @@ export function mapHealth(raw: RawHealth): Health {
       lastSyncedAt: raw.sync.last_synced_at,
       freshnessSeconds: raw.sync.freshness_seconds,
       freshnessState: raw.sync.freshness_state,
+      lastError: raw.sync.last_error,
+      consecutiveFailures: raw.sync.consecutive_failures,
+      lastRunStats: raw.sync.last_run_stats
+        ? {
+            processed: raw.sync.last_run_stats.processed,
+            created: raw.sync.last_run_stats.created,
+            updated: raw.sync.last_run_stats.updated,
+            missingCost: raw.sync.last_run_stats.missing_cost,
+            unresolvedTenant: raw.sync.last_run_stats.unresolved_tenant,
+            missingFx: raw.sync.last_run_stats.missing_fx,
+            errors: raw.sync.last_run_stats.errors,
+          }
+        : null,
     },
     counters: {
       totalCalls: raw.counters.total_calls,
+      vapiCalls: raw.counters.vapi_calls,
       failedCalls: raw.counters.failed_calls,
       handoffCalls: raw.counters.handoff_calls,
       callsWithCost: raw.counters.calls_with_cost,
+      callsWithoutCost: raw.counters.calls_without_cost,
       repeatedBusinessErrors: raw.counters.repeated_business_errors,
       idempotencyHits: raw.counters.idempotency_hits,
       coveragePct: raw.counters.coverage_pct,
@@ -88,10 +101,16 @@ export function mapOverview(raw: RawOverview): Overview {
 
 export function mapCosts(raw: RawCosts): Costs {
   return {
+    visibility: raw.visibility,
     summary: {
       totalCostUsd: raw.summary.total_cost_usd,
+      totalCostBrl: raw.summary.total_cost_brl,
+      vapiCalls: raw.summary.vapi_calls,
       callsWithCost: raw.summary.calls_with_cost,
+      callsWithoutCost: raw.summary.calls_without_cost,
+      coveragePct: raw.summary.coverage_pct,
       avgCostPerCallUsd: raw.summary.avg_cost_per_call_usd,
+      avgCostPerCallBrl: raw.summary.avg_cost_per_call_brl,
       callsWithDuration: raw.summary.calls_with_duration,
       totalDurationSeconds: raw.summary.total_duration_seconds,
       avgDurationSeconds: raw.summary.avg_duration_seconds,
@@ -100,7 +119,27 @@ export function mapCosts(raw: RawCosts): Costs {
       timestamp: point.timestamp,
       calls: point.calls,
       costUsd: point.cost_usd,
+      costBrl: point.cost_brl,
       durationSeconds: point.duration_seconds,
+      provisionalCalls: point.provisional_calls,
+    })),
+    fx: {
+      source: raw.fx.source,
+      complete: raw.fx.complete,
+      provisionalCalls: raw.fx.provisional_calls,
+      missingRateCalls: raw.fx.missing_rate_calls,
+      lastRateDate: raw.fx.last_rate_date,
+    },
+    reconciliation: {
+      operationalCalls: raw.reconciliation.operational_calls,
+      linkedOperationalCalls: raw.reconciliation.linked_operational_calls,
+      linkageCoveragePct: raw.reconciliation.linkage_coverage_pct,
+      componentAdjustmentCalls: raw.reconciliation.component_adjustment_calls,
+    },
+    breakdown: raw.breakdown.map((item) => ({
+      category: item.category,
+      costUsd: item.cost_usd,
+      sharePct: item.share_pct,
     })),
   }
 }
@@ -112,6 +151,19 @@ export function mapResilience(raw: RawResilience): Resilience {
       lastSyncedAt: raw.sync.last_synced_at,
       freshnessSeconds: raw.sync.freshness_seconds,
       freshnessState: raw.sync.freshness_state,
+      lastError: raw.sync.last_error,
+      consecutiveFailures: raw.sync.consecutive_failures,
+      lastRunStats: raw.sync.last_run_stats
+        ? {
+            processed: raw.sync.last_run_stats.processed,
+            created: raw.sync.last_run_stats.created,
+            updated: raw.sync.last_run_stats.updated,
+            missingCost: raw.sync.last_run_stats.missing_cost,
+            unresolvedTenant: raw.sync.last_run_stats.unresolved_tenant,
+            missingFx: raw.sync.last_run_stats.missing_fx,
+            errors: raw.sync.last_run_stats.errors,
+          }
+        : null,
     },
     summary: {
       totalCalls: raw.summary.total_calls,
@@ -177,6 +229,12 @@ export function mapCostSync(raw: RawCostSync): CostSyncResult {
     result: {
       processed: raw.result.processed || 0,
       created: raw.result.created || 0,
+      updated: raw.result.updated || 0,
+      missingCost: raw.result.missing_cost || 0,
+      unresolvedTenant: raw.result.unresolved_tenant || 0,
+      missingFx: raw.result.missing_fx || 0,
+      errors: raw.result.errors || 0,
+      locked: raw.result.locked,
     },
   }
 }

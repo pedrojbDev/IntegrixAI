@@ -1,4 +1,4 @@
-import { Activity, BarChart3, ClipboardList } from "lucide-react"
+import { Activity, BarChart3, ClipboardList, Users } from "lucide-react"
 import { NavLink } from "react-router-dom"
 
 import { cn } from "@/lib/utils"
@@ -9,7 +9,10 @@ const items = [
   { to: "/audit", label: "Auditoria", icon: ClipboardList },
 ]
 
-export function SidebarNavigation() {
+const adminItem = { to: "/admin/users", label: "Usuários", icon: Users }
+
+export function SidebarNavigation({ isAdmin }: { isAdmin: boolean }) {
+  const visibleItems = isAdmin ? [...items, adminItem] : items
   return (
     <aside className="hidden w-64 shrink-0 border-r border-border bg-card/40 lg:block">
       <div className="border-b border-border px-5 py-4">
@@ -17,7 +20,7 @@ export function SidebarNavigation() {
         <p className="mt-1 text-xs text-muted-foreground">Ops Console</p>
       </div>
       <nav className="space-y-1 p-3">
-        {items.map((item) => (
+        {visibleItems.map((item) => (
           <NavLink
             className={({ isActive }) =>
               cn(
@@ -38,10 +41,14 @@ export function SidebarNavigation() {
   )
 }
 
-export function MobileNavigation() {
+export function MobileNavigation({ isAdmin }: { isAdmin: boolean }) {
+  const visibleItems = isAdmin ? [...items, adminItem] : items
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-3 border-t border-border bg-background/95 backdrop-blur lg:hidden">
-      {items.map((item) => (
+    <nav
+      className="fixed inset-x-0 bottom-0 z-40 grid border-t border-border bg-background/95 backdrop-blur lg:hidden"
+      style={{ gridTemplateColumns: `repeat(${visibleItems.length}, minmax(0, 1fr))` }}
+    >
+      {visibleItems.map((item) => (
         <NavLink
           className={({ isActive }) =>
             cn(

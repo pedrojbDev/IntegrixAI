@@ -9,6 +9,12 @@ const usdFormatter = new Intl.NumberFormat("pt-BR", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 6,
 })
+const brlFormatter = new Intl.NumberFormat("pt-BR", {
+  style: "currency",
+  currency: "BRL",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+})
 
 export function formatNumberBR(value: number | null | undefined) {
   return numberFormatter.format(Number(value || 0))
@@ -20,6 +26,10 @@ export function formatPercent(value: number | null | undefined) {
 
 export function formatCurrencyUSD(value: number | null | undefined) {
   return usdFormatter.format(Number(value || 0))
+}
+
+export function formatCurrencyBRL(value: number | null | undefined) {
+  return value == null ? "Indisponível" : brlFormatter.format(value)
 }
 
 export function formatDurationMs(value: number | null | undefined) {

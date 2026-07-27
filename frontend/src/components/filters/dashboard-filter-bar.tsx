@@ -17,6 +17,8 @@ type DashboardFilterBarProps = {
   refreshing?: boolean
   syncing?: boolean
   exporting?: boolean
+  isAdmin: boolean
+  allowedTenants: string[]
 }
 
 export function DashboardFilterBar({
@@ -28,6 +30,8 @@ export function DashboardFilterBar({
   refreshing,
   syncing,
   exporting,
+  isAdmin,
+  allowedTenants,
 }: DashboardFilterBarProps) {
   const [reportPeriodDays, setReportPeriodDays] = useState<ReportPeriodDays>(30)
 
@@ -46,15 +50,26 @@ export function DashboardFilterBar({
         </label>
         <label className="space-y-1.5">
           <span className="text-xs font-medium text-muted-foreground">Tenant</span>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden="true" />
-            <Input
-              className="pl-9"
-              placeholder="tenant_id"
+          {isAdmin ? (
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden="true" />
+              <Input
+                className="pl-9"
+                placeholder="tenant_id ou visão global autorizada"
+                value={filters.tenantId || ""}
+                onChange={(event) => onChange({ ...filters, tenantId: event.target.value })}
+              />
+            </div>
+          ) : (
+            <Select
               value={filters.tenantId || ""}
               onChange={(event) => onChange({ ...filters, tenantId: event.target.value })}
-            />
-          </div>
+            >
+              {allowedTenants.map((tenantId) => (
+                <option key={tenantId} value={tenantId}>{tenantId}</option>
+              ))}
+            </Select>
+          )}
         </label>
         <label className="space-y-1.5">
           <span className="text-xs font-medium text-muted-foreground">Assistant</span>
@@ -70,10 +85,12 @@ export function DashboardFilterBar({
           <RefreshCw className="h-4 w-4" aria-hidden="true" />
           Atualizar
         </Button>
-        <Button className="flex-1 lg:flex-none" disabled={syncing} onClick={onSync} type="button">
-          <Zap className="h-4 w-4" aria-hidden="true" />
-          Sync custos
-        </Button>
+        {isAdmin ? (
+          <Button className="flex-1 lg:flex-none" disabled={syncing} onClick={onSync} type="button">
+            <Zap className="h-4 w-4" aria-hidden="true" />
+            Sync custos
+          </Button>
+        ) : null}
       </div>
       <div className="flex items-end gap-2 border-t border-border pt-3 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
         <label className="min-w-28 space-y-1.5">

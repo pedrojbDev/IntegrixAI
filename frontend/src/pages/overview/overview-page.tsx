@@ -12,6 +12,7 @@ import { useDashboardPreferences } from "@/features/shared-dashboard/dashboard-p
 import { useOverviewQueries } from "@/hooks/use-dashboard-queries"
 import { useRefreshEvent } from "@/hooks/use-refresh-event"
 import {
+  formatCurrencyBRL,
   formatCurrencyUSD,
   formatDurationMs,
   formatDurationSeconds,
@@ -58,23 +59,33 @@ export function OverviewPage() {
   const successRate = rate(overview.kpis.successCalls, totalCalls)
   const handoffRate = rate(overview.kpis.handoffCalls, totalCalls)
   const failureRate = rate(overview.kpis.failedCalls, totalCalls)
-  const coverageRate = rate(costs.summary.callsWithCost, totalCalls)
+  const coverageRate = costs.summary.coveragePct
   const costPerMinute = costs.summary.totalDurationSeconds > 0
     ? costs.summary.totalCostUsd / (costs.summary.totalDurationSeconds / 60)
     : 0
+  const financialVisible = costs.visibility !== "hidden"
   return (
     <div className="space-y-4">
+      {costs.visibility === "admin_preview" ? (
+        <div className="rounded-md border border-warning/40 bg-warning/10 px-4 py-3 text-sm">
+          Prévia administrativa: custos v2 ainda não foram liberados para clientes.
+        </div>
+      ) : costs.visibility === "hidden" ? (
+        <div className="rounded-md border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+          Valores financeiros estão em reconciliação e ainda não foram liberados.
+        </div>
+      ) : null}
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <StatCard detail="Calls na janela atual" icon={Activity} label="Total de calls" value={formatNumberBR(totalCalls)} />
         <StatCard detail={`${formatNumberBR(overview.kpis.successCalls)} resolvidas`} icon={CheckCircle2} label="Resolução" tone="success" value={formatPercent(successRate)} />
         <StatCard detail={`${formatNumberBR(overview.kpis.handoffCalls)} transferências`} icon={PhoneForwarded} label="Handoff" tone={handoffRate >= 20 ? "warning" : "default"} value={formatPercent(handoffRate)} />
-        <StatCard detail={`${formatNumberBR(costs.summary.callsWithCost)} calls com custo`} icon={BadgeDollarSign} label="Custo total" value={formatCurrencyUSD(costs.summary.totalCostUsd)} />
+        <StatCard detail={`${formatNumberBR(costs.summary.callsWithCost)} calls Vapi com custo`} icon={BadgeDollarSign} label="Custo Vapi em USD" value={financialVisible ? formatCurrencyUSD(costs.summary.totalCostUsd) : "Oculto"} />
       </section>
 
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <StatCard detail={`${formatNumberBR(overview.kpis.failedCalls)} falhas`} label="Falha" tone={failureRate >= 10 ? "danger" : "default"} value={formatPercent(failureRate)} />
-        <StatCard detail="Calls com custo sincronizado" label="Cobertura de custo" tone={coverageRate < 80 && totalCalls > 0 ? "warning" : "default"} value={formatPercent(coverageRate)} />
-        <StatCard detail="Base nas chamadas sincronizadas" label="Custo médio por call" value={formatCurrencyUSD(costs.summary.avgCostPerCallUsd)} />
+        <StatCard detail={`${formatNumberBR(costs.summary.callsWithoutCost)} de ${formatNumberBR(costs.summary.vapiCalls)} sem custo`} label="Cobertura Vapi" tone={coverageRate < 80 && costs.summary.vapiCalls > 0 ? "warning" : "default"} value={formatPercent(coverageRate)} />
+        <StatCard detail={costs.fx.complete ? "PTAX histórica aplicada" : "Conversão parcial ou indisponível"} label="Custo em BRL" tone={costs.fx.complete ? "default" : "warning"} value={financialVisible ? formatCurrencyBRL(costs.summary.totalCostBrl) : "Oculto"} />
         <StatCard
           detail={`${formatNumberBR(costs.summary.callsWithDuration)} calls com duração | total ${formatDurationSeconds(costs.summary.totalDurationSeconds)}`}
           icon={Clock3}
@@ -105,17 +116,53 @@ export function OverviewPage() {
 
         <Card>
           <CardHeader>
-            <SectionHeader description="Gasto agregado por bucket sincronizado." title="Custo por período" />
+            <SectionHeader description="Custos reportados pela Vapi em USD e conversão PTAX em BRL." title="Custo por período" />
           </CardHeader>
           <CardContent>
-            {costs.series.length ? (
+            {financialVisible && costs.series.length ? (
               <ResponsiveLineChart
-                data={costs.series.map((point) => ({ ...point, cost: point.costUsd }))}
-                series={[{ key: "cost", label: "Custo", color: "hsl(var(--primary))", area: true }]}
+                data={costs.series.map((point) => ({ ...point, usd: point.costUsd, brl: point.costBrl }))}
+                series={[
+                  { key: "usd", label: "USD", color: "hsl(var(--primary))", area: true },
+                  { key: "brl", label: "BRL", color: "hsl(var(--success))" },
+                ]}
               />
             ) : (
               <EmptyState description="Nenhum custo sincronizado para os filtros atuais." title="Sem custos" />
             )}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[1.3fr_0.7fr]">
+        <Card>
+          <CardHeader>
+            <SectionHeader description="Composição normalizada do custo oficial retornado pela Vapi." title="Composição do custo" />
+          </CardHeader>
+          <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {financialVisible ? costs.breakdown.map((item) => (
+              <div className="rounded-md border border-border p-3" key={item.category}>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">{item.category}</p>
+                <p className="mt-2 font-mono text-base font-semibold">{formatCurrencyUSD(item.costUsd)}</p>
+                <p className="text-xs text-muted-foreground">{formatPercent(item.sharePct)} do total</p>
+              </div>
+            )) : <p className="text-sm text-muted-foreground">Composição oculta até a liberação financeira.</p>}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <SectionHeader description="Vínculo entre eventos internos e chamadas financeiras." title="Reconciliação" />
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <div className="flex justify-between gap-4"><span className="text-muted-foreground">Cobertura de vínculo</span><strong>{formatPercent(costs.reconciliation.linkageCoveragePct)}</strong></div>
+            <div className="flex justify-between gap-4"><span className="text-muted-foreground">Calls operacionais</span><strong>{formatNumberBR(costs.reconciliation.operationalCalls)}</strong></div>
+            <div className="flex justify-between gap-4"><span className="text-muted-foreground">Vinculadas à Vapi</span><strong>{formatNumberBR(costs.reconciliation.linkedOperationalCalls)}</strong></div>
+            <div className="flex justify-between gap-4"><span className="text-muted-foreground">Ajustes de componentes</span><strong>{formatNumberBR(costs.reconciliation.componentAdjustmentCalls)}</strong></div>
+            <div className="border-t border-border pt-3 text-xs text-muted-foreground">
+              PTAX mais recente: {costs.fx.lastRateDate || "indisponível"}
+              {costs.fx.provisionalCalls ? ` · ${costs.fx.provisionalCalls} conversões provisórias` : ""}
+              {costs.fx.missingRateCalls ? ` · ${costs.fx.missingRateCalls} sem conversão` : ""}
+            </div>
           </CardContent>
         </Card>
       </section>
@@ -166,7 +213,7 @@ export function OverviewPage() {
 
       <Card>
         <CardHeader>
-          <SectionHeader description="Performance, falha, handoff e custo por ferramenta." title="Desempenho por tool" />
+          <SectionHeader description="Performance, falha, handoff e duração por ferramenta. Custos não são atribuídos por tool." title="Desempenho por tool" />
         </CardHeader>
         <CardContent>
           {tools.length ? <ToolsTable items={tools} /> : <EmptyState description="Nenhuma tool encontrada para os filtros atuais." title="Sem tools" />}

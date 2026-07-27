@@ -13,6 +13,12 @@ const DiagnosticsPage = lazy(() =>
   import("@/pages/diagnostics/diagnostics-page").then((module) => ({ default: module.DiagnosticsPage })),
 )
 const AuditPage = lazy(() => import("@/pages/audit/audit-page").then((module) => ({ default: module.AuditPage })))
+const AdminUsersPage = lazy(() =>
+  import("@/pages/admin/admin-users-page").then((module) => ({ default: module.AdminUsersPage })),
+)
+const ChangePasswordPage = lazy(() =>
+  import("@/pages/login/change-password-page").then((module) => ({ default: module.ChangePasswordPage })),
+)
 const NotFoundPage = lazy(() => import("@/pages/not-found/not-found-page").then((module) => ({ default: module.NotFoundPage })))
 
 function RouteFallback() {
@@ -27,10 +33,12 @@ export function AppRouter() {
         <Routes>
           <Route element={<LoginPage />} path="/login" />
           <Route element={<ProtectedRoute />}>
+            <Route element={<ChangePasswordPage />} path="/change-password" />
             <Route element={<AppShell />}>
               <Route element={<OverviewPage />} index />
               <Route element={<DiagnosticsPage />} path="diagnostics" />
               <Route element={<AuditPage />} path="audit" />
+              <Route element={<AdminUsersPage />} path="admin/users" />
             </Route>
           </Route>
           <Route element={<NotFoundPage />} path="not-found" />

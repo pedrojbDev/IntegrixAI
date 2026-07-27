@@ -67,7 +67,7 @@ def _assistant_call_ids(
         return None
 
     stmt = select(VapiCallCost.call_id).where(
-        VapiCallCost.synced_at >= since,
+        VapiCallCost.started_at >= since,
         VapiCallCost.assistant_id == assistant_id,
     )
     if tenant_id:
@@ -248,8 +248,13 @@ def get_costs(
     assistant_id: str | None,
 ) -> dict[str, Any]:
     since, bucket_minutes = _resolve_window(window)
-
-    filters = [VapiCallCost.synced_at >= since]
+    until = datetime.now(timezone.utc)
+    filters = [
+        VapiCallCost.started_at >= since,
+        VapiCallCost.started_at < until,
+        VapiCallCost.tenant_id.is_not(None),
+        VapiCallCost.is_verified.is_(True),
+    ]
     if tenant_id:
         filters.append(VapiCallCost.tenant_id == tenant_id)
     if assistant_id:
@@ -257,16 +262,48 @@ def get_costs(
 
     summary = session.execute(
         select(
-            func.count(VapiCallCost.call_id).label("call_count"),
+            func.count(VapiCallCost.call_id).label("vapi_calls"),
+            func.count(VapiCallCost.cost_total_usd).label("calls_with_cost"),
             func.sum(VapiCallCost.cost_total_usd).label("total_cost_usd"),
+            func.sum(VapiCallCost.cost_total_brl).label("total_cost_brl"),
             func.count(VapiCallCost.duration_seconds).label("duration_count"),
             func.sum(VapiCallCost.duration_seconds).label("total_duration_seconds"),
             func.avg(VapiCallCost.duration_seconds).label("avg_duration_seconds"),
+            func.sum(
+                case(
+                    (
+                        and_(
+                            VapiCallCost.cost_total_usd.is_not(None),
+                            VapiCallCost.cost_total_brl.is_(None),
+                        ),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ).label("missing_rate_calls"),
+            func.sum(case((VapiCallCost.fx_is_provisional.is_(True), 1), else_=0)).label(
+                "provisional_calls"
+            ),
+            func.max(VapiCallCost.fx_rate_date).label("last_rate_date"),
         ).where(*filters)
     ).one()
-    call_count = int(summary.call_count or 0)
+    vapi_calls = int(summary.vapi_calls or 0)
+    calls_with_cost = int(summary.calls_with_cost or 0)
     total_cost_usd = round(float(summary.total_cost_usd or 0.0), 6)
-    avg_cost_per_call = round(total_cost_usd / call_count, 6) if call_count else 0.0
+    missing_rate_calls = int(summary.missing_rate_calls or 0)
+    total_cost_brl = (
+        round(float(summary.total_cost_brl or 0.0), 2)
+        if missing_rate_calls == 0
+        else None
+    )
+    avg_cost_per_call = (
+        round(total_cost_usd / calls_with_cost, 6) if calls_with_cost else 0.0
+    )
+    avg_cost_per_call_brl = (
+        round(total_cost_brl / calls_with_cost, 2)
+        if total_cost_brl is not None and calls_with_cost
+        else None
+    )
     duration_count = int(summary.duration_count or 0)
     total_duration_seconds = round(float(summary.total_duration_seconds or 0.0), 2)
     avg_duration_seconds = round(float(summary.avg_duration_seconds or 0.0), 2)
@@ -275,47 +312,163 @@ def get_costs(
             VapiCallCost.started_at,
             VapiCallCost.synced_at,
             VapiCallCost.cost_total_usd,
+            VapiCallCost.cost_total_brl,
             VapiCallCost.duration_seconds,
+            VapiCallCost.fx_is_provisional,
         )
         .where(*filters)
-        .order_by(VapiCallCost.synced_at.asc())
+        .order_by(VapiCallCost.started_at.asc())
     ).all()
 
     series_map: dict[str, dict[str, Any]] = defaultdict(
-        lambda: {"calls": 0, "cost_usd": 0.0, "duration_seconds": 0.0}
+        lambda: {
+            "calls": 0,
+            "cost_usd": 0.0,
+            "cost_brl": 0.0,
+            "missing_brl": 0,
+            "duration_seconds": 0.0,
+            "provisional_calls": 0,
+        }
     )
-    for started_at, synced_at, cost_total_usd, duration_seconds in rows:
+    for (
+        started_at,
+        synced_at,
+        cost_total_usd,
+        cost_total_brl,
+        duration_seconds,
+        fx_is_provisional,
+    ) in rows:
         point_time = _ensure_utc(started_at) or _ensure_utc(synced_at)
         if point_time is None:
             continue
         bucket = _floor_bucket(point_time, bucket_minutes).isoformat()
         series_map[bucket]["calls"] += 1
         series_map[bucket]["cost_usd"] += float(cost_total_usd or 0.0)
+        if cost_total_usd is not None and cost_total_brl is None:
+            series_map[bucket]["missing_brl"] += 1
+        else:
+            series_map[bucket]["cost_brl"] += float(cost_total_brl or 0.0)
         series_map[bucket]["duration_seconds"] += float(duration_seconds or 0.0)
+        series_map[bucket]["provisional_calls"] += int(bool(fx_is_provisional))
 
     series = [
         {
             "timestamp": timestamp,
             "calls": values["calls"],
             "cost_usd": round(values["cost_usd"], 6),
+            "cost_brl": (
+                None if values["missing_brl"] else round(values["cost_brl"], 2)
+            ),
             "duration_seconds": round(values["duration_seconds"], 2),
+            "provisional_calls": values["provisional_calls"],
         }
         for timestamp, values in sorted(series_map.items())
     ]
 
+    component_columns = {
+        "transport": VapiCallCost.cost_transport_usd,
+        "stt": VapiCallCost.cost_stt_usd,
+        "llm": VapiCallCost.cost_llm_usd,
+        "tts": VapiCallCost.cost_tts_usd,
+        "vapi": VapiCallCost.cost_vapi_usd,
+        "analysis": VapiCallCost.cost_analysis_usd,
+        "adjustment_and_other": VapiCallCost.cost_other_usd,
+    }
+    component_row = session.execute(
+        select(
+            *[
+                func.sum(column).label(name)
+                for name, column in component_columns.items()
+            ]
+        ).where(*filters)
+    ).one()
+    adjustment_calls = int(
+        session.execute(
+            select(func.count(VapiCallCost.call_id)).where(
+                *filters,
+                VapiCallCost.cost_other_usd.is_not(None),
+                VapiCallCost.cost_other_usd != 0,
+            )
+        ).scalar()
+        or 0
+    )
+    breakdown = []
+    for name in component_columns:
+        cost_usd = round(float(getattr(component_row, name) or 0.0), 6)
+        breakdown.append(
+            {
+                "category": name,
+                "cost_usd": cost_usd,
+                "share_pct": (
+                    round((cost_usd / total_cost_usd) * 100.0, 2)
+                    if total_cost_usd
+                    else 0.0
+                ),
+            }
+        )
+
+    event_filters = [CallEvent.created_at >= since, CallEvent.created_at < until]
+    if tenant_id:
+        event_filters.append(CallEvent.tenant_id == tenant_id)
+    operational_calls = int(
+        session.execute(
+            select(func.count(func.distinct(CallEvent.call_id))).where(*event_filters)
+        ).scalar()
+        or 0
+    )
+    cost_call_ids = select(VapiCallCost.call_id).where(*filters)
+    linked_operational_calls = int(
+        session.execute(
+            select(func.count(func.distinct(CallEvent.call_id))).where(
+                *event_filters,
+                CallEvent.call_id.in_(cost_call_ids),
+            )
+        ).scalar()
+        or 0
+    )
+
     return {
         "window": window,
         "since": since.isoformat(),
+        "until": until.isoformat(),
         "tenant_id": tenant_id,
         "assistant_id": assistant_id,
         "summary": {
             "total_cost_usd": total_cost_usd,
-            "calls_with_cost": call_count,
+            "total_cost_brl": total_cost_brl,
+            "vapi_calls": vapi_calls,
+            "calls_with_cost": calls_with_cost,
+            "calls_without_cost": max(0, vapi_calls - calls_with_cost),
+            "coverage_pct": (
+                round((calls_with_cost / vapi_calls) * 100.0, 2) if vapi_calls else 0.0
+            ),
             "avg_cost_per_call_usd": avg_cost_per_call,
+            "avg_cost_per_call_brl": avg_cost_per_call_brl,
             "calls_with_duration": duration_count,
             "total_duration_seconds": total_duration_seconds,
             "avg_duration_seconds": avg_duration_seconds,
         },
+        "fx": {
+            "source": "BCB_PTAX",
+            "basis": "closing_sale_rate_on_call_date",
+            "complete": missing_rate_calls == 0,
+            "provisional_calls": int(summary.provisional_calls or 0),
+            "missing_rate_calls": missing_rate_calls,
+            "last_rate_date": (
+                summary.last_rate_date.isoformat() if summary.last_rate_date else None
+            ),
+        },
+        "reconciliation": {
+            "operational_calls": operational_calls,
+            "linked_operational_calls": linked_operational_calls,
+            "linkage_coverage_pct": (
+                round((linked_operational_calls / operational_calls) * 100.0, 2)
+                if operational_calls
+                else 0.0
+            ),
+            "component_adjustment_calls": adjustment_calls,
+        },
+        "breakdown": breakdown,
         "series": series,
     }
 
@@ -365,41 +518,11 @@ def get_tools(
         .group_by(CallEvent.tool_name)
     )
 
-    distinct_call_tool = (
-        select(
-            CallEvent.tenant_id.label("tenant_id"),
-            CallEvent.tool_name.label("tool_name"),
-            CallEvent.call_id.label("call_id"),
-        )
-        .where(*filters)
-        .distinct()
-        .subquery()
-    )
-    costs_stmt = (
-        select(
-            distinct_call_tool.c.tool_name,
-            func.sum(VapiCallCost.cost_total_usd).label("total_cost_usd"),
-        )
-        .join(
-            VapiCallCost,
-            and_(
-                VapiCallCost.call_id == distinct_call_tool.c.call_id,
-                VapiCallCost.tenant_id == distinct_call_tool.c.tenant_id,
-            ),
-        )
-        .group_by(distinct_call_tool.c.tool_name)
-    )
-    costs_by_tool = {
-        tool_name or "unknown": float(total_cost_usd or 0.0)
-        for tool_name, total_cost_usd in session.execute(costs_stmt).all()
-    }
-
     tools: list[dict[str, Any]] = []
     for item in session.execute(summary_stmt).all():
         tool_name = item.tool_name or "unknown"
         total_calls = int(item.total_calls or 0)
         unique_calls = int(item.unique_calls or 0)
-        tool_cost = round(costs_by_tool.get(tool_name, 0.0), 6)
         avg_duration = round(float(item.avg_duration_ms or 0.0), 2)
         failure_rate = (
             round((int(item.failed_calls or 0) / total_calls) * 100.0, 2)
@@ -416,8 +539,6 @@ def get_tools(
                 "avg_duration_ms": avg_duration,
                 "failure_rate_pct": failure_rate,
                 "unique_calls": unique_calls,
-                "total_cost_usd": tool_cost,
-                "avg_cost_per_call_usd": round(tool_cost / unique_calls, 6) if unique_calls else 0.0,
             }
         )
 
@@ -434,7 +555,11 @@ def get_tools(
 def _sync_snapshot(session: Session) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     state = session.get(OpsSyncState, "vapi_costs")
-    last_synced_at = _ensure_utc(state.last_synced_at) if state and state.last_synced_at else None
+    last_synced_at = (
+        _ensure_utc(state.last_successful_run_at)
+        if state and state.last_successful_run_at
+        else (_ensure_utc(state.last_synced_at) if state and state.last_synced_at else None)
+    )
     freshness_seconds = (
         int((now - last_synced_at).total_seconds()) if last_synced_at is not None else None
     )
@@ -450,6 +575,9 @@ def _sync_snapshot(session: Session) -> dict[str, Any]:
         "last_synced_at": last_synced_at.isoformat() if last_synced_at is not None else None,
         "freshness_seconds": freshness_seconds,
         "freshness_state": freshness_state,
+        "last_error": state.last_error if state else None,
+        "consecutive_failures": int(state.consecutive_failures or 0) if state else 0,
+        "last_run_stats": state.last_run_stats_json if state else None,
     }
 
 
@@ -517,9 +645,7 @@ def get_health(
     handoff_rate = (
         round((int(overview["kpis"]["handoff_calls"]) / total_calls) * 100.0, 2) if total_calls else 0.0
     )
-    coverage_pct = (
-        round((int(costs["summary"]["calls_with_cost"]) / total_calls) * 100.0, 2) if total_calls else 0.0
-    )
+    coverage_pct = float(costs["summary"]["coverage_pct"])
 
     if total_calls == 0:
         health_state = "no_data"
@@ -561,9 +687,11 @@ def get_health(
         "sync": sync,
         "counters": {
             "total_calls": total_calls,
+            "vapi_calls": int(costs["summary"]["vapi_calls"]),
             "failed_calls": int(overview["kpis"]["failed_calls"]),
             "handoff_calls": int(overview["kpis"]["handoff_calls"]),
             "calls_with_cost": int(costs["summary"]["calls_with_cost"]),
+            "calls_without_cost": int(costs["summary"]["calls_without_cost"]),
             "repeated_business_errors": repeated_business_errors,
             "idempotency_hits": idempotency_hits,
             "coverage_pct": coverage_pct,

@@ -60,6 +60,10 @@ VAPI_API_KEY
 
 Use `ENVIRONMENT=production`, `DB_ENABLED=true`, `DATA_MODE=external_api` e `AUDIT_WRITE_MODE=async`.
 
+`OPS_DASHBOARD_TOKEN` e somente o segredo de bootstrap inicial. Ele nao deve ser
+distribuido a clientes e nao autentica o dashboard depois da criacao do
+primeiro administrador.
+
 ### Relatório diário por e-mail
 
 Para habilitar o envio automático às 07:00 de Brasília, preencha no
@@ -76,6 +80,8 @@ Voce nao precisa editar `deploy/Caddyfile` para o caso padrao. O Caddy usa `DOMA
 
 ## 5. Subir Serviços
 
+Na primeira instalacao:
+
 ```bash
 docker compose -f docker-compose.production.yml --env-file .env.production up -d --build
 ```
@@ -85,6 +91,31 @@ Aplicar migrations:
 ```bash
 docker compose -f docker-compose.production.yml --env-file .env.production exec app alembic upgrade head
 ```
+
+Em uma instalacao existente, construa a nova imagem e aplique a migration em um
+container temporario antes de substituir a API em execucao:
+
+```bash
+docker compose -f docker-compose.production.yml --env-file .env.production build app
+docker compose -f docker-compose.production.yml --env-file .env.production run --rm app alembic upgrade head
+docker compose -f docker-compose.production.yml --env-file .env.production up -d --no-deps app
+```
+
+Abra `/dashboard`, escolha **Configuracao inicial** e crie o primeiro
+administrador usando `OPS_DASHBOARD_TOKEN`. O primeiro sync administrativo faz
+o backfill de 90 dias; mantenha o custo v2 restrito a administradores ate
+reconciliar um dia e sete dias contra a Vapi.
+
+Use o reconciliador no container para conferir um periodo conhecido (a data
+final e exclusiva):
+
+```bash
+docker compose -f docker-compose.production.yml --env-file .env.production exec app python scripts/reconcile_vapi_costs.py --start 2026-07-01 --end 2026-07-02 --tenant-id tenant_demo
+```
+
+Quando contagens, USD e BRL passarem nos criterios, defina
+`OPS_COST_V2_ENABLED=true` e recrie o servico `app`. Em regressao financeira,
+volte a flag para `false`; os dados brutos permanecem para reprocessamento.
 
 ## 6. Validar
 
@@ -97,7 +128,7 @@ curl -fsS https://api.seudominio.com/health
 Smoke remoto a partir da sua máquina local:
 
 ```powershell
-.\venv\Scripts\python.exe scripts\smoke_local.py --base-url https://api.seudominio.com --tenant-id tenant_demo --to-number +5511999999999 --webhook-secret "<WEBHOOK_SECRET>" --ops-token "<OPS_DASHBOARD_TOKEN>" --load-calls 20 --load-workers 5
+.\venv\Scripts\python.exe scripts\smoke_local.py --base-url https://api.seudominio.com --tenant-id tenant_demo --to-number +5511999999999 --webhook-secret "<WEBHOOK_SECRET>" --ops-email "<ADMIN_EMAIL>" --ops-password "<ADMIN_PASSWORD>" --load-calls 20 --load-workers 5
 ```
 
 ## 7. Configurar Vapi
@@ -154,5 +185,7 @@ docker compose -f docker-compose.production.yml --env-file .env.production exec 
 - `alembic upgrade head` executado sem erro.
 - Smoke remoto passa.
 - Dashboard abre via `https://api.seudominio.com/dashboard`.
+- Sync automatico aparece atual, cobertura de custo e PTAX foram reconciliadas.
+- Um cliente de teste nao consegue consultar tenant fora de seu membership.
 - Vapi envia `x-webhook-secret`.
 - Logs não mostram `webhook_unauthorized`, `tenant_resolution_rejected` ou `UPSTREAM_503` em chamadas válidas.

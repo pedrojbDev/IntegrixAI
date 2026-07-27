@@ -82,6 +82,15 @@ class Settings(BaseSettings):
     ops_token_header: str = "x-ops-token"
     ops_cost_sync_page_size: int = 100
     ops_cost_sync_lookback_minutes: int = 60
+    ops_cost_sync_enabled: bool = True
+    ops_cost_v2_enabled: bool = False
+    ops_cost_sync_interval_seconds: int = 300
+    ops_cost_sync_overlap_minutes: int = 10
+    ops_cost_backfill_days: int = 90
+    ops_session_max_age_seconds: int = 28800
+    ops_login_max_attempts: int = 5
+    ops_login_window_minutes: int = 15
+    ptax_base_url: str = "https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata"
     daily_report_enabled: bool = False
     daily_report_recipients: str = ""
     daily_report_tenant_id: str | None = None
@@ -205,12 +214,42 @@ class Settings(BaseSettings):
     @field_validator("ops_cost_sync_page_size")
     @classmethod
     def clamp_ops_cost_sync_page_size(cls, value: int) -> int:
-        return max(1, min(200, value))
+        return max(1, min(1000, value))
 
     @field_validator("ops_cost_sync_lookback_minutes")
     @classmethod
     def clamp_ops_cost_sync_lookback_minutes(cls, value: int) -> int:
         return max(1, min(10080, value))
+
+    @field_validator("ops_cost_sync_interval_seconds")
+    @classmethod
+    def clamp_ops_cost_sync_interval_seconds(cls, value: int) -> int:
+        return max(60, min(3600, value))
+
+    @field_validator("ops_cost_sync_overlap_minutes")
+    @classmethod
+    def clamp_ops_cost_sync_overlap_minutes(cls, value: int) -> int:
+        return max(1, min(1440, value))
+
+    @field_validator("ops_cost_backfill_days")
+    @classmethod
+    def clamp_ops_cost_backfill_days(cls, value: int) -> int:
+        return max(1, min(365, value))
+
+    @field_validator("ops_session_max_age_seconds")
+    @classmethod
+    def clamp_ops_session_max_age_seconds(cls, value: int) -> int:
+        return max(900, min(86400, value))
+
+    @field_validator("ops_login_max_attempts")
+    @classmethod
+    def clamp_ops_login_max_attempts(cls, value: int) -> int:
+        return max(3, min(20, value))
+
+    @field_validator("ops_login_window_minutes")
+    @classmethod
+    def clamp_ops_login_window_minutes(cls, value: int) -> int:
+        return max(1, min(60, value))
 
     @field_validator("daily_report_period_days")
     @classmethod

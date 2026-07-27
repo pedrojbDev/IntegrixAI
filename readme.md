@@ -32,10 +32,10 @@ Hoje o repositorio contem cinco blocos principais:
 
 A aplicacao tambem expoe uma console operacional em `/dashboard` com:
 
-- login por token ops
-- sessao HttpOnly em cookie
-- visoes de overview, custo, auditoria, diagnostico e resiliencia
-- sync manual de custos da Vapi
+- login por email e senha com sessao opaca HttpOnly e CSRF
+- usuarios administradores e clientes com memberships multi-tenant
+- visoes de overview, custos USD/BRL, auditoria, diagnostico e resiliencia
+- sync automatico a cada cinco minutos e sync manual administrativo
 - filtros por `tenant_id` e `assistant_id`
 
 ## Arquitetura
@@ -121,7 +121,9 @@ Quando `DB_ENABLED=true`, o sistema usa estas tabelas:
 
 - `call_events`: trilha de auditoria operacional por chamada/tool/evento
 - `vapi_call_costs`: custos sincronizados da Vapi
-- `ops_sync_state`: cursor da ultima sincronizacao de custos
+- `exchange_rates`: PTAX de venda historica USD/BRL
+- `ops_sync_state`: cursor, sucesso e diagnostico das sincronizacoes
+- `ops_users`, `ops_user_tenants`, `ops_sessions`, `ops_auth_events`: identidade e auditoria ops
 - `tool_invocation_results`: cache de idempotencia por `tenant_id + call_id + tool_call_id`
 - `tool_business_error_attempts`: contagem de repeticao de erros de negocio por escopo
 
@@ -130,6 +132,8 @@ As migrations atuais vao ate:
 - `0001_create_call_events`
 - `0002_add_vapi_cost_tables`
 - `0003_add_high_volume_indexes`
+- `0004_add_tool_idempotency`
+- `0005_ops_financial_auth_v2`
 - `0004_add_tool_idempotency`
 
 ## Variaveis de ambiente
@@ -163,6 +167,8 @@ As configuracoes sao carregadas de `.env`.
 |---|---:|---|
 | `DEFAULT_TENANT` | `demo` | tenant fallback |
 | `TENANT_MAP` | `{}` | JSON DID -> tenant |
+| `TENANT_ASSISTANT_MAP` | `{}` | JSON `assistant_id` Vapi -> tenant |
+| `TENANT_PHONE_NUMBER_MAP` | `{}` | JSON `phone_number_id` Vapi -> tenant |
 | `DEFAULT_TENANT_IMPLEMENTATION` | `pbsaude` | implementacao padrao |
 | `TENANT_IMPLEMENTATION_MAP` | `{}` | override tenant -> implementacao |
 
@@ -172,9 +178,11 @@ As configuracoes sao carregadas de `.env`.
 |---|---:|---|
 | `WEBHOOK_SECRET` | vazio | segredo do webhook `/tools` |
 | `WEBHOOK_SECRET_HEADER` | `x-webhook-secret` | header do segredo |
-| `OPS_DASHBOARD_TOKEN` | vazio | token de acesso ops |
-| `OPS_TOKEN_HEADER` | `x-ops-token` | header do token ops |
-| `OPS_ALLOW_GLOBAL_QUERIES` | `false` | em producao, permite consultas ops sem `tenant_id` |
+| `OPS_DASHBOARD_TOKEN` | vazio | segredo usado somente no primeiro `POST /ops/bootstrap` |
+| `OPS_SESSION_MAX_AGE_SECONDS` | `28800` | expiracao da sessao opaca |
+| `OPS_LOGIN_MAX_ATTEMPTS` | `5` | tentativas na janela compartilhada do PostgreSQL |
+| `OPS_LOGIN_WINDOW_MINUTES` | `15` | janela do rate limit de login |
+| `OPS_ALLOW_GLOBAL_QUERIES` | `false` | permite visao global apenas a `platform_admin` |
 
 ### Auditoria e retention
 
@@ -229,7 +237,12 @@ As configuracoes sao carregadas de `.env`.
 | `VAPI_BASE_URL` | `https://api.vapi.ai` | base da Vapi |
 | `VAPI_CALLS_PATH` | `/call` | endpoint de chamadas |
 | `OPS_COST_SYNC_PAGE_SIZE` | `100` | pagina do sync |
-| `OPS_COST_SYNC_LOOKBACK_MINUTES` | `60` | lookback inicial |
+| `OPS_COST_SYNC_ENABLED` | `true` | habilita job interno |
+| `OPS_COST_V2_ENABLED` | `false` | libera valores financeiros para clientes apos reconciliacao |
+| `OPS_COST_SYNC_INTERVAL_SECONDS` | `300` | intervalo automatico |
+| `OPS_COST_SYNC_OVERLAP_MINUTES` | `10` | sobreposicao incremental por `updatedAt` |
+| `OPS_COST_BACKFILL_DAYS` | `90` | backfill inicial por `createdAt` |
+| `PTAX_BASE_URL` | BCB Olinda | fonte oficial da PTAX de venda |
 
 ### Relatório diário por e-mail
 
@@ -361,8 +374,13 @@ alembic upgrade head
 ### Ops protegidos
 
 - `POST /ops/session`
+- `POST /ops/bootstrap`
+- `POST /ops/session/password`
 - `GET /ops/session`
 - `DELETE /ops/session`
+- `GET|POST /ops/admin/users`
+- `PATCH /ops/admin/users/{user_id}`
+- `POST /ops/admin/users/{user_id}/reset-password`
 - `GET /ops/baseline`
 - `GET /ops/audit/recent`
 - `GET /ops/audit/summary`
@@ -530,9 +548,11 @@ Retorna:
 
 Retorna:
 
-- custo total USD
-- media por chamada
-- serie temporal de custo
+- custo total e medio em USD e BRL
+- chamadas Vapi com e sem custo e cobertura financeira
+- duracao, composicao normalizada e ajuste de reconciliacao
+- estado PTAX, conversoes provisorias e ausentes
+- serie temporal USD e BRL baseada em `started_at`
 
 ### `GET /ops/dashboard/tools`
 
@@ -541,7 +561,9 @@ Retorna:
 - volume por tool
 - taxa de falha
 - handoff por tool
-- custo total e medio por tool
+- duracao media por tool
+
+Custos nao sao atribuidos por tool.
 
 ### `GET /ops/dashboard/health`
 
@@ -578,31 +600,26 @@ Expoe:
 `POST /ops/session` recebe:
 
 ```json
-{ "token": "..." }
+{ "email": "admin@example.com", "password": "..." }
 ```
 
-Se o token bater com `OPS_DASHBOARD_TOKEN`, o backend define o cookie:
+A sessao opaca aleatoria e armazenada no banco somente como hash. O backend
+define o cookie:
 
 - `integrix_ops_session`
 - `HttpOnly`
 - `SameSite=lax`
 - `Secure` em producao
 
-### Rate limit
-
-O endpoint de sessao aplica limitador simples em memoria por IP:
-
-- janela de 60 segundos
-- maximo de 10 tentativas
+Mutacoes validam origem e `x-csrf-token`. Logout, troca/reset de senha,
+desativacao e mudanca de memberships revogam sessoes. O rate limit de login usa
+eventos persistidos no PostgreSQL, portanto vale entre todos os workers.
 
 ### Dashboard bootstrap
 
-`/dashboard?token=...` so e aceito fora de producao.
-
-Em producao:
-
-- query token e rejeitado com `401`
-- use login da SPA ou header ops
+`POST /ops/bootstrap` usa `OPS_DASHBOARD_TOKEN` para criar o primeiro
+`platform_admin` somente quando nenhum administrador existe. Depois disso o
+token nao autentica rotas, headers nem query strings.
 
 ## Search providers
 
@@ -765,4 +782,4 @@ python scripts\smoke_local.py --base-url http://127.0.0.1:8000
 8. Validar `GET /health`.
 9. Rodar `python -m unittest discover -s tests`.
 10. Rodar `python scripts\smoke_local.py`.
-11. Acessar `/dashboard` e autenticar via token ops.
+11. Acessar `/dashboard`, criar o primeiro administrador e autenticar por email e senha.

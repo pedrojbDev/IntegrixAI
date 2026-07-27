@@ -19,7 +19,7 @@ type SeriesConfig = {
 }
 
 type ResponsiveLineChartProps = {
-  data: Array<Record<string, string | number>>
+  data: Array<Record<string, string | number | null>>
   series: SeriesConfig[]
 }
 

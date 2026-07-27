@@ -1,6 +1,21 @@
 export type WindowKey = "15m" | "1h" | "24h" | "7d"
 export type ReportPeriodDays = 7 | 15 | 30 | 90
 export type HealthState = "stable" | "warning" | "critical" | "no_data" | string
+export type OpsRole = "platform_admin" | "tenant_user"
+
+export type SessionPrincipal = {
+  id: string
+  email: string
+  role: OpsRole
+  tenantIds: string[]
+  mustChangePassword: boolean
+}
+
+export type OpsUser = SessionPrincipal & {
+  isActive: boolean
+  createdAt: string
+  updatedAt: string
+}
 
 export type DashboardFilters = {
   window: WindowKey
@@ -22,12 +37,25 @@ export type Health = {
     lastSyncedAt: string | null
     freshnessSeconds: number | null
     freshnessState: string
+    lastError: string | null
+    consecutiveFailures: number
+    lastRunStats: {
+      processed: number
+      created: number
+      updated: number
+      missingCost: number
+      unresolvedTenant: number
+      missingFx: number
+      errors: number
+    } | null
   }
   counters: {
     totalCalls: number
+    vapiCalls: number
     failedCalls: number
     handoffCalls: number
     callsWithCost: number
+    callsWithoutCost: number
     repeatedBusinessErrors: number
     idempotencyHits: number
     coveragePct: number
@@ -53,10 +81,16 @@ export type Overview = {
 }
 
 export type Costs = {
+  visibility: "enabled" | "admin_preview" | "hidden"
   summary: {
     totalCostUsd: number
+    totalCostBrl: number | null
+    vapiCalls: number
     callsWithCost: number
+    callsWithoutCost: number
+    coveragePct: number
     avgCostPerCallUsd: number
+    avgCostPerCallBrl: number | null
     callsWithDuration: number
     totalDurationSeconds: number
     avgDurationSeconds: number
@@ -65,7 +99,27 @@ export type Costs = {
     timestamp: string
     calls: number
     costUsd: number
+    costBrl: number | null
     durationSeconds: number
+    provisionalCalls: number
+  }>
+  fx: {
+    source: string
+    complete: boolean
+    provisionalCalls: number
+    missingRateCalls: number
+    lastRateDate: string | null
+  }
+  reconciliation: {
+    operationalCalls: number
+    linkedOperationalCalls: number
+    linkageCoveragePct: number
+    componentAdjustmentCalls: number
+  }
+  breakdown: Array<{
+    category: string
+    costUsd: number
+    sharePct: number
   }>
 }
 
@@ -78,8 +132,6 @@ export type ToolPerformance = {
   avgDurationMs: number
   failureRatePct: number
   uniqueCalls: number
-  totalCostUsd: number
-  avgCostPerCallUsd: number
 }
 
 export type Resilience = {
@@ -139,5 +191,11 @@ export type CostSyncResult = {
   result: {
     processed: number
     created: number
+    updated: number
+    missingCost: number
+    unresolvedTenant: number
+    missingFx: number
+    errors: number
+    locked: boolean
   }
 }

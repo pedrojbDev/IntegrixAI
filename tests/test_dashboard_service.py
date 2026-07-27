@@ -1,14 +1,17 @@
 import unittest
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.core.ops.dashboard_service import get_costs, get_health, get_resilience
+from app.core.ops.dashboard_service import get_costs, get_health, get_resilience, get_tools
 from app.core.ops.report_service import build_operational_report_pdf
 from app.db import Base
 from app.models.call_event import CallEvent
+from app.models.exchange_rate import ExchangeRate
 from app.models.ops_sync_state import OpsSyncState
 from app.models.tool_invocation import ToolBusinessErrorAttempt
 from app.models.vapi_call_cost import VapiCallCost
@@ -181,6 +184,143 @@ class DashboardServiceTests(unittest.TestCase):
 
         self.assertTrue(report_pdf.startswith(b"%PDF-"))
         self.assertGreater(len(report_pdf), 1_000)
+
+    def test_cost_window_uses_started_at_and_preserves_null_vs_zero(self) -> None:
+        session_local = self._session_local()
+        now = datetime.now(timezone.utc)
+        with session_local() as session:
+            session.add_all(
+                [
+                    VapiCallCost(
+                        call_id="missing",
+                        tenant_id="tenant_a",
+                        started_at=now - timedelta(minutes=10),
+                        cost_total_usd=None,
+                        synced_at=now - timedelta(days=20),
+                        is_verified=True,
+                    ),
+                    VapiCallCost(
+                        call_id="zero",
+                        tenant_id="tenant_a",
+                        started_at=now - timedelta(minutes=9),
+                        cost_total_usd=Decimal("0"),
+                        cost_total_brl=Decimal("0"),
+                        synced_at=now - timedelta(days=20),
+                        is_verified=True,
+                    ),
+                    VapiCallCost(
+                        call_id="old-call-synced-now",
+                        tenant_id="tenant_a",
+                        started_at=now - timedelta(days=2),
+                        cost_total_usd=Decimal("99"),
+                        synced_at=now,
+                        is_verified=True,
+                    ),
+                    VapiCallCost(
+                        call_id="other-tenant",
+                        tenant_id="tenant_b",
+                        started_at=now - timedelta(minutes=8),
+                        cost_total_usd=Decimal("50"),
+                        synced_at=now,
+                        is_verified=True,
+                    ),
+                    VapiCallCost(
+                        call_id="quarantine",
+                        tenant_id=None,
+                        started_at=now - timedelta(minutes=7),
+                        cost_total_usd=Decimal("50"),
+                        synced_at=now,
+                        is_verified=True,
+                    ),
+                    VapiCallCost(
+                        call_id="legacy-unverified",
+                        tenant_id="tenant_a",
+                        started_at=now - timedelta(minutes=6),
+                        cost_total_usd=Decimal("50"),
+                        synced_at=now,
+                        is_verified=False,
+                    ),
+                ]
+            )
+            session.commit()
+            costs = get_costs(
+                session,
+                window="24h",
+                tenant_id="tenant_a",
+                assistant_id=None,
+            )
+
+        self.assertEqual(2, costs["summary"]["vapi_calls"])
+        self.assertEqual(1, costs["summary"]["calls_with_cost"])
+        self.assertEqual(1, costs["summary"]["calls_without_cost"])
+        self.assertEqual(50.0, costs["summary"]["coverage_pct"])
+        self.assertEqual(0.0, costs["summary"]["total_cost_usd"])
+
+    def test_ptax_conversion_and_tool_metrics_remain_separate(self) -> None:
+        session_local = self._session_local()
+        now = datetime.now(timezone.utc)
+        call_date = now.astimezone(ZoneInfo("America/Sao_Paulo")).date()
+        with session_local() as session:
+            session.add(
+                ExchangeRate(
+                    rate_date=call_date,
+                    base_currency="USD",
+                    quote_currency="BRL",
+                    sale_rate=Decimal("5.12345678"),
+                    source="BCB_PTAX",
+                    is_provisional=False,
+                )
+            )
+            session.add(
+                VapiCallCost(
+                    call_id="financial-call",
+                    tenant_id="tenant_a",
+                    started_at=now - timedelta(minutes=10),
+                    cost_total_usd=Decimal("1.20000000"),
+                    cost_total_brl=Decimal("6.14814814"),
+                    usd_brl_rate=Decimal("5.12345678"),
+                    fx_rate_date=call_date,
+                    cost_transport_usd=Decimal("0.2"),
+                    cost_llm_usd=Decimal("0.8"),
+                    cost_other_usd=Decimal("0.2"),
+                    synced_at=now,
+                    is_verified=True,
+                )
+            )
+            session.add(
+                CallEvent(
+                    tenant_id="tenant_a",
+                    call_id="financial-call",
+                    tool_call_id="tc_financial",
+                    tool_name="search_providers",
+                    event_type="tool_completed",
+                    final_state="RESOLVIDA_AUTOMATICO",
+                    ok=True,
+                    duration_ms=900,
+                    error_code=None,
+                    payload_masked={},
+                    created_at=now - timedelta(minutes=9),
+                )
+            )
+            session.commit()
+            costs = get_costs(
+                session,
+                window="24h",
+                tenant_id="tenant_a",
+                assistant_id=None,
+            )
+            tools = get_tools(
+                session,
+                window="24h",
+                tenant_id="tenant_a",
+                assistant_id=None,
+            )
+
+        self.assertEqual(6.15, costs["summary"]["total_cost_brl"])
+        self.assertEqual(1, costs["reconciliation"]["component_adjustment_calls"])
+        self.assertEqual(100.0, costs["reconciliation"]["linkage_coverage_pct"])
+        self.assertNotIn("total_cost_usd", tools["items"][0])
+        self.assertNotIn("avg_cost_per_call_usd", tools["items"][0])
 
 
 if __name__ == "__main__":

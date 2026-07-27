@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { formatCurrencyUSD, formatDurationMs, formatNumberBR, formatPercent } from "@/lib/format"
+import { formatDurationMs, formatNumberBR, formatPercent } from "@/lib/format"
 import type { ToolPerformance } from "@/types/dashboard"
 
 export function ToolsTable({ items }: { items: ToolPerformance[] }) {
@@ -14,7 +14,6 @@ export function ToolsTable({ items }: { items: ToolPerformance[] }) {
           <TableHead>Falha</TableHead>
           <TableHead>Handoff</TableHead>
           <TableHead>Tempo tool</TableHead>
-          <TableHead>Custo USD</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -34,7 +33,6 @@ export function ToolsTable({ items }: { items: ToolPerformance[] }) {
               </TableCell>
               <TableCell className="font-mono">{formatNumberBR(item.handoffCalls)}</TableCell>
               <TableCell className="font-mono">{formatDurationMs(item.avgDurationMs)}</TableCell>
-              <TableCell className="font-mono">{formatCurrencyUSD(item.totalCostUsd)}</TableCell>
             </TableRow>
           )
         })}

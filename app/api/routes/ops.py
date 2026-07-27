@@ -14,13 +14,20 @@ from ...core.ops.dashboard_service import (
     get_tools,
 )
 from ...core.ops.report_service import build_operational_report_pdf
-from ...core.security.ops import require_ops_token
+from ...core.security.ops import (
+    OpsPrincipal,
+    authorize_tenant_scope,
+    record_auth_event,
+    require_csrf,
+    require_platform_admin,
+    require_ready_principal,
+)
 from ...db import SessionLocal
 from ...logging import get_logger
 from ...models.call_event import CallEvent
 from ...models.vapi_call_cost import VapiCallCost
 
-router = APIRouter(prefix="/ops", tags=["ops"], dependencies=[Depends(require_ops_token)])
+router = APIRouter(prefix="/ops", tags=["ops"])
 log = get_logger()
 
 
@@ -32,12 +39,38 @@ def _assert_db_enabled(settings: Settings) -> None:
         )
 
 
-def _assert_tenant_scope(settings: Settings, tenant_id: str | None) -> None:
-    if settings.is_production and not settings.ops_allow_global_queries and not tenant_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="tenant_id obrigatorio em producao",
+def _authorized_tenant(
+    principal: OpsPrincipal,
+    settings: Settings,
+    tenant_id: str | None,
+) -> str | None:
+    try:
+        resolved = authorize_tenant_scope(principal, tenant_id, settings)
+    except HTTPException:
+        log.warning(
+            "ops_authorization_denied",
+            event_type="ops_authorization",
+            principal_id=principal.id,
+            requested_tenant_id=tenant_id,
         )
+        raise
+    log.info(
+        "ops_authorization_granted",
+        event_type="ops_authorization",
+        principal_id=principal.id,
+        tenant_id=resolved,
+        global_scope=resolved is None,
+    )
+    return resolved
+
+
+def _admin_mutation(
+    admin: OpsPrincipal = Depends(require_platform_admin),
+    csrf: OpsPrincipal = Depends(require_csrf),
+) -> OpsPrincipal:
+    if admin.id != csrf.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Principal mismatch")
+    return admin
 
 
 def _assistant_call_ids_for_filter(
@@ -54,13 +87,13 @@ def _assistant_call_ids_for_filter(
     if tenant_id:
         stmt = stmt.where(VapiCallCost.tenant_id == tenant_id)
     if since is not None:
-        stmt = stmt.where(VapiCallCost.synced_at >= since)
+        stmt = stmt.where(VapiCallCost.started_at >= since)
     rows = session.execute(stmt).scalars().all()
     return {row for row in rows if row}
 
 
 @router.get("/baseline")
-async def baseline_metrics():
+async def baseline_metrics(_: OpsPrincipal = Depends(require_platform_admin)):
     return metrics_store.snapshot()
 
 
@@ -75,9 +108,10 @@ async def recent_audit_events(
     ok: bool | None = Query(default=None),
     event_type: str | None = Query(default=None),
     settings: Settings = Depends(get_settings),
+    principal: OpsPrincipal = Depends(require_ready_principal),
 ):
     _assert_db_enabled(settings)
-    _assert_tenant_scope(settings, tenant_id)
+    tenant_id = _authorized_tenant(principal, settings, tenant_id)
 
     session = SessionLocal()
     try:
@@ -135,9 +169,10 @@ async def audit_summary(
     tenant_id: str | None = Query(default=None),
     assistant_id: str | None = Query(default=None),
     settings: Settings = Depends(get_settings),
+    principal: OpsPrincipal = Depends(require_ready_principal),
 ):
     _assert_db_enabled(settings)
-    _assert_tenant_scope(settings, tenant_id)
+    tenant_id = _authorized_tenant(principal, settings, tenant_id)
 
     session = SessionLocal()
     try:
@@ -226,15 +261,32 @@ async def audit_summary(
 
 
 @router.post("/costs/sync")
-async def sync_vapi_costs(settings: Settings = Depends(get_settings)):
-    # TODO: add CSRF protection if the ops dashboard becomes externally exposed.
+async def sync_vapi_costs(
+    settings: Settings = Depends(get_settings),
+    admin: OpsPrincipal = Depends(_admin_mutation),
+):
     _assert_db_enabled(settings)
     session = SessionLocal()
     try:
         result = VapiCostSyncService(settings).sync(session)
+        record_auth_event(
+            session,
+            event_type="cost_sync_requested",
+            success=True,
+            user_id=admin.id,
+            details={"processed": result.get("processed", 0)},
+        )
+        session.commit()
         log.info("ops_cost_sync_completed", event_type="ops_cost_sync", **result)
         return {"ok": True, "result": result}
     except Exception as exc:
+        record_auth_event(
+            session,
+            event_type="cost_sync_requested",
+            success=False,
+            user_id=admin.id,
+        )
+        session.commit()
         log.error("ops_cost_sync_failed", event_type="error", message=str(exc))
         raise HTTPException(status_code=502, detail=str(exc))
     finally:
@@ -247,10 +299,11 @@ async def download_operational_report(
     tenant_id: str | None = Query(default=None),
     assistant_id: str | None = Query(default=None),
     settings: Settings = Depends(get_settings),
+    principal: OpsPrincipal = Depends(require_ready_principal),
 ):
     """Export tenant-scoped operational aggregates as a PDF report."""
     _assert_db_enabled(settings)
-    _assert_tenant_scope(settings, tenant_id)
+    tenant_id = _authorized_tenant(principal, settings, tenant_id)
     if period_days not in {7, 15, 30, 90}:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -258,12 +311,26 @@ async def download_operational_report(
         )
     session = SessionLocal()
     try:
+        if not settings.ops_cost_v2_enabled and not principal.is_platform_admin:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Financial report is not enabled",
+            )
         report_pdf = build_operational_report_pdf(
             session,
             period_days=period_days,
             tenant_id=tenant_id,
             assistant_id=assistant_id,
         )
+        record_auth_event(
+            session,
+            event_type="report_exported",
+            success=True,
+            user_id=principal.id,
+            tenant_id=tenant_id,
+            details={"period_days": period_days, "assistant_filter": bool(assistant_id)},
+        )
+        session.commit()
         log.info(
             "ops_operational_report_exported",
             event_type="ops_report_export",
@@ -290,9 +357,10 @@ async def dashboard_overview(
     tenant_id: str | None = Query(default=None),
     assistant_id: str | None = Query(default=None),
     settings: Settings = Depends(get_settings),
+    principal: OpsPrincipal = Depends(require_ready_principal),
 ):
     _assert_db_enabled(settings)
-    _assert_tenant_scope(settings, tenant_id)
+    tenant_id = _authorized_tenant(principal, settings, tenant_id)
     session = SessionLocal()
     try:
         return get_overview(session, window=window, tenant_id=tenant_id, assistant_id=assistant_id)
@@ -306,12 +374,33 @@ async def dashboard_costs(
     tenant_id: str | None = Query(default=None),
     assistant_id: str | None = Query(default=None),
     settings: Settings = Depends(get_settings),
+    principal: OpsPrincipal = Depends(require_ready_principal),
 ):
     _assert_db_enabled(settings)
-    _assert_tenant_scope(settings, tenant_id)
+    tenant_id = _authorized_tenant(principal, settings, tenant_id)
     session = SessionLocal()
     try:
-        return get_costs(session, window=window, tenant_id=tenant_id, assistant_id=assistant_id)
+        payload = get_costs(
+            session,
+            window=window,
+            tenant_id=tenant_id,
+            assistant_id=assistant_id,
+        )
+        if settings.ops_cost_v2_enabled:
+            payload["visibility"] = "enabled"
+        elif principal.is_platform_admin:
+            payload["visibility"] = "admin_preview"
+        else:
+            payload["visibility"] = "hidden"
+            payload["summary"]["total_cost_usd"] = 0.0
+            payload["summary"]["total_cost_brl"] = None
+            payload["summary"]["avg_cost_per_call_usd"] = 0.0
+            payload["summary"]["avg_cost_per_call_brl"] = None
+            payload["breakdown"] = []
+            for point in payload["series"]:
+                point["cost_usd"] = 0.0
+                point["cost_brl"] = None
+        return payload
     finally:
         session.close()
 
@@ -322,9 +411,10 @@ async def dashboard_tools(
     tenant_id: str | None = Query(default=None),
     assistant_id: str | None = Query(default=None),
     settings: Settings = Depends(get_settings),
+    principal: OpsPrincipal = Depends(require_ready_principal),
 ):
     _assert_db_enabled(settings)
-    _assert_tenant_scope(settings, tenant_id)
+    tenant_id = _authorized_tenant(principal, settings, tenant_id)
     session = SessionLocal()
     try:
         return get_tools(session, window=window, tenant_id=tenant_id, assistant_id=assistant_id)
@@ -338,9 +428,10 @@ async def dashboard_health(
     tenant_id: str | None = Query(default=None),
     assistant_id: str | None = Query(default=None),
     settings: Settings = Depends(get_settings),
+    principal: OpsPrincipal = Depends(require_ready_principal),
 ):
     _assert_db_enabled(settings)
-    _assert_tenant_scope(settings, tenant_id)
+    tenant_id = _authorized_tenant(principal, settings, tenant_id)
     session = SessionLocal()
     try:
         return get_health(session, window=window, tenant_id=tenant_id, assistant_id=assistant_id)
@@ -354,9 +445,10 @@ async def dashboard_resilience(
     tenant_id: str | None = Query(default=None),
     assistant_id: str | None = Query(default=None),
     settings: Settings = Depends(get_settings),
+    principal: OpsPrincipal = Depends(require_ready_principal),
 ):
     _assert_db_enabled(settings)
-    _assert_tenant_scope(settings, tenant_id)
+    tenant_id = _authorized_tenant(principal, settings, tenant_id)
     session = SessionLocal()
     try:
         return get_resilience(session, window=window, tenant_id=tenant_id, assistant_id=assistant_id)

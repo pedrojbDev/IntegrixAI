@@ -7,10 +7,16 @@ import { ApiError } from "./errors"
 type QueryParams = Record<string, string | number | boolean | undefined | null>
 
 type RequestOptions<TSchema extends z.ZodType> = {
-  method?: "GET" | "POST" | "DELETE"
+  method?: "GET" | "POST" | "PATCH" | "DELETE"
   body?: unknown
   params?: QueryParams
   schema?: TSchema
+}
+
+function readCookie(name: string) {
+  const prefix = `${encodeURIComponent(name)}=`
+  const value = document.cookie.split("; ").find((item) => item.startsWith(prefix))
+  return value ? decodeURIComponent(value.slice(prefix.length)) : null
 }
 
 function buildUrl(path: string, params?: QueryParams) {
@@ -93,10 +99,17 @@ export async function apiRequest<TSchema extends z.ZodType>(
     headers.set("content-type", "application/json")
     body = JSON.stringify(options.body)
   }
+  const method = options.method || "GET"
+  if (method !== "GET") {
+    const csrfToken = readCookie("integrix_ops_csrf")
+    if (csrfToken) {
+      headers.set("x-csrf-token", csrfToken)
+    }
+  }
 
   try {
     const response = await fetch(buildUrl(path, options.params), {
-      method: options.method || "GET",
+      method,
       headers,
       body,
       credentials: "include",

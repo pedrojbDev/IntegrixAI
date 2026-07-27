@@ -120,7 +120,22 @@ def build_operational_report_pdf(
                 ("Calls analisadas", _number(total_calls), "volume no periodo", NAVY),
                 ("Resolucao automatica", _percent(success_calls, total_calls), f"{_number(success_calls)} calls", TEAL),
                 ("Handoff", _percent(handoff_calls, total_calls), f"{_number(handoff_calls)} transferencias", AMBER),
-                ("Custo total", _currency(float(costs_summary["total_cost_usd"])), "custos Vapi sincronizados", BLUE),
+                (
+                    "Custo Vapi em USD",
+                    _currency(float(costs_summary["total_cost_usd"])),
+                    "fonte financeira oficial",
+                    BLUE,
+                ),
+                (
+                    "Custo convertido em BRL",
+                    (
+                        _currency_brl(float(costs_summary["total_cost_brl"]))
+                        if costs_summary["total_cost_brl"] is not None
+                        else "Indisponivel"
+                    ),
+                    "PTAX de venda por data da chamada",
+                    BLUE,
+                ),
                 (
                     "Custo medio por call",
                     _currency(float(costs_summary["avg_cost_per_call_usd"])),
@@ -150,7 +165,7 @@ def build_operational_report_pdf(
         ),
         Spacer(1, 6 * mm),
         Paragraph("Desempenho por tool", styles["section"]),
-        Paragraph("Chamadas concluidas, resultado, tempo e custo atribuido por ferramenta.", styles["section_note"]),
+        Paragraph("Chamadas concluidas, resultado e tempo por ferramenta. Custos nao sao atribuidos por tool.", styles["section_note"]),
         Spacer(1, 2 * mm),
         _tools_table(tools["items"], styles),
     ]
@@ -408,7 +423,8 @@ def _health_table(
     rows = [
         ["Estado", _health_label(str(health["health_state"]))],
         ["Atualizacao de custos", str(health["sync"]["freshness_state"]).capitalize()],
-        ["Cobertura de custo", _percent(int(costs_summary["calls_with_cost"]), total_calls)],
+        ["Cobertura de custo Vapi", f"{float(costs_summary['coverage_pct']):.1f}%".replace(".", ",")],
+        ["Calls Vapi sem custo", _number(int(costs_summary["calls_without_cost"]))],
         ["Erros de negocio repetidos", _number(int(counters["repeated_business_errors"]))],
         ["Reentregas idempotentes", _number(int(counters["idempotency_hits"]))],
     ]
@@ -439,12 +455,12 @@ def _health_table(
 
 
 def _tools_table(items: list[dict[str, Any]], styles: dict[str, ParagraphStyle]) -> Table:
-    headers = ["TOOL", "CALLS", "RESOLVIDAS", "FALHAS", "HANDOFF", "TEMPO", "CUSTO", "CUSTO/CALL"]
+    headers = ["TOOL", "CALLS", "RESOLVIDAS", "FALHAS", "HANDOFF", "TEMPO"]
     data: list[list[Paragraph]] = [[Paragraph(header, styles["table_header"]) for header in headers]]
     if not items:
         data.append(
             [Paragraph("Nenhuma tool concluida no periodo selecionado.", styles["table_cell"])]
-            + [Paragraph("", styles["table_cell"]) for _ in range(7)]
+            + [Paragraph("", styles["table_cell"]) for _ in range(5)]
         )
     else:
         for item in items:
@@ -456,13 +472,11 @@ def _tools_table(items: list[dict[str, Any]], styles: dict[str, ParagraphStyle])
                     Paragraph(_number(int(item["failed_calls"])), styles["table_cell"]),
                     Paragraph(_number(int(item["handoff_calls"])), styles["table_cell"]),
                     Paragraph(_duration_ms(float(item["avg_duration_ms"])), styles["table_cell"]),
-                    Paragraph(_currency(float(item["total_cost_usd"])), styles["table_cell"]),
-                    Paragraph(_currency(float(item["avg_cost_per_call_usd"])), styles["table_cell"]),
                 ]
             )
     table = Table(
         data,
-        colWidths=[43 * mm, 14 * mm, 18 * mm, 15 * mm, 17 * mm, 20 * mm, 23 * mm, 24 * mm],
+        colWidths=[68 * mm, 20 * mm, 24 * mm, 20 * mm, 22 * mm, 20 * mm],
         hAlign="LEFT",
         repeatRows=1,
     )
@@ -540,6 +554,10 @@ def _percent(part: int, total: int) -> str:
 
 def _currency(value: float) -> str:
     return f"US$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _currency_brl(value: float) -> str:
+    return f"R$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
 def _duration_ms(value: float) -> str:
