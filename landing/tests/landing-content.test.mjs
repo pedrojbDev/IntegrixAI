@@ -53,11 +53,14 @@ test("landing presents a realistic management interface", async () => {
 })
 
 test("landing uses a distinctive editorial brand system and accessible motion fallback", async () => {
+  const app = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8")
   const css = await readFile(new URL("../src/index.css", import.meta.url), "utf8")
   const tailwind = await readFile(new URL("../tailwind.config.js", import.meta.url), "utf8")
 
   assert.match(css, /Manrope/)
   assert.match(css, /IBM Plex Sans/)
+  assert.match(css, /\.section-title\s*\{[^}]*color:\s*inherit/s)
+  assert.match(app, /lg:grid-cols-\[1\.1fr_0\.9fr\] lg:items-center lg:gap-20/)
   assert.match(css, /prefers-reduced-motion/)
   assert.match(css, /focus-visible/)
   assert.match(tailwind, /#d9ff57/)

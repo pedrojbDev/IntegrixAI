@@ -355,7 +355,7 @@ function ProblemSection() {
   return (
     <section className="bg-brand-ink px-5 py-24 text-white sm:px-8 sm:py-32 lg:px-12" id="resultados">
       <div className="mx-auto max-w-[1440px]">
-        <div className="grid gap-10 lg:grid-cols-[0.82fr_1.18fr] lg:items-end">
+        <div className="grid gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:items-center lg:gap-20">
           <div>
             <p className="eyebrow-light">O custo que quase nunca aparece inteiro</p>
             <h2 className="section-title mt-5 max-w-3xl text-white">
