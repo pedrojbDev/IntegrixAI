@@ -1,8 +1,10 @@
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
+import httpx
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -110,6 +112,29 @@ class PtaxServiceTests(unittest.TestCase):
 
         self.assertEqual(Decimal("5.20000000"), row.sale_rate)
         self.assertFalse(row.is_provisional)
+
+    @patch("app.core.ops.fx_service.httpx.get")
+    def test_period_endpoint_returns_daily_closing_rate(self, get_mock) -> None:
+        get_mock.return_value = httpx.Response(
+            200,
+            request=httpx.Request("GET", "https://example.test/ptax"),
+            json={
+                "value": [
+                    {
+                        "cotacaoVenda": 5.0894,
+                        "dataHoraCotacao": "2026-07-20 13:03:16.960952",
+                    }
+                ]
+            },
+        )
+        service = PtaxService(Settings(_env_file=None))
+
+        rates = service._fetch_period(date(2026, 7, 20), date(2026, 7, 20))
+
+        self.assertEqual([(date(2026, 7, 20), Decimal("5.0894"), False)], rates)
+        params = get_mock.call_args.kwargs["params"]
+        self.assertEqual("cotacaoVenda,dataHoraCotacao", params["$select"])
+        self.assertNotIn("tipoBoletim", params["$select"])
 
 
 if __name__ == "__main__":

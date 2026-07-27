@@ -82,7 +82,7 @@ class PtaxService:
             "@dataInicial": f"'{start_text}'",
             "@dataFinalCotacao": f"'{end_text}'",
             "$format": "json",
-            "$select": "cotacaoVenda,dataHoraCotacao,tipoBoletim",
+            "$select": "cotacaoVenda,dataHoraCotacao",
         }
         url = f"{self.settings.ptax_base_url.rstrip('/')}/{endpoint}"
         try:
@@ -92,7 +92,7 @@ class PtaxService:
         except (httpx.HTTPError, ValueError) as exc:
             raise RuntimeError("BCB PTAX request failed") from exc
         items = payload.get("value", []) if isinstance(payload, dict) else []
-        latest_by_date: dict[date, tuple[datetime, Decimal, bool]] = {}
+        latest_by_date: dict[date, tuple[datetime, Decimal]] = {}
         for item in items:
             if not isinstance(item, dict):
                 continue
@@ -104,12 +104,10 @@ class PtaxService:
             if parsed_at is None or rate <= 0:
                 continue
             current = latest_by_date.get(parsed_at.date())
-            is_close = str(item.get("tipoBoletim", "")).lower() == "fechamento"
-            sort_time = parsed_at + (timedelta(days=1) if is_close else timedelta())
-            if current is None or sort_time > current[0]:
-                latest_by_date[parsed_at.date()] = (sort_time, rate, not is_close)
+            if current is None or parsed_at > current[0]:
+                latest_by_date[parsed_at.date()] = (parsed_at, rate)
         return sorted(
-            (rate_date, value[1], value[2])
+            (rate_date, value[1], False)
             for rate_date, value in latest_by_date.items()
         )
 
