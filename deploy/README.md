@@ -2,6 +2,10 @@
 
 Guia operacional para subir o backend em uma VPS usando Docker Compose, PostgreSQL local e Caddy com HTTPS automático.
 
+Para metricas em tempo quase real da VPS, dos containers e da API, use o guia
+[monitoring/README.md](monitoring/README.md). O monitoramento e um Compose
+opcional e nao altera a inicializacao padrao.
+
 ## 1. DNS
 
 Crie um registro `A` apontando o subdomínio para o IP da VPS:

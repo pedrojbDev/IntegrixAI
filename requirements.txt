@@ -11,3 +11,4 @@ structlog>=24.1,<25
 httpx>=0.25,<0.28
 reportlab>=4.0,<5
 argon2-cffi>=23.1,<26
+prometheus-client>=0.20,<1

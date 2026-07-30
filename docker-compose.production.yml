@@ -13,14 +13,7 @@ services:
       - "8000"
     volumes:
       - ./data/especialidade.csv:/app/data/especialidade.csv:ro
-    command: >
-      gunicorn app.main:app
-      --worker-class uvicorn.workers.UvicornWorker
-      --workers ${WEB_CONCURRENCY:-3}
-      --bind 0.0.0.0:8000
-      --timeout ${GUNICORN_TIMEOUT:-60}
-      --access-logfile -
-      --error-logfile -
+    command: /app/deploy/start-api.sh
 
   postgres:
     image: postgres:16-alpine

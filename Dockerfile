@@ -28,8 +28,11 @@ COPY alembic.ini ./
 COPY alembic ./alembic
 COPY app ./app
 COPY scripts ./scripts
+COPY deploy/gunicorn.conf.py deploy/start-api.sh ./deploy/
 COPY --from=frontend-build /frontend/dist ./frontend/dist
+
+RUN chmod 755 ./deploy/start-api.sh
 
 EXPOSE 8000
 
-CMD ["gunicorn", "app.main:app", "--worker-class", "uvicorn.workers.UvicornWorker", "--workers", "3", "--bind", "0.0.0.0:8000", "--timeout", "60", "--access-logfile", "-", "--error-logfile", "-"]
+CMD ["/app/deploy/start-api.sh"]

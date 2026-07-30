@@ -1,0 +1,97 @@
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+prometheus.remote_write "grafana_cloud" {
+  endpoint {
+    url = sys.env("GRAFANA_CLOUD_PROMETHEUS_URL")
+
+    basic_auth {
+      username = sys.env("GRAFANA_CLOUD_PROMETHEUS_USERNAME")
+      password = sys.env("GRAFANA_CLOUD_API_KEY")
+    }
+  }
+}
+
+prometheus.relabel "integrix" {
+  forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+
+  rule {
+    target_label = "deployment"
+    replacement  = "integrix"
+  }
+
+  rule {
+    target_label = "environment"
+    replacement  = sys.env("MONITORING_ENVIRONMENT")
+  }
+
+  rule {
+    target_label = "instance"
+    replacement  = sys.env("MONITORING_INSTANCE")
+  }
+}
+
+prometheus.scrape "integrix_api" {
+  targets = [
+    {
+      "__address__" = "app:8000",
+    },
+  ]
+
+  forward_to     = [prometheus.relabel.integrix.receiver]
+  job_name       = "integrix-api"
+  metrics_path   = "/internal/metrics"
+  scrape_interval = "15s"
+  scrape_timeout  = "5s"
+  sample_limit    = 2000
+  label_limit     = 20
+}
+
+prometheus.exporter.unix "host" {
+  rootfs_path = "/rootfs"
+  procfs_path = "/rootfs/proc"
+  sysfs_path  = "/rootfs/sys"
+}
+
+prometheus.scrape "integrix_host" {
+  targets = prometheus.exporter.unix.host.targets
+
+  forward_to      = [prometheus.relabel.integrix.receiver]
+  job_name        = "integrix-vps"
+  scrape_interval = "15s"
+  scrape_timeout  = "5s"
+  sample_limit    = 3000
+  label_limit     = 20
+}
+
+prometheus.exporter.cadvisor "docker" {
+  docker_host = "unix:///var/run/docker.sock"
+  docker_only = true
+
+  enabled_metrics = [
+    "cpu",
+    "diskIO",
+    "memory",
+    "network",
+    "oom_event",
+  ]
+
+  store_container_labels = false
+  allowlisted_container_labels = [
+    "com.docker.compose.project",
+    "com.docker.compose.service",
+  ]
+}
+
+prometheus.scrape "integrix_docker" {
+  targets = prometheus.exporter.cadvisor.docker.targets
+
+  forward_to      = [prometheus.relabel.integrix.receiver]
+  job_name        = "integrix-docker"
+  scrape_interval = "15s"
+  scrape_timeout  = "5s"
+  sample_limit    = 4000
+  label_limit     = 20
+}
