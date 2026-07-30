@@ -31,6 +31,22 @@ prometheus.relabel "integrix" {
     target_label = "instance"
     replacement  = sys.env("MONITORING_INSTANCE")
   }
+
+  // Exporters define their own integration job labels. Normalize them so
+  // dashboards and alerts remain stable if Alloy changes its internal names.
+  rule {
+    source_labels = ["job"]
+    regex         = "integrations/unix"
+    target_label  = "job"
+    replacement   = "integrix-vps"
+  }
+
+  rule {
+    source_labels = ["job"]
+    regex         = "integrations/cadvisor"
+    target_label  = "job"
+    replacement   = "integrix-docker"
+  }
 }
 
 prometheus.scrape "integrix_api" {
