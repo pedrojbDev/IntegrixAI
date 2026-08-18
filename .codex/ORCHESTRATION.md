@@ -1,83 +1,38 @@
 # Codex Orchestration Guide
 
-This repository already has project-specific skills in [`.agents/skills`](c:/Users/55719/Desktop/IntegrixAI/.agents/skills) and now has Codex agent metadata in [`.codex/agents`](c:/Users/55719/Desktop/IntegrixAI/.codex/agents).
-Use them conservatively: start from the real code, keep ownership clear, and preserve compatibility seams.
+Start with [docs/INDEX.md](../docs/INDEX.md) and load only the context routed for
+the task. Agents supplement repository docs; they do not replace code and tests
+as the source of truth.
 
-For task-specific repository context, start with [docs/INDEX.md](c:/Users/55719/Desktop/IntegrixAI/docs/INDEX.md). It links to the current architecture, runtime flows, tenant-safety invariants, and validation commands without duplicating `AGENTS.md`.
+## Agent Ownership
 
-## When To Use Each Agent
+| Agent | Owns | Does not own |
+|---|---|---|
+| `architecture-multitenant` | shared-vs-tenant boundaries, isolation analysis, compatibility and refactoring strategy | routine route fixes or tenant implementation details |
+| `backend-runtime` | FastAPI routes, `/tools`, dispatch, shared security, audit, metrics and runtime defects | tenant-specific workflows or persistence/dashboard ownership |
+| `platform-ops-data` | models, Alembic, dashboard/ops, React console, reports, schedulers and cost sync | PB Saude workflows or generic architecture reviews |
+| `tenant-implementation` | tenant workflows, contracts, translators, catalogs and provider adapters | shared-core behavior without an explicit integration seam |
+| `docs-skills` | repository docs, AGENTS, Codex metadata, landing docs and skills | runtime behavior changes |
 
-1. `architecture-multitenant`
-Use for boundary analysis, migration strategy, tenant-isolation review, or planning an incremental refactor.
+Do not create a separate frontend or landing agent while their ownership remains
+small and aligned with `platform-ops-data` or `docs-skills`.
 
-2. `backend-runtime`
-Use for `/tools`, route handling, dispatch behavior, audit/metrics wiring, and runtime bug fixes.
+## Selection Rules
 
-3. `platform-ops-data`
-Use for dashboard, ops endpoints, models, migrations, cost sync, PDF reports,
-scheduled SMTP delivery, and the React operational console.
+- Pick the narrowest owning agent. Split work only when file ownership can be
+  disjoint; otherwise keep one owner.
+- Use [SKILLS.md](SKILLS.md) to disambiguate skills. Do not pair both broad
+  architecture skills or load skill references preemptively.
+- Agents supplement repository docs and code. Their prompts must not duplicate
+  task routing, schemas or validation commands.
 
-4. `tenant-implementation`
-Use for work inside `app/tenants/*`, including workflows, translators, adapters, and tenant contracts.
+## Coordination
 
-5. `docs-skills`
-Use for repo docs, skill docs, AGENTS, and Codex workflow documentation.
-
-## Skill Usage
-
-Skills remain in [`.agents/skills`](c:/Users/55719/Desktop/IntegrixAI/.agents/skills).
-Prefer the project-specific ones when the task matches:
-
-1. `saas-multitenant-architect-writer`
-Use for architecture-plus-implementation work in the multi-tenant backend.
-
-2. `integrix-multitenant`
-Use for tenant isolation review and tenant-aware behavior changes.
-
-3. `integrix-auth`
-Use for auth/authz reasoning and permission safety.
-
-4. `integrix-change-review`
-Use for backend risk review before implementing or releasing a change.
-
-5. `integrix-vapi-webhooks`
-Use for webhook ingestion, retries, deduplication, and inbound event safety.
-
-6. `integrix-metrics`
-Use for metrics, dashboard logic, and KPI reasoning.
-
-## Practical Flows
-
-### Analyze a Feature
-
-1. Use `architecture-multitenant` to map current boundaries and identify risks.
-2. Use `tenant-implementation` if the feature is tenant-specific.
-3. Use `docs-skills` only if the change also requires updated operational or architectural docs.
-
-### Implement a Backend Change
-
-1. Use `backend-runtime` for route and dispatch changes.
-2. Use `tenant-implementation` for tenant-specific workflow or adapter changes.
-3. Use `platform-ops-data` if the change touches models, migrations, ops endpoints, or dashboard data.
-
-### Debug a Multi-Tenant Issue
-
-1. Start with `architecture-multitenant` or `integrix-multitenant` to locate the tenant boundary.
-2. Use `backend-runtime` for runtime path fixes.
-3. Use `platform-ops-data` if the issue appears in reports, dashboard data, sync
-   jobs, daily delivery, or scheduler behavior. Read
-   [operational-reports.md](c:/Users/55719/Desktop/IntegrixAI/docs/operational-reports.md)
-   before changing report delivery.
-
-### Generate Documentation
-
-1. Use `docs-skills` to update [readme.md](c:/Users/55719/Desktop/IntegrixAI/readme.md), [AGENTS.md](c:/Users/55719/Desktop/IntegrixAI/AGENTS.md), or Codex docs.
-2. Use [docs/INDEX.md](c:/Users/55719/Desktop/IntegrixAI/docs/INDEX.md) as the map for new or updated repository docs.
-3. Keep documentation synchronized with actual file paths, commands, and current architecture.
-
-## Coordination Rules
-
-1. Give each agent a disjoint primary ownership area.
-2. Do not assign the same runtime files to multiple agents in parallel.
-3. Validate the smallest relevant test slice after changes.
-4. Preserve legacy shims unless the task explicitly includes their retirement plan.
+- Give every delegated task a bounded, disjoint ownership area.
+- Do not assign the same runtime files to multiple agents concurrently.
+- Keep shared-core and tenant-specific changes with their owning agents.
+- Tell delegated agents they share the worktree and must preserve other edits.
+- Validate the smallest relevant slice first; use broad tests for cross-cutting
+  changes.
+- Preserve compatibility shims unless retirement is explicitly planned.
+- Update the context index when real ownership changes, not for one-off tasks.

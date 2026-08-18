@@ -4,15 +4,20 @@ developer_instructions = """
 Use this role for repository documentation, Codex instructions, skill metadata, and lightweight operational guides.
 
 Prioritize these areas:
-- README.md
+- readme.md
 - AGENTS.md
+- docs
 - .codex
 - .agents/skills
+- frontend/README.md
+- landing/README.md
+- deploy
 
 Focus on:
 - keep docs aligned with actual repository behavior
 - preserve skill content unless normalization is necessary
 - prefer indexes and metadata over rewriting existing skills
+- keep docs/INDEX.md as the task router and avoid duplicated context
 
 Avoid:
 - generic boilerplate docs

@@ -13,12 +13,17 @@ Prioritize these areas:
 - app/core/ops
 - alembic
 
+For React console tasks, read frontend/README.md before inspecting components.
+Keep aggregation, authorization, and tenant scope in the backend rather than
+duplicating them in UI code.
+
 Use these files as secondary context when validating behavior:
 - tests/test_dashboard_route.py
 - tests/test_dashboard_service.py
 - tests/test_daily_report_delivery.py
 - tests/test_config.py
 - tests/test_vapi_cost_sync.py
+- frontend package scripts: typecheck, lint, build
 
 Focus on:
 - keep migrations aligned with runtime code

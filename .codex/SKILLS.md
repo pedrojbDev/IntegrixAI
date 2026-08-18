@@ -1,48 +1,29 @@
 # Skills Index
 
-Project skills are stored in [`.agents/skills`](c:/Users/55719/Desktop/IntegrixAI/.agents/skills).
-They are already Codex-compatible through `SKILL.md`; this file is only a lightweight discovery index.
-
-Use [docs/INDEX.md](c:/Users/55719/Desktop/IntegrixAI/docs/INDEX.md) to choose the repository context docs that should accompany these skills for a given task.
+Project skills are stored in [`.agents/skills`](../.agents/skills). This file
+disambiguates triggers; [docs/INDEX.md](../docs/INDEX.md) selects repository
+context. Trigger the minimum set that covers the task.
 
 ## Project-Specific Skills
 
-1. `saas-multitenant-architect-writer`
-Architecture plus implementation for this SaaS multi-tenant backend.
-
-2. `software-architecture-consultant`
-Architecture review and refactoring guidance for backend/SaaS structure.
-
-3. `integrix-multitenant`
-Tenant isolation and tenant-aware backend review.
-
-4. `integrix-auth`
-Authentication and authorization reasoning.
-
-5. `integrix-change-review`
-Backend safety review focused on risk detection.
-
-6. `integrix-metrics`
-Metrics, analytics, and KPI reasoning.
-
-7. `integrix-vapi-webhooks`
-Safe Vapi webhook ingestion and event-handling guidance.
-
-Pair tenant-sensitive skills with [docs/tenant-safety.md](c:/Users/55719/Desktop/IntegrixAI/docs/tenant-safety.md), runtime work with [docs/runtime-flows.md](c:/Users/55719/Desktop/IntegrixAI/docs/runtime-flows.md), and metrics/report work with [docs/operational-reports.md](c:/Users/55719/Desktop/IntegrixAI/docs/operational-reports.md).
+| Skill | Use when | Do not combine by default with |
+|---|---|---|
+| `software-architecture-consultant` | analysis, design review or refactoring advice without implementation | `saas-multitenant-architect-writer` |
+| `saas-multitenant-architect-writer` | cross-cutting architecture change that must also be implemented | `software-architecture-consultant` |
+| `integrix-multitenant` | a localized change can affect tenant resolution, scope, isolation or fallback | another broad architecture skill unless the task is cross-cutting |
+| `integrix-auth` | identity, session, CSRF, role, permission or authorization behavior | `integrix-vapi-webhooks` unless both trust boundaries change |
+| `integrix-change-review` | explicit code/release review for concrete findings and blockers | implementation skills during a review-only request |
+| `integrix-metrics` | KPI definitions, aggregation, time windows, cost/report semantics | broad architecture skills for a localized metric change |
+| `integrix-vapi-webhooks` | inbound Vapi event authenticity, deduplication, retry or replay | ordinary `/tools` dispatch work |
 
 ## Utility Skills
 
-1. `fastapi-router-py`
-Router creation patterns aligned with FastAPI CRUD work.
+| Skill | Trigger boundary |
+|---|---|
+| `fastapi-router-py` | creating or materially changing FastAPI routes; inspect neighboring routes first |
+| `pydantic-models-py` | creating or changing Pydantic API/contracts; never use it for SQLAlchemy models |
+| `skill-creator` | creating, splitting, trimming or validating a skill package |
+| `frontend-design` | deliberate visual/UI work, not ordinary frontend data wiring |
+| `pdf:pdf` | PDF layout, generation or rendered visual verification |
 
-2. `pydantic-models-py`
-Pydantic model patterns for request/response/data modeling.
-
-3. `skill-creator`
-Create or refine project skills.
-
-4. `frontend-design`
-Use only for deliberate UI work in the React operational console.
-
-5. `pdf:pdf`
-Use when changing PDF report layout or when render-and-visual verification is needed.
+If no row matches, use repository docs and code without forcing a skill.
