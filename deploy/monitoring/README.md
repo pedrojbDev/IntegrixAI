@@ -19,7 +19,7 @@ Adicione os valores somente em `/opt/IntegrixAI/.env.production`:
 GRAFANA_CLOUD_PROMETHEUS_URL=https://prometheus-REGIAO.grafana.net/api/prom/push
 GRAFANA_CLOUD_PROMETHEUS_USERNAME=SEU_ID
 GRAFANA_CLOUD_API_KEY=SEU_TOKEN
-MONITORING_INSTANCE=srv1742572
+MONITORING_INSTANCE=integrix-vps
 ```
 
 Nao imprima o arquivo de ambiente nem grave o token no Git.

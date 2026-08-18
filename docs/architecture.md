@@ -81,8 +81,9 @@ como risco alto ate provar que a tabela e realmente global.
 
 ## Dashboard E Frontend Operacional
 
-O backend serve uma interface operacional. A abordagem atual inclui assets
-estaticos em `app/static/dashboard` e tambem um app `frontend/` separado.
+O backend serve a console React gerada a partir de `frontend/`. O FastAPI entrega
+a SPA em `/dashboard`. `app/static/dashboard` permanece apenas como superficie
+legada de compatibilidade, nao como fonte principal da interface.
 
 Nao proponha reescrita de frontend ou troca de stack para mudancas pequenas de
 ops. Preserve a abordagem existente salvo pedido explicito.

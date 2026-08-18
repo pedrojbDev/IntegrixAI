@@ -53,7 +53,7 @@ If `/tools` degrades, the live assistant degrades with it.
 - A DID in `TO_NUMBER` that is mapped in `TENANT_MAP` for the active tenant
 - `k6` installed locally
 
-Before running load tests, it is a good idea to run [`smoke_local.py`](/Users/55719/Desktop/IntegrixAI/scripts/smoke_local.py) first if you are testing a local or freshly deployed environment.
+Before running load tests, run [`smoke_local.py`](../smoke_local.py) first when testing a local or freshly deployed environment.
 
 ## Install k6
 

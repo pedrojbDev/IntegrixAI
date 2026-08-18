@@ -2,6 +2,10 @@
 
 Guia operacional para subir o backend em uma VPS usando Docker Compose, PostgreSQL local e Caddy com HTTPS automático.
 
+Para operar a instalacao existente da Integrix, leia primeiro
+[docs/production-vps.md](../docs/production-vps.md). Este arquivo continua sendo
+o guia generico de instalacao e atualizacao.
+
 Para metricas em tempo quase real da VPS, dos containers e da API, use o guia
 [monitoring/README.md](monitoring/README.md). O monitoramento e um Compose
 opcional e nao altera a inicializacao padrao.

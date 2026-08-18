@@ -7,7 +7,8 @@ runtime, tenant, ops ou persistencia.
 
 1. `app/api/routes/tools.py` registra handlers de `pbsaude` e expoe `POST /tools`.
 2. A rota cria `ToolDispatcher` com `Settings`.
-3. O dispatcher extrai `call.id`, `call.to` e `toolCallList`.
+3. O dispatcher valida o envelope Vapi e extrai `call.id`, `call.to` e
+   `toolCallList`.
 4. `call.to` e usado para resolver tenant via `app/core/tenant/resolver.py`.
 5. Em producao, fallback de tenant desconhecido ou ausente pode ser rejeitado.
 6. O webhook e autorizado por `app/core/security/webhook.py`.
@@ -20,6 +21,11 @@ runtime, tenant, ops ou persistencia.
 Esse fluxo deve continuar retornando o contrato esperado pelo orquestrador de
 voz, inclusive para validacoes, tools desconhecidas, eventos ignorados e erros
 de upstream.
+
+O contrato atual nao aceita diretamente o payload de Custom Function da Retell
+(`name`, `args`, `call`). Integrar outro provedor exige um tradutor explicito
+para o contrato interno, resolucao de tenant equivalente e uma chave de
+idempotencia estavel; nao reutilize `/tools` supondo compatibilidade de envelope.
 
 ## Resolucao De Tenant
 
