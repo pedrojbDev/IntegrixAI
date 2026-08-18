@@ -42,6 +42,9 @@ htmlcov/
 *.seed
 *.out
 
+# Local client/reference artifacts and document-render QA
+artifacts/
+
 # Databases / local data
 *.sqlite3
 *.db
