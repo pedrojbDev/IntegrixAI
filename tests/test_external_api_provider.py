@@ -84,7 +84,6 @@ class ExternalApiProviderTests(unittest.TestCase):
                 "tenant_a",
                 "call_123",
                 "feira de santana",
-                "Centro",
                 "cardiologia",
                 "03457351538",
                 None,
@@ -92,6 +91,32 @@ class ExternalApiProviderTests(unittest.TestCase):
 
         self.assertEqual(2, len(fake_client.calls))
         self.assertEqual("Clínica Alpha", providers[0].name)
+
+    def test_sends_search_payload_without_neighborhood(self) -> None:
+        fake_client = FakeClient([success_response()])
+        provider = ExternalApiDataProvider(settings())
+
+        with patch(
+            "app.tenants.pbsaude.integration.http_client.get_external_api_client",
+            return_value=fake_client,
+        ):
+            provider.search_providers(
+                "tenant_a",
+                "call_123",
+                " feira de santana ",
+                " cardiologia ",
+                "034.573.515-38",
+                None,
+            )
+
+        self.assertEqual(
+            {
+                "cpf": "03457351538",
+                "especialidade": "cardiologia",
+                "cidade": "feira de santana",
+            },
+            fake_client.calls[0]["kwargs"]["json"],
+        )
 
     def test_request_error_retries_until_limit_then_fails(self) -> None:
         fake_client = FakeClient(
@@ -111,7 +136,6 @@ class ExternalApiProviderTests(unittest.TestCase):
                     "tenant_a",
                     "call_123",
                     "feira de santana",
-                    "Centro",
                     "cardiologia",
                     "03457351538",
                     None,
@@ -144,7 +168,6 @@ class ExternalApiProviderTests(unittest.TestCase):
                     "tenant_a",
                     "call_123",
                     "feira de santana",
-                    "Centro",
                     "cardiologia",
                     "03457351538",
                     None,
@@ -165,7 +188,6 @@ class ExternalApiProviderTests(unittest.TestCase):
                     "tenant_a",
                     "call_123",
                     "feira de santana",
-                    "Centro",
                     "cardiologia",
                     "03457351538",
                     None,
@@ -188,7 +210,6 @@ class ExternalApiProviderTests(unittest.TestCase):
                 "tenant_a",
                 "call_123",
                 "feira de santana",
-                "Centro",
                 "cardiologia",
                 "03457351538",
                 None,

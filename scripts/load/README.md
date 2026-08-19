@@ -15,8 +15,8 @@ This directory adds a reproducible `k6` setup focused on validating whether the 
   - Sends a Vapi-compatible `search_providers` payload for the active `pbsaude` implementation.
   - Uses a staged ramp up to 100 VUs, then sustains 100 VUs.
   - Randomizes `message.call.id` and `message.toolCallList[0].id`.
-  - Uses a known functional `search_providers` body by default: `cpf=03457351538`, `especialidade=cardiologia`, `cidade=feira de santana`, `bairro=Centro`.
-  - Can randomize `cpf`, `cidade`, `bairro`, and `especialidade` with `RANDOMIZE_SEARCH_ARGS=true`, but that mode should only be used when the target environment accepts synthetic data.
+  - Uses a known functional `search_providers` body by default: `cpf=03457351538`, `especialidade=cardiologia`, `cidade=feira de santana`.
+  - Can randomize `cpf`, `cidade`, and `especialidade` with `RANDOMIZE_SEARCH_ARGS=true`, but that mode should only be used when the target environment accepts synthetic data.
   - Sends `x-webhook-secret` by default, or the header configured with `WEBHOOK_SECRET_HEADER`.
   - Validates that `/tools` returned a result for the expected tool call and that the result is for `search_providers`.
 - `load-idempotency.js`
@@ -101,7 +101,6 @@ TO_NUMBER=+5511999999999
 SEARCH_CPF=03457351538
 SEARCH_ESPECIALIDADE=cardiologia
 SEARCH_CIDADE=feira de santana
-SEARCH_BAIRRO=Centro
 ```
 
 ## How to run
@@ -154,7 +153,7 @@ On Windows, the helper reads `WEBHOOK_SECRET` and `WEBHOOK_SECRET_HEADER` from t
 Override the `search_providers` body when needed:
 
 ```powershell
-.\scripts\load\run-load-tests.ps1 -BaseUrl http://127.0.0.1:8000 -Mode tools -ToNumber +5511999999999 -SearchCpf 03457351538 -SearchEspecialidade cardiologia -SearchCidade "feira de santana" -SearchBairro Centro
+.\scripts\load\run-load-tests.ps1 -BaseUrl http://127.0.0.1:8000 -Mode tools -ToNumber +5511999999999 -SearchCpf 03457351538 -SearchEspecialidade cardiologia -SearchCidade "feira de santana"
 ```
 
 ### Bash
@@ -194,7 +193,7 @@ On Linux/macOS, the helper also reads `WEBHOOK_SECRET` and `WEBHOOK_SECRET_HEADE
 Override the `search_providers` body when needed:
 
 ```bash
-./scripts/load/run-load-tests.sh --base-url http://127.0.0.1:8000 --mode tools --to-number +5511999999999 --search-cpf 03457351538 --search-especialidade cardiologia --search-cidade "feira de santana" --search-bairro Centro
+./scripts/load/run-load-tests.sh --base-url http://127.0.0.1:8000 --mode tools --to-number +5511999999999 --search-cpf 03457351538 --search-especialidade cardiologia --search-cidade "feira de santana"
 ```
 
 ## Realistic mode vs aggressive mode
@@ -218,12 +217,15 @@ By default, `load-tools.js` and `load-idempotency.js` use the known functional P
 {
   "cpf": "03457351538",
   "especialidade": "cardiologia",
-  "cidade": "feira de santana",
-  "bairro": "Centro"
+  "cidade": "feira de santana"
 }
 ```
 
 This is the right default for validating the real external API path because a syntactically valid CPF may still be rejected by the upstream system.
+
+Legacy `SearchBairro` / `--search-bairro` options are accepted temporarily by
+the wrappers so existing commands do not fail, but they are ignored and never
+included in the request payload.
 
 Use randomized search arguments only for mock, staging, or seeded test environments:
 

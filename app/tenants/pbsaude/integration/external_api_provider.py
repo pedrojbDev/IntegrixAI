@@ -45,7 +45,6 @@ class ExternalApiDataProvider(DataProvider):
         tenant_id: str,
         call_id: str,
         city: str,
-        neighborhood: str | None,
         query: str,
         cpf: str | None,
         tipo_atendimento: str | None,
@@ -68,7 +67,6 @@ class ExternalApiDataProvider(DataProvider):
             "cpf": cpf_normalized,
             "especialidade": query.strip(),
             "cidade": city.strip(),
-            "bairro": (neighborhood or "").strip(),
         }
         if tipo_atendimento and tipo_atendimento.strip():
             payload["tipoAtendimento"] = tipo_atendimento.strip()

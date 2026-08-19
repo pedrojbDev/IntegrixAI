@@ -48,7 +48,6 @@ class MockDataProvider(DataProvider):
         tenant_id: str,
         call_id: str,
         city: str,
-        neighborhood: str | None,
         query: str,
         cpf: str | None,
         tipo_atendimento: str | None,
@@ -56,13 +55,10 @@ class MockDataProvider(DataProvider):
         maybe_introduce_chaos(self.settings)
         city_key = city.strip().lower()
         query_key = query.strip().lower()
-        neighborhood_key = neighborhood.strip().lower() if neighborhood else None
 
         matches: list[Provider] = []
         for item in self._providers:
             if item.city.lower() != city_key:
-                continue
-            if neighborhood_key and neighborhood_key not in (item.neighborhood or "").lower():
                 continue
             if query_key in item.name.lower() or query_key in item.specialty.lower():
                 matches.append(item)

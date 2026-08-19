@@ -52,6 +52,10 @@ class SearchProvidersRequest(ToolBase):
     neighborhood: str | None = Field(
         default=None,
         validation_alias=AliasChoices("neighborhood", "bairro"),
+        description=(
+            "Legacy Vapi input accepted during migration; ignored by provider search "
+            "and never sent to the upstream API"
+        ),
     )
     query: str = Field(validation_alias=AliasChoices("query", "especialidade"))
 

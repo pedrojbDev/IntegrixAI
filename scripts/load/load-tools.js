@@ -12,7 +12,6 @@ const TOOLS_TARGET_VUS = Math.max(Number(__ENV.TOOLS_TARGET_VUS || 100), 1);
 const SEARCH_CPF = __ENV.SEARCH_CPF || "03457351538";
 const SEARCH_ESPECIALIDADE = __ENV.SEARCH_ESPECIALIDADE || "cardiologia";
 const SEARCH_CIDADE = __ENV.SEARCH_CIDADE || "feira de santana";
-const SEARCH_BAIRRO = __ENV.SEARCH_BAIRRO || "Centro";
 
 const toolOkRate = new Rate("tool_ok_rate");
 const upstreamSuccessRate = new Rate("upstream_success_rate");
@@ -30,15 +29,6 @@ const CIDADES = [
   "Lauro de Freitas",
   "Jequie",
   "Ilheus",
-];
-
-const BAIRROS = [
-  "Centro",
-  "Pituba",
-  "Brotas",
-  "Barra",
-  "Cabula",
-  "Itapua",
 ];
 
 const ESPECIALIDADES = [
@@ -123,14 +113,12 @@ function searchArguments() {
       cpf: SEARCH_CPF,
       especialidade: SEARCH_ESPECIALIDADE,
       cidade: SEARCH_CIDADE,
-      bairro: SEARCH_BAIRRO,
     };
   }
 
   return {
     cpf: syntheticCpf(),
     cidade: randomItem(CIDADES),
-    bairro: randomItem(BAIRROS),
     especialidade: randomItem(ESPECIALIDADES),
   };
 }

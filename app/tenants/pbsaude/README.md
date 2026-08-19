@@ -32,6 +32,12 @@ Erros de negocio devem permanecer diferenciados de indisponibilidade e timeout.
 Nunca registre CPF completo, credenciais externas ou payloads com PII sem
 mascaramento.
 
+O request upstream de busca envia `cpf`, `especialidade`, `cidade` e, quando
+informado, `tipoAtendimento`. `bairro` permanece aceito somente como entrada
+legada da Vapi durante a migracao, mas deve ser ignorado pelo workflow e nunca
+enviado ao provider. O bairro devolvido dentro de cada prestador continua sendo
+parte valida do endereco de resposta.
+
 ## Texto Para Fala E Enderecos
 
 `integration/speech_text.py` normaliza Unicode e aplica somente correcoes

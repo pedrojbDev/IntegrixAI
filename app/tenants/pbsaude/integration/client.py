@@ -33,7 +33,6 @@ class DataProvider(ABC):
         tenant_id: str,
         call_id: str,
         city: str,
-        neighborhood: str | None,
         query: str,
         cpf: str | None,
         tipo_atendimento: str | None,
