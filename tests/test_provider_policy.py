@@ -6,6 +6,7 @@ from app.tenants.pbsaude.contracts import Provider
 from app.tenants.pbsaude.provider_policy import (
     ProviderPolicyConfig,
     apply_provider_policy,
+    apply_provider_policy_business_override,
     load_provider_policy,
 )
 
@@ -46,8 +47,12 @@ class ProviderPolicyTests(unittest.TestCase):
         )
 
     def test_loads_versioned_tenant_scoped_configuration(self) -> None:
-        self.assertEqual(1, self.config.policy_version)
+        self.assertEqual(2, self.config.policy_version)
         self.assertEqual(["tenant_demo"], self.config.tenant_ids)
+        self.assertEqual(
+            ["ESPECIALIDADE_INVALIDA", "CIDADE_INVALIDA", "CIDADE_SEM_COBERTURA"],
+            self.config.business_error_fallback_codes,
+        )
         self.assertEqual(
             {"salvador", "goiania", "vitoria_da_conquista", "feira_de_santana"},
             {item.city_key for item in self.config.cities},
@@ -81,6 +86,13 @@ class ProviderPolicyTests(unittest.TestCase):
         payload["cities"][0]["providers"][0]["services"][0]["service_mode"] = "telephone"
 
         with self.assertRaisesRegex(ValidationError, "service_mode"):
+            ProviderPolicyConfig.model_validate(payload)
+
+    def test_rejects_duplicate_business_error_fallback_codes(self) -> None:
+        payload = self.config.model_dump(mode="json")
+        payload["business_error_fallback_codes"].append("ESPECIALIDADE_INVALIDA")
+
+        with self.assertRaisesRegex(ValidationError, "business_error_fallback_codes must be unique"):
             ProviderPolicyConfig.model_validate(payload)
 
     def test_disabled_policy_preserves_upstream_results(self) -> None:
@@ -161,6 +173,67 @@ class ProviderPolicyTests(unittest.TestCase):
         self.assertEqual("", online.address)
         self.assertIsNone(online.neighborhood)
         self.assertEqual("0800 940 9778", online.phone)
+
+    def test_business_override_returns_fallback_for_each_allowed_code(self) -> None:
+        for error_code in self.config.business_error_fallback_codes:
+            with self.subTest(error_code=error_code):
+                result = apply_provider_policy_business_override(
+                    tenant_id="tenant_demo",
+                    city="Vitoria da Conquista",
+                    query="Médico da Família",
+                    business_error_code=error_code,
+                    max_results=3,
+                    policy_enabled=True,
+                    business_override_enabled=True,
+                    config=self.config,
+                )
+
+                self.assertTrue(result.applied)
+                self.assertEqual(1, result.fallback_count)
+                self.assertEqual("online", result.providers[0].service_mode)
+
+    def test_business_override_denies_unlisted_error_or_tenant(self) -> None:
+        unsupported_error = apply_provider_policy_business_override(
+            tenant_id="tenant_demo",
+            city="Vitoria da Conquista",
+            query="Médico da Família",
+            business_error_code="CPF_INVALIDO",
+            max_results=3,
+            policy_enabled=True,
+            business_override_enabled=True,
+            config=self.config,
+        )
+        other_tenant = apply_provider_policy_business_override(
+            tenant_id="tenant_other",
+            city="Vitoria da Conquista",
+            query="Médico da Família",
+            business_error_code="ESPECIALIDADE_INVALIDA",
+            max_results=3,
+            policy_enabled=True,
+            business_override_enabled=True,
+            config=self.config,
+        )
+
+        self.assertFalse(unsupported_error.applied)
+        self.assertFalse(other_tenant.applied)
+
+    def test_business_override_requires_both_feature_flags(self) -> None:
+        for policy_enabled, override_enabled in ((False, True), (True, False)):
+            with self.subTest(
+                policy_enabled=policy_enabled,
+                override_enabled=override_enabled,
+            ):
+                result = apply_provider_policy_business_override(
+                    tenant_id="tenant_demo",
+                    city="Feira de Santana",
+                    query="Médico da Família",
+                    business_error_code="CIDADE_SEM_COBERTURA",
+                    max_results=3,
+                    policy_enabled=policy_enabled,
+                    business_override_enabled=override_enabled,
+                    config=self.config,
+                )
+                self.assertFalse(result.applied)
 
     def test_city_and_service_normalization_handles_accents_and_aliases(self) -> None:
         goiania = self.apply([], city="GOIÂNIA", query="cardiologista")

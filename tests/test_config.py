@@ -29,12 +29,20 @@ def production_settings(**overrides):
 
 class SettingsTests(unittest.TestCase):
     def test_pbsaude_provider_policy_is_opt_in(self) -> None:
-        self.assertFalse(Settings(_env_file=None).pbsaude_provider_policy_enabled)
+        defaults = Settings(_env_file=None)
+        self.assertFalse(defaults.pbsaude_provider_policy_enabled)
+        self.assertFalse(defaults.pbsaude_provider_policy_business_override_enabled)
         self.assertTrue(
             Settings(
                 _env_file=None,
                 pbsaude_provider_policy_enabled=True,
             ).pbsaude_provider_policy_enabled
+        )
+        self.assertTrue(
+            Settings(
+                _env_file=None,
+                pbsaude_provider_policy_business_override_enabled=True,
+            ).pbsaude_provider_policy_business_override_enabled
         )
 
     def test_production_requires_webhook_secret(self) -> None:

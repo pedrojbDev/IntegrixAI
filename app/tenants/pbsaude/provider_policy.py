@@ -105,8 +105,11 @@ class CityProviderPolicy(BaseModel):
 
 
 class ProviderPolicyConfig(BaseModel):
-    policy_version: Literal[1]
+    policy_version: Literal[2]
     tenant_ids: list[str] = Field(min_length=1, max_length=100)
+    business_error_fallback_codes: list[
+        Literal["ESPECIALIDADE_INVALIDA", "CIDADE_INVALIDA", "CIDADE_SEM_COBERTURA"]
+    ] = Field(min_length=1, max_length=10)
     cities: list[CityProviderPolicy] = Field(min_length=1, max_length=500)
 
     model_config = ConfigDict(extra="forbid")
@@ -118,6 +121,13 @@ class ProviderPolicyConfig(BaseModel):
         if len(set(tenant_ids)) != len(tenant_ids):
             raise ValueError("tenant_ids must be unique")
         return tenant_ids
+
+    @field_validator("business_error_fallback_codes")
+    @classmethod
+    def validate_business_error_fallback_codes(cls, value: list[str]) -> list[str]:
+        if len(set(value)) != len(value):
+            raise ValueError("business_error_fallback_codes must be unique")
+        return value
 
     @model_validator(mode="after")
     def validate_cities(self) -> "ProviderPolicyConfig":
@@ -228,6 +238,45 @@ def apply_provider_policy(
         fallback_count=fallback_count,
         online_count=sum(item.service_mode == "online" for item in final),
     )
+
+
+def apply_provider_policy_business_override(
+    *,
+    tenant_id: str,
+    city: str,
+    query: str,
+    business_error_code: str,
+    max_results: int,
+    policy_enabled: bool,
+    business_override_enabled: bool,
+    config: ProviderPolicyConfig | None = None,
+) -> ProviderPolicyApplication:
+    if not policy_enabled or not business_override_enabled:
+        return ProviderPolicyApplication(providers=[])
+
+    active_config = config or load_provider_policy()
+    if business_error_code not in active_config.business_error_fallback_codes:
+        return ProviderPolicyApplication(providers=[])
+
+    application = apply_provider_policy(
+        [],
+        tenant_id=tenant_id,
+        city=city,
+        query=query,
+        max_results=max_results,
+        enabled=True,
+        config=active_config,
+    )
+    if not application.applied or application.fallback_count == 0:
+        return ProviderPolicyApplication(
+            providers=[],
+            evaluated=application.evaluated,
+            policy_version=application.policy_version,
+            city_key=application.city_key,
+            mode=application.mode,
+            matched_service=application.matched_service,
+        )
+    return application
 
 
 def _best_matching_service(

@@ -1,4 +1,5 @@
 import asyncio
+from typing import NoReturn
 
 from ....config import Settings
 from ....logging import get_logger
@@ -8,7 +9,11 @@ from ..contracts import SearchProvidersRequest, SearchProvidersResponse
 from ..integration.client import BusinessRuleError, ServiceUnavailable, get_data_provider
 from ..integration.translator import normalize_cpf
 from ..mappings import TOOL_SEARCH_PROVIDERS, mask_cpf
-from ..provider_policy import apply_provider_policy
+from ..provider_policy import (
+    ProviderPolicyApplication,
+    apply_provider_policy,
+    apply_provider_policy_business_override,
+)
 
 log = get_logger()
 
@@ -53,6 +58,8 @@ async def search_providers(
     else:
         canonical_specialty = payload.query
 
+    policy_application: ProviderPolicyApplication
+    business_override_code: str | None = None
     try:
         providers = await asyncio.wait_for(
             asyncio.to_thread(
@@ -68,32 +75,52 @@ async def search_providers(
         )
     except asyncio.TimeoutError as exc:
         raise TimeoutError("Timeout na busca de rede") from exc
-    except BusinessRuleError:
-        raise
-    except ServiceUnavailable as exc:
-        raise RuntimeError(str(exc)) from exc
-
-    try:
-        policy_application = apply_provider_policy(
-            providers,
-            tenant_id=tenant_id,
-            city=payload.city,
-            query=canonical_specialty,
-            max_results=settings.provider_max_results,
-            enabled=settings.pbsaude_provider_policy_enabled,
-        )
-    except (OSError, ValueError) as exc:
-        log.exception(
-            "provider_policy_invalid",
-            event_type="provider_policy",
+    except BusinessRuleError as exc:
+        policy_application = _apply_business_override(
+            settings=settings,
             tenant_id=tenant_id,
             call_id=call_id,
             city=payload.city,
+            query=payload.query,
+            business_error=exc,
+        )
+        if not policy_application.applied:
+            raise
+        providers = policy_application.providers
+        business_override_code = exc.code
+    except ServiceUnavailable as exc:
+        raise RuntimeError(str(exc)) from exc
+    else:
+        try:
+            policy_application = apply_provider_policy(
+                providers,
+                tenant_id=tenant_id,
+                city=payload.city,
+                query=payload.query,
+                max_results=settings.provider_max_results,
+                enabled=settings.pbsaude_provider_policy_enabled,
+            )
+        except (OSError, ValueError) as exc:
+            _raise_invalid_policy(exc, tenant_id=tenant_id, call_id=call_id, city=payload.city)
+        providers = policy_application.providers
+
+    if business_override_code is not None:
+        log.warning(
+            "provider_policy_business_override",
+            event_type="provider_policy",
+            tenant_id=tenant_id,
+            call_id=call_id,
+            policy_version=policy_application.policy_version,
+            city_key=policy_application.city_key,
+            mode=policy_application.mode,
+            matched_service=policy_application.matched_service,
+            upstream_code=business_override_code,
+            fallback_count=policy_application.fallback_count,
+            online_count=policy_application.online_count,
+            final_count=len(providers),
             tool_name=TOOL_SEARCH_PROVIDERS,
         )
-        raise RuntimeError("Configuracao da politica de rede invalida") from exc
 
-    providers = policy_application.providers
     if policy_application.evaluated:
         log.info(
             "provider_policy_evaluated",
@@ -128,3 +155,46 @@ async def search_providers(
     )
     response = SearchProvidersResponse(providers=list(providers))
     return response.model_dump(), CallFinalState.RESOLVIDA_AUTOMATICO
+
+
+def _apply_business_override(
+    *,
+    settings: Settings,
+    tenant_id: str,
+    call_id: str,
+    city: str,
+    query: str,
+    business_error: BusinessRuleError,
+) -> ProviderPolicyApplication:
+    try:
+        return apply_provider_policy_business_override(
+            tenant_id=tenant_id,
+            city=city,
+            query=query,
+            business_error_code=business_error.code,
+            max_results=settings.provider_max_results,
+            policy_enabled=settings.pbsaude_provider_policy_enabled,
+            business_override_enabled=(
+                settings.pbsaude_provider_policy_business_override_enabled
+            ),
+        )
+    except (OSError, ValueError) as exc:
+        _raise_invalid_policy(exc, tenant_id=tenant_id, call_id=call_id, city=city)
+
+
+def _raise_invalid_policy(
+    exc: Exception,
+    *,
+    tenant_id: str,
+    call_id: str,
+    city: str,
+) -> NoReturn:
+    log.exception(
+        "provider_policy_invalid",
+        event_type="provider_policy",
+        tenant_id=tenant_id,
+        call_id=call_id,
+        city=city,
+        tool_name=TOOL_SEARCH_PROVIDERS,
+    )
+    raise RuntimeError("Configuracao da politica de rede invalida") from exc
