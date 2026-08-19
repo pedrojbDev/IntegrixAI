@@ -87,6 +87,14 @@ def normalize_providers(
                 if neighborhood
                 else None,
                 phone=normalize_phone(as_string(item.get("telefone") or item.get("phone"), "")),
+                provider_code=as_optional_string(
+                    item.get("codigoPrestador")
+                    or item.get("codigo_prestador")
+                    or item.get("providerCode")
+                    or item.get("provider_code")
+                    or item.get("codigo")
+                    or item.get("id")
+                ),
             )
         )
 

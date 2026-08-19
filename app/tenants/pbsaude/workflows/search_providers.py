@@ -8,6 +8,7 @@ from ..contracts import SearchProvidersRequest, SearchProvidersResponse
 from ..integration.client import BusinessRuleError, ServiceUnavailable, get_data_provider
 from ..integration.translator import normalize_cpf
 from ..mappings import TOOL_SEARCH_PROVIDERS, mask_cpf
+from ..provider_policy import apply_provider_policy
 
 log = get_logger()
 
@@ -71,6 +72,46 @@ async def search_providers(
         raise
     except ServiceUnavailable as exc:
         raise RuntimeError(str(exc)) from exc
+
+    try:
+        policy_application = apply_provider_policy(
+            providers,
+            tenant_id=tenant_id,
+            city=payload.city,
+            query=canonical_specialty,
+            max_results=settings.provider_max_results,
+            enabled=settings.pbsaude_provider_policy_enabled,
+        )
+    except (OSError, ValueError) as exc:
+        log.exception(
+            "provider_policy_invalid",
+            event_type="provider_policy",
+            tenant_id=tenant_id,
+            call_id=call_id,
+            city=payload.city,
+            tool_name=TOOL_SEARCH_PROVIDERS,
+        )
+        raise RuntimeError("Configuracao da politica de rede invalida") from exc
+
+    providers = policy_application.providers
+    if policy_application.evaluated:
+        log.info(
+            "provider_policy_evaluated",
+            event_type="provider_policy",
+            tenant_id=tenant_id,
+            call_id=call_id,
+            policy_version=policy_application.policy_version,
+            city_key=policy_application.city_key,
+            mode=policy_application.mode,
+            matched_service=policy_application.matched_service,
+            applied=policy_application.applied,
+            upstream_count=policy_application.upstream_count,
+            curated_count=policy_application.curated_count,
+            fallback_count=policy_application.fallback_count,
+            online_count=policy_application.online_count,
+            final_count=len(providers),
+            tool_name=TOOL_SEARCH_PROVIDERS,
+        )
 
     log.info(
         "provider_search_ok",

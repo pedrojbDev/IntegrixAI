@@ -98,6 +98,7 @@ class ProviderTranslatorTests(unittest.TestCase):
                         "endereco": "Rua A, 123",
                         "bairro": "Centro",
                         "telefone": "71999999999",
+                        "codigoPrestador": "prestador-123",
                     },
                     {
                         "nome": "CLINICA B LTDA",
@@ -120,6 +121,8 @@ class ProviderTranslatorTests(unittest.TestCase):
         self.assertEqual("Salvador", providers[0].city)
         self.assertEqual("Centro", providers[0].neighborhood)
         self.assertEqual("(71) 99999-9999", providers[0].phone)
+        self.assertEqual("prestador-123", providers[0].provider_code)
+        self.assertNotIn("provider_code", providers[0].model_dump())
 
     def test_adds_controlled_accents_to_provider_presentation_fields(self) -> None:
         providers = normalize_providers(
