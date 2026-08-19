@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, DateTime, Float, Index, Numeric, String, func
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Numeric, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
@@ -27,9 +27,15 @@ class VapiCallCost(Base):
             "started_at",
         ),
         Index("ix_vapi_call_costs_vapi_updated", "vapi_updated_at"),
+        Index("uq_vapi_call_costs_voice_call", "voice_call_id", unique=True),
     )
 
     call_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    voice_call_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("voice_calls.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     tenant_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     to_number: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     phone_number_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)

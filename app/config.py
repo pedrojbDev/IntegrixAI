@@ -80,6 +80,7 @@ class Settings(BaseSettings):
     vapi_api_key: str | None = None
     vapi_base_url: str = "https://api.vapi.ai"
     vapi_calls_path: str = "/call"
+    voice_call_shadow_enabled: bool = False
     ops_dashboard_token: str | None = None
     ops_token_header: str = "x-ops-token"
     ops_cost_sync_page_size: int = 100

@@ -14,6 +14,14 @@ from ...config import Settings
 from ...logging import get_logger
 from ...models.ops_sync_state import OpsSyncState
 from ...models.vapi_call_cost import VapiCallCost
+from ...platform.services.provider_identity_shadow import (
+    VapiInboundIdentityEvidence,
+    extract_vapi_inbound_identity,
+)
+from ...platform.services.voice_call_reconciliation import (
+    InboundCallObservation,
+    VoiceCallReconciliationService,
+)
 from ..tenant.resolver import resolve_tenant_details, should_reject_tenant_resolution
 from .fx_service import PtaxService
 
@@ -41,6 +49,8 @@ class ParsedCallCost:
     vapi_updated_at: datetime | None = None
     components: dict[str, Decimal | None] = field(default_factory=dict)
     raw_call_json: dict[str, Any] = field(default_factory=dict)
+    identity_evidence: VapiInboundIdentityEvidence | None = None
+    voice_call_id: str | None = None
 
 
 class VapiCostSyncService:
@@ -217,6 +227,7 @@ class VapiCostSyncService:
         assistant_id = self._extract_assistant_id(raw)
         phone_number_id = self._as_optional_string(raw.get("phoneNumberId"))
         to_number = self._extract_to_number(raw)
+        identity_evidence = extract_vapi_inbound_identity(raw)
         resolution = resolve_tenant_details(
             to_number,
             self.settings,
@@ -243,6 +254,7 @@ class VapiCostSyncService:
             cost_breakdown_json=breakdown,
             components=components,
             raw_call_json=raw,
+            identity_evidence=identity_evidence,
         )
 
     def _upsert_cost_batch(
@@ -262,6 +274,8 @@ class VapiCostSyncService:
     ) -> tuple[int, int, int]:
         if not parsed_batch:
             return 0, 0, 0
+        if self.settings.voice_call_shadow_enabled:
+            self._reconcile_voice_calls_shadow(session, parsed_batch, synced_at)
         call_ids = [parsed.call_id for parsed in parsed_batch]
         existing_ids = set(
             session.execute(
@@ -280,6 +294,7 @@ class VapiCostSyncService:
             missing_fx += int(parsed.cost_total_usd is not None and fx_rate is None)
             row = {
                 "call_id": parsed.call_id,
+                "voice_call_id": parsed.voice_call_id,
                 "tenant_id": parsed.tenant_id,
                 "to_number": parsed.to_number,
                 "phone_number_id": parsed.phone_number_id,
@@ -309,10 +324,17 @@ class VapiCostSyncService:
         if session.bind and session.bind.dialect.name == "postgresql":
             insert_stmt = pg_insert(VapiCallCost).values(rows)
             excluded = insert_stmt.excluded
+            update_values = {
+                key: getattr(excluded, key) for key in rows[0] if key != "call_id"
+            }
+            update_values["voice_call_id"] = func.coalesce(
+                excluded.voice_call_id,
+                VapiCallCost.voice_call_id,
+            )
             session.execute(
                 insert_stmt.on_conflict_do_update(
                     index_elements=[VapiCallCost.call_id],
-                    set_={key: getattr(excluded, key) for key in rows[0] if key != "call_id"},
+                    set_=update_values,
                 )
             )
             return created, updated, missing_fx
@@ -323,8 +345,61 @@ class VapiCostSyncService:
                 session.add(row)
             for key, value in values.items():
                 if key != "call_id":
+                    if key == "voice_call_id" and value is None and row.voice_call_id:
+                        continue
                     setattr(row, key, value)
         return created, updated, missing_fx
+
+    def _reconcile_voice_calls_shadow(
+        self,
+        session: Session,
+        parsed_batch: list[ParsedCallCost],
+        received_at: datetime,
+    ) -> None:
+        reconciler = VoiceCallReconciliationService()
+        for parsed in parsed_batch:
+            evidence = parsed.identity_evidence or VapiInboundIdentityEvidence(
+                call_id=parsed.call_id,
+                provider_org_id=None,
+                phone_number_id=parsed.phone_number_id,
+                did=None,
+                telephony_credential_id=None,
+                assistant_id=parsed.assistant_id,
+                sip_destination=None,
+                sip_header_names=(),
+            )
+            observation = InboundCallObservation(
+                provider="vapi",
+                source="sync",
+                event_type="call_snapshot",
+                evidence=evidence,
+                raw_payload=parsed.raw_call_json,
+                occurred_at=parsed.vapi_updated_at or parsed.vapi_created_at,
+                provider_created_at=parsed.vapi_created_at,
+                provider_updated_at=parsed.vapi_updated_at,
+                started_at=parsed.started_at,
+                ended_at=parsed.ended_at,
+                duration_seconds=parsed.duration_seconds,
+                provider_status=parsed.status,
+            )
+            try:
+                with session.begin_nested():
+                    result = reconciler.reconcile(
+                        session,
+                        observation,
+                        received_at=received_at,
+                    )
+                    if result.voice_call is not None:
+                        parsed.voice_call_id = result.voice_call.id
+            except Exception as exc:
+                parsed.voice_call_id = None
+                log.warning(
+                    "voice_call_shadow_reconciliation_failed",
+                    event_type="voice_call_shadow",
+                    provider="vapi",
+                    call_id=parsed.call_id,
+                    reason=str(exc)[:1000],
+                )
 
     @staticmethod
     def _extract_cost(
