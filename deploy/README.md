@@ -118,7 +118,7 @@ Use o reconciliador no container para conferir um periodo conhecido (a data
 final e exclusiva):
 
 ```bash
-docker compose -f docker-compose.production.yml --env-file .env.production exec app python -m scripts.reconcile_vapi_costs --start 2026-07-01 --end 2026-07-02 --tenant-id tenant_demo
+docker compose -f docker-compose.production.yml --env-file .env.production exec app python -m scripts.reconcile_vapi_costs --start 2026-07-01 --end 2026-07-02 --tenant-id pbsaude
 ```
 
 Quando contagens, USD e BRL passarem nos criterios, defina
@@ -136,7 +136,7 @@ curl -fsS https://api.seudominio.com/health
 Smoke remoto a partir da sua máquina local:
 
 ```powershell
-.\venv\Scripts\python.exe scripts\smoke_local.py --base-url https://api.seudominio.com --tenant-id tenant_demo --to-number +5511999999999 --webhook-secret "<WEBHOOK_SECRET>" --ops-email "<ADMIN_EMAIL>" --ops-password "<ADMIN_PASSWORD>" --load-calls 20 --load-workers 5
+.\venv\Scripts\python.exe scripts\smoke_local.py --base-url https://api.seudominio.com --tenant-id pbsaude --to-number +5511999999999 --webhook-secret "<WEBHOOK_SECRET>" --ops-email "<ADMIN_EMAIL>" --ops-password "<ADMIN_PASSWORD>" --load-calls 20 --load-workers 5
 ```
 
 ## 7. Configurar Vapi

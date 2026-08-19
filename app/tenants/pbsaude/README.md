@@ -4,6 +4,10 @@ Este diretorio concentra comportamento, vocabulario e integracoes especificas da
 PB Saude. Leia este guia para mudar tools, workflows, catalogo, provider externo,
 traducao da rede credenciada ou texto apresentado ao assistente.
 
+O identificador tecnico canonico desse cliente e `pbsaude`. Use `PB Saúde`
+somente como nome de exibicao; nao crie aliases de runtime para identificadores
+antigos ou provisórios.
+
 ## Limites
 
 - `tool_handlers.py` registra handlers no implementation key `pbsaude`.
