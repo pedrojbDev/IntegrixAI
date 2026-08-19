@@ -1,7 +1,12 @@
 {
-  "policy_version": 1,
+  "policy_version": 2,
   "tenant_ids": [
     "tenant_demo"
+  ],
+  "business_error_fallback_codes": [
+    "ESPECIALIDADE_INVALIDA",
+    "CIDADE_INVALIDA",
+    "CIDADE_SEM_COBERTURA"
   ],
   "cities": [
     {

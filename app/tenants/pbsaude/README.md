@@ -46,14 +46,26 @@ somente quando `PBSAUDE_PROVIDER_POLICY_ENABLED=true`, depois de uma resposta
 bem-sucedida do provider externo e antes do `SearchProvidersResponse`.
 
 Uma especialidade configurada usa o modo da cidade (`exclusive`, `priority` ou
-`ensure`). Especialidades nao configuradas preservam os resultados da API. O
-fallback estatico nunca contorna CPF invalido, erro de negocio, timeout ou
-indisponibilidade upstream. Servicos `online` omitem endereco e bairro no
-contrato devolvido e preservam o telefone confirmado pelo cliente.
+`ensure`). Especialidades nao configuradas preservam os resultados da API.
+Servicos `online` omitem endereco e bairro no contrato devolvido e preservam o
+telefone confirmado pelo cliente.
+
+Como contingencia temporaria para divergencias conhecidas no cadastro upstream,
+`PBSAUDE_PROVIDER_POLICY_BUSINESS_OVERRIDE_ENABLED=true` permite usar somente
+fallbacks autorizados no JSON quando a API responde com um dos codigos listados
+em `business_error_fallback_codes`. Essa semantica pertence a policy v2. A
+excecao ainda exige a flag principal, tenant, cidade e servico configurados e
+`use_as_fallback_when_missing_from_api`.
+O casamento da policy usa o servico original pedido pelo usuario, nao o valor
+fuzzy do catalogo. CPF invalido, timeout, autenticacao, HTTP 5xx,
+indisponibilidade, codigo nao permitido ou especialidade fora da policy nunca
+usam essa contingencia e mantem a transferencia humana.
 
 O `tenant_id` precisa constar explicitamente em `tenant_ids`; a flag sozinha nao
 habilita a politica para outro tenant. Logs de avaliacao registram contagens e a
-versao da policy, sem CPF, endereco ou telefone.
+versao da policy, sem CPF, endereco ou telefone. Eventos da contingencia tambem
+registram o codigo upstream e devem ser monitorados ate a API voltar a ser a
+fonte de verdade; o rollback operacional e desligar primeiro a flag de override.
 
 ## Texto Para Fala E Enderecos
 

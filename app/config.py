@@ -67,6 +67,7 @@ class Settings(BaseSettings):
     external_api_max_keepalive_connections: int = 20
     provider_max_results: int = 3
     pbsaude_provider_policy_enabled: bool = False
+    pbsaude_provider_policy_business_override_enabled: bool = False
     external_api_tenant_configs: dict[str, dict[str, str | float | bool | None]] = Field(
         default_factory=dict
     )
