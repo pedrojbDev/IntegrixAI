@@ -1,7 +1,7 @@
 {
   "policy_version": 2,
   "tenant_ids": [
-    "tenant_demo"
+    "pbsaude"
   ],
   "business_error_fallback_codes": [
     "ESPECIALIDADE_INVALIDA",

@@ -31,7 +31,7 @@ class SearchProvidersWorkflowTests(unittest.IsolatedAsyncioTestCase):
                         pbsaude_provider_policy_business_override_enabled=True,
                     ),
                     "call_123",
-                    "tenant_demo",
+                    "pbsaude",
                 )
 
         self.assertEqual("CPF_INVALIDO", exc.exception.code)
@@ -186,7 +186,7 @@ class SearchProvidersWorkflowTests(unittest.IsolatedAsyncioTestCase):
                 },
                 Settings(_env_file=None, pbsaude_provider_policy_enabled=True),
                 "call_policy",
-                "tenant_demo",
+                "pbsaude",
             )
 
         self.assertEqual(CallFinalState.RESOLVIDA_AUTOMATICO, final_state)
@@ -218,13 +218,13 @@ class SearchProvidersWorkflowTests(unittest.IsolatedAsyncioTestCase):
                 },
                 Settings(_env_file=None, pbsaude_provider_policy_enabled=True),
                 "call_original_service",
-                "tenant_demo",
+                "pbsaude",
             )
 
         self.assertEqual(CallFinalState.RESOLVIDA_AUTOMATICO, final_state)
         self.assertEqual("online", data["providers"][0]["service_mode"])
         provider.search_providers.assert_called_once_with(
-            "tenant_demo",
+            "pbsaude",
             "call_original_service",
             "Vitoria da Conquista",
             "MEDICO DO TRABALHO",
@@ -258,7 +258,7 @@ class SearchProvidersWorkflowTests(unittest.IsolatedAsyncioTestCase):
                     pbsaude_provider_policy_business_override_enabled=True,
                 ),
                 "call_business_override",
-                "tenant_demo",
+                "pbsaude",
             )
 
         self.assertEqual(CallFinalState.RESOLVIDA_AUTOMATICO, final_state)
@@ -324,7 +324,7 @@ class SearchProvidersWorkflowTests(unittest.IsolatedAsyncioTestCase):
                         pbsaude_provider_policy_business_override_enabled=True,
                     ),
                     "call_upstream_failure",
-                    "tenant_demo",
+                    "pbsaude",
                 )
 
         policy.assert_not_called()
@@ -358,7 +358,7 @@ class SearchProvidersWorkflowTests(unittest.IsolatedAsyncioTestCase):
                         pbsaude_provider_policy_business_override_enabled=True,
                     ),
                     "call_business_rule",
-                    "tenant_demo",
+                    "pbsaude",
                 )
 
         policy.assert_not_called()
@@ -388,7 +388,7 @@ class SearchProvidersWorkflowTests(unittest.IsolatedAsyncioTestCase):
                         pbsaude_provider_policy_business_override_enabled=True,
                     ),
                     "call_timeout",
-                    "tenant_demo",
+                    "pbsaude",
                 )
 
         policy.assert_not_called()

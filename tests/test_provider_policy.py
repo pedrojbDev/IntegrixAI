@@ -35,7 +35,7 @@ class ProviderPolicyTests(unittest.TestCase):
         load_provider_policy.cache_clear()
         cls.config = load_provider_policy()
 
-    def apply(self, providers, *, city, query, tenant_id="tenant_demo", config=None, limit=3):
+    def apply(self, providers, *, city, query, tenant_id="pbsaude", config=None, limit=3):
         return apply_provider_policy(
             providers,
             tenant_id=tenant_id,
@@ -48,7 +48,7 @@ class ProviderPolicyTests(unittest.TestCase):
 
     def test_loads_versioned_tenant_scoped_configuration(self) -> None:
         self.assertEqual(2, self.config.policy_version)
-        self.assertEqual(["tenant_demo"], self.config.tenant_ids)
+        self.assertEqual(["pbsaude"], self.config.tenant_ids)
         self.assertEqual(
             ["ESPECIALIDADE_INVALIDA", "CIDADE_INVALIDA", "CIDADE_SEM_COBERTURA"],
             self.config.business_error_fallback_codes,
@@ -100,7 +100,7 @@ class ProviderPolicyTests(unittest.TestCase):
 
         result = apply_provider_policy(
             upstream,
-            tenant_id="tenant_demo",
+            tenant_id="pbsaude",
             city="Salvador",
             query="Cardiologia",
             max_results=3,
@@ -178,7 +178,7 @@ class ProviderPolicyTests(unittest.TestCase):
         for error_code in self.config.business_error_fallback_codes:
             with self.subTest(error_code=error_code):
                 result = apply_provider_policy_business_override(
-                    tenant_id="tenant_demo",
+                    tenant_id="pbsaude",
                     city="Vitoria da Conquista",
                     query="Médico da Família",
                     business_error_code=error_code,
@@ -194,7 +194,7 @@ class ProviderPolicyTests(unittest.TestCase):
 
     def test_business_override_denies_unlisted_error_or_tenant(self) -> None:
         unsupported_error = apply_provider_policy_business_override(
-            tenant_id="tenant_demo",
+            tenant_id="pbsaude",
             city="Vitoria da Conquista",
             query="Médico da Família",
             business_error_code="CPF_INVALIDO",
@@ -224,7 +224,7 @@ class ProviderPolicyTests(unittest.TestCase):
                 override_enabled=override_enabled,
             ):
                 result = apply_provider_policy_business_override(
-                    tenant_id="tenant_demo",
+                    tenant_id="pbsaude",
                     city="Feira de Santana",
                     query="Médico da Família",
                     business_error_code="CIDADE_SEM_COBERTURA",
