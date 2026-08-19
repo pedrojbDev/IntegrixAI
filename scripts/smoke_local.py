@@ -64,7 +64,7 @@ def parse_args(env: dict[str, str]) -> argparse.Namespace:
     parser.add_argument("--to-number", default=infer_to_number(env) or "+5511999999999")
     parser.add_argument("--cpf", default="03457351538")
     parser.add_argument("--cidade", default="feira de santana")
-    parser.add_argument("--bairro", default="Centro")
+    parser.add_argument("--bairro", help="Legacy option accepted but ignored")
     parser.add_argument("--especialidade", default="cardiologia")
     parser.add_argument("--load-calls", type=int, default=20)
     parser.add_argument("--load-workers", type=int, default=5)
@@ -155,7 +155,6 @@ def check_search(client: httpx.Client, args: argparse.Namespace) -> str:
         arguments={
             "cpf": args.cpf,
             "cidade": args.cidade,
-            "bairro": args.bairro,
             "especialidade": args.especialidade,
         },
     )

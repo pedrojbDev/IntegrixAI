@@ -14,6 +14,7 @@ param(
 
     [string]$SearchCidade,
 
+    # Legacy parameter accepted during migration but intentionally not sent to k6.
     [string]$SearchBairro,
 
     [switch]$RandomizeSearchArgs,
@@ -106,9 +107,6 @@ function Invoke-K6Script {
     }
     if ($SearchCidade) {
         $k6Args += @("-e", "SEARCH_CIDADE=$SearchCidade")
-    }
-    if ($SearchBairro) {
-        $k6Args += @("-e", "SEARCH_BAIRRO=$SearchBairro")
     }
     $k6Args += $ScriptPath
 

@@ -9,7 +9,6 @@ const TO_NUMBER = __ENV.TO_NUMBER || "+5511999999999";
 const SEARCH_CPF = __ENV.SEARCH_CPF || "03457351538";
 const SEARCH_ESPECIALIDADE = __ENV.SEARCH_ESPECIALIDADE || "cardiologia";
 const SEARCH_CIDADE = __ENV.SEARCH_CIDADE || "feira de santana";
-const SEARCH_BAIRRO = __ENV.SEARCH_BAIRRO || "Centro";
 
 const toolOkRate = new Rate("tool_ok_rate");
 
@@ -55,7 +54,6 @@ function payloadForVu() {
               cpf: SEARCH_CPF,
               especialidade: SEARCH_ESPECIALIDADE,
               cidade: SEARCH_CIDADE,
-              bairro: SEARCH_BAIRRO,
             },
           },
         ],

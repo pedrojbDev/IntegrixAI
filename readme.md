@@ -420,7 +420,6 @@ Exemplo:
         "arguments": {
           "cpf": "03457351538",
           "cidade": "feira de santana",
-          "bairro": "Centro",
           "especialidade": "cardiologia"
         }
       }

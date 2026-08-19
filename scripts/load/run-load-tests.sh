@@ -18,7 +18,7 @@ AGGRESSIVE="false"
 usage() {
   cat <<'EOF'
 Usage:
-  ./scripts/load/run-load-tests.sh --base-url URL [--webhook-secret SECRET] [--webhook-secret-header HEADER] [--to-number DID] [--search-cpf CPF] [--search-especialidade TEXT] [--search-cidade TEXT] [--search-bairro TEXT] [--randomize-search-args] [--mode health|tools|idempotency|all] [--aggressive]
+  ./scripts/load/run-load-tests.sh --base-url URL [--webhook-secret SECRET] [--webhook-secret-header HEADER] [--to-number DID] [--search-cpf CPF] [--search-especialidade TEXT] [--search-cidade TEXT] [--search-bairro LEGACY_IGNORED] [--randomize-search-args] [--mode health|tools|idempotency|all] [--aggressive]
 EOF
 }
 
@@ -143,7 +143,6 @@ run_k6() {
   [[ -n "$SEARCH_CPF" ]] && args+=(-e "SEARCH_CPF=$SEARCH_CPF")
   [[ -n "$SEARCH_ESPECIALIDADE" ]] && args+=(-e "SEARCH_ESPECIALIDADE=$SEARCH_ESPECIALIDADE")
   [[ -n "$SEARCH_CIDADE" ]] && args+=(-e "SEARCH_CIDADE=$SEARCH_CIDADE")
-  [[ -n "$SEARCH_BAIRRO" ]] && args+=(-e "SEARCH_BAIRRO=$SEARCH_BAIRRO")
 
   args+=("$script_path")
   k6 "${args[@]}"
