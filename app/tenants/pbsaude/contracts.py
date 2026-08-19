@@ -1,4 +1,5 @@
 from datetime import date
+from typing import Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
@@ -40,6 +41,8 @@ class Provider(BaseModel):
     city: str
     neighborhood: str | None = None
     phone: str
+    service_mode: Literal["in_person", "online", "hybrid"] | None = None
+    provider_code: str | None = Field(default=None, exclude=True)
 
 
 class SearchProvidersRequest(ToolBase):

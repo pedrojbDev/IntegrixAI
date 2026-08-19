@@ -38,6 +38,23 @@ legada da Vapi durante a migracao, mas deve ser ignorado pelo workflow e nunca
 enviado ao provider. O bairro devolvido dentro de cada prestador continua sendo
 parte valida do endereco de resposta.
 
+## Politica De Prestadores Por Cidade
+
+`provider_policy.json` contem a lista versionada e tenant-scoped de prestadores
+curados pela PB Saude. `provider_policy.py` valida e aplica a configuracao
+somente quando `PBSAUDE_PROVIDER_POLICY_ENABLED=true`, depois de uma resposta
+bem-sucedida do provider externo e antes do `SearchProvidersResponse`.
+
+Uma especialidade configurada usa o modo da cidade (`exclusive`, `priority` ou
+`ensure`). Especialidades nao configuradas preservam os resultados da API. O
+fallback estatico nunca contorna CPF invalido, erro de negocio, timeout ou
+indisponibilidade upstream. Servicos `online` omitem endereco e bairro no
+contrato devolvido e preservam o telefone confirmado pelo cliente.
+
+O `tenant_id` precisa constar explicitamente em `tenant_ids`; a flag sozinha nao
+habilita a politica para outro tenant. Logs de avaliacao registram contagens e a
+versao da policy, sem CPF, endereco ou telefone.
+
 ## Texto Para Fala E Enderecos
 
 `integration/speech_text.py` normaliza Unicode e aplica somente correcoes

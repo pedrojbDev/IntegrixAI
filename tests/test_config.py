@@ -28,6 +28,15 @@ def production_settings(**overrides):
 
 
 class SettingsTests(unittest.TestCase):
+    def test_pbsaude_provider_policy_is_opt_in(self) -> None:
+        self.assertFalse(Settings(_env_file=None).pbsaude_provider_policy_enabled)
+        self.assertTrue(
+            Settings(
+                _env_file=None,
+                pbsaude_provider_policy_enabled=True,
+            ).pbsaude_provider_policy_enabled
+        )
+
     def test_production_requires_webhook_secret(self) -> None:
         with self.assertRaisesRegex(ValidationError, "WEBHOOK_SECRET"):
             production_settings(webhook_secret=None)

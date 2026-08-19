@@ -1,0 +1,306 @@
+{
+  "policy_version": 1,
+  "tenant_ids": [
+    "tenant_demo"
+  ],
+  "cities": [
+    {
+      "uf": "BA",
+      "city": "Salvador",
+      "city_key": "salvador",
+      "mode": "exclusive",
+      "unmatched_specialty_behavior": "use_api_results",
+      "providers": [
+        {
+          "key": "centro_medico_pituba",
+          "name": "Centro Médico Pituba",
+          "aliases": [],
+          "provider_code": null,
+          "address": "Ed. Antônio Fernando Silvany - Rua das Hortênsias, 274 - Pituba, Salvador - BA, 41810-010 - Antigo Prédio do DHPP, em frente ao Colégio Militar",
+          "neighborhood": "Pituba",
+          "phone": "0800 940 9778",
+          "services": [
+            {
+              "name": "Médico da Família",
+              "aliases": ["Médico de Família", "Medicina de Família e Comunidade"],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "Enfermagem",
+              "aliases": [],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "Clínica Médica",
+              "aliases": ["Clínico geral", "Clínico"],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "Cardiologia",
+              "aliases": ["Cardiologista"],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "Ginecologia e Obstetrícia",
+              "aliases": ["Ginecologia", "Ginecologista", "Obstetrícia", "Obstetra"],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "Gastroenterologia",
+              "aliases": ["Gastroenterologista"],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "Medicina da Dor",
+              "aliases": [],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "Fisioterapia",
+              "aliases": ["Fisioterapeuta"],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "Nutrição/Bioimpedanciometria",
+              "aliases": ["Nutrição", "Nutricionista", "Bioimpedanciometria"],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "Psicologia",
+              "aliases": ["Psicólogo", "Psicóloga"],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "Dermatologia",
+              "aliases": ["Dermatologista"],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "Infectologista",
+              "aliases": ["Infectologia"],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "Urologista",
+              "aliases": ["Urologia"],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "Psiquiatra",
+              "aliases": ["Psiquiatria"],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "Cirurgião Geral",
+              "aliases": ["Cirurgia Geral"],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "Cirurgião Ginecológico",
+              "aliases": ["Cirurgia Ginecológica"],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "Ortopedia",
+              "aliases": ["Ortopedista"],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "Pediatra",
+              "aliases": ["Pediatria"],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "Nefrologia",
+              "aliases": ["Nefrologista"],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "Anestesiologia",
+              "aliases": ["Anestesista"],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "Exames de Laboratório",
+              "aliases": ["Laboratório", "Exames laboratoriais", "Exame de sangue"],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "Ultrassonografia",
+              "aliases": ["Ultrassom"],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "MAPA e Holter 24h",
+              "aliases": ["MAPA", "Holter", "Holter 24h", "Monitorização ambulatorial da pressão arterial"],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "ECG",
+              "aliases": ["Eletrocardiograma"],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "Preventivo e Retirada de DIU",
+              "aliases": ["Preventivo", "Papanicolau", "Retirada de DIU"],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "Cultura para Streptococcus",
+              "aliases": ["Cultura para estreptococo"],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "Inserção/Retirada de DIU e Implanon",
+              "aliases": ["Inserção de DIU", "Retirada de DIU", "Inserção de Implanon", "Retirada de Implanon", "Implanon"],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "Exérese de lesão e Biópsia do colo uterino",
+              "aliases": ["Exérese de lesão", "Biópsia do colo uterino"],
+              "service_mode": "in_person"
+            }
+          ],
+          "priority": 1,
+          "active": true,
+          "use_as_fallback_when_missing_from_api": true,
+          "information_source": "client_provided",
+          "last_verified_at": "2026-08-12"
+        },
+        {
+          "key": "hospital_pituba_rede_grand",
+          "name": "Hospital Pituba - Rede Grand",
+          "aliases": ["Hospital Pituba", "Hospital Pituba Rede Grand"],
+          "provider_code": null,
+          "address": "Rua das Hortênsias, 668 - Pituba, Salvador - BA, 41810-010",
+          "neighborhood": "Pituba",
+          "phone": "(71) 98247-7487",
+          "services": [
+            {
+              "name": "Raio X",
+              "aliases": ["Raio-X", "Radiografia", "Radiologia"],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "Endoscopia",
+              "aliases": [],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "Colonoscopia",
+              "aliases": [],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "Sutura simples",
+              "aliases": ["Sutura"],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "Biópsia incisional",
+              "aliases": [],
+              "service_mode": "in_person"
+            },
+            {
+              "name": "Procedimentos dermatológicos",
+              "aliases": ["Shaving", "Eletrocauterização", "Eletrocoagulação", "Infiltração lesional", "Biópsia de lesão", "Exérese de lesões dermatológicas"],
+              "service_mode": "in_person"
+            }
+          ],
+          "priority": 2,
+          "active": true,
+          "use_as_fallback_when_missing_from_api": true,
+          "information_source": "client_provided",
+          "last_verified_at": "2026-08-12"
+        }
+      ]
+    },
+    {
+      "uf": "GO",
+      "city": "Goiânia",
+      "city_key": "goiania",
+      "mode": "exclusive",
+      "unmatched_specialty_behavior": "use_api_results",
+      "providers": [
+        {
+          "key": "hospital_santa_maria",
+          "name": "Hospital Santa Maria",
+          "aliases": [],
+          "provider_code": null,
+          "address": "Rua 68, quadra 125, lote 45, Setor Central",
+          "neighborhood": "Setor Central",
+          "phone": "(62) 3877-9610",
+          "services": [
+            {"name": "Ortopedia", "aliases": ["Ortopedista"], "service_mode": "in_person"},
+            {"name": "Pediatria", "aliases": ["Pediatra"], "service_mode": "in_person"},
+            {"name": "Clínico geral", "aliases": ["Clínica Médica", "Clínico"], "service_mode": "in_person"},
+            {"name": "Enfermagem", "aliases": [], "service_mode": "in_person"},
+            {"name": "Médico da Família", "aliases": ["Médico de Família", "Medicina de Família e Comunidade"], "service_mode": "in_person"},
+            {"name": "Ginecologia", "aliases": ["Ginecologista"], "service_mode": "in_person"},
+            {"name": "Bucomaxilofacial", "aliases": ["Cirurgia Bucomaxilofacial"], "service_mode": "in_person"},
+            {"name": "Cardiologia", "aliases": ["Cardiologista"], "service_mode": "in_person"}
+          ],
+          "priority": 1,
+          "active": true,
+          "use_as_fallback_when_missing_from_api": true,
+          "information_source": "client_provided",
+          "last_verified_at": "2026-08-12"
+        }
+      ]
+    },
+    {
+      "uf": "BA",
+      "city": "Vitória da Conquista",
+      "city_key": "vitoria_da_conquista",
+      "mode": "exclusive",
+      "unmatched_specialty_behavior": "use_api_results",
+      "providers": [
+        {
+          "key": "centro_medico_rede_grand_vitoria_da_conquista",
+          "name": "Centro Médico Rede Grand – Vitória da Conquista",
+          "aliases": ["Centro Médico Rede Grand Vitória da Conquista"],
+          "provider_code": null,
+          "address": "Avenida Otávio Santos, nº 227 – Centro Médico Otávio Santos – Recreio",
+          "neighborhood": "Recreio",
+          "phone": "0800 940 9778",
+          "services": [
+            {"name": "Médico da Família", "aliases": ["Médico de Família", "Medicina de Família e Comunidade"], "service_mode": "online"},
+            {"name": "Enfermagem", "aliases": [], "service_mode": "online"}
+          ],
+          "priority": 1,
+          "active": true,
+          "use_as_fallback_when_missing_from_api": true,
+          "information_source": "client_provided",
+          "last_verified_at": "2026-08-12"
+        }
+      ]
+    },
+    {
+      "uf": "BA",
+      "city": "Feira de Santana",
+      "city_key": "feira_de_santana",
+      "mode": "exclusive",
+      "unmatched_specialty_behavior": "use_api_results",
+      "providers": [
+        {
+          "key": "centro_medico_rede_grand_feira_de_santana",
+          "name": "Centro Médico Rede Grand – Feira de Santana",
+          "aliases": ["Centro Médico Rede Grand Feira de Santana"],
+          "provider_code": null,
+          "address": "Rua Cel. Álvaro Simões, 130 – Centro, Ed. Jorge Leal Trade Center – 5º andar",
+          "neighborhood": "Centro",
+          "phone": "0800 940 9778",
+          "services": [
+            {"name": "Médico da Família", "aliases": ["Médico de Família", "Medicina de Família e Comunidade"], "service_mode": "in_person"},
+            {"name": "Enfermagem", "aliases": [], "service_mode": "in_person"}
+          ],
+          "priority": 1,
+          "active": true,
+          "use_as_fallback_when_missing_from_api": true,
+          "information_source": "client_provided",
+          "last_verified_at": "2026-08-12"
+        }
+      ]
+    }
+  ]
+}
