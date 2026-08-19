@@ -14,6 +14,8 @@ exige pedido explicito do usuario e confirmacao do alvo antes da execucao.
 - A branch canonica de producao e `main` depois da consolidacao do historico.
 - O Compose da aplicacao e `docker-compose.production.yml`.
 - Variaveis e segredos vivem no arquivo privado `.env.production` do host.
+- Backups, diagnosticos e artefatos de rollback vivem em `/opt/integrix-ops`,
+  fora do worktree, com acesso restrito ao operador.
 - O schema e controlado por Alembic; confirme `current` e `heads` em cada
   rollout.
 - O endereco, usuario e diretorio do host devem ser obtidos do inventario
@@ -66,6 +68,27 @@ Se houver arquivos modificados ou nao rastreados no host, interrompa a
 atualizacao ate identificar sua finalidade. Nao use `git reset --hard`,
 `git clean`, `git checkout --` ou outra operacao que possa apagar estado local.
 
+## Artefatos Operacionais Fora Do Worktree
+
+Use `/opt/integrix-ops` para preservar backups, diagnosticos, testes de
+conectividade, configuracoes anteriores do Caddy e rollbacks da landing. O
+diretorio deve pertencer ao operador autorizado e aceitar acesso somente dele:
+
+```bash
+install -d -m 700 /opt/integrix-ops
+install -d -m 700 /opt/integrix-ops/backups
+install -d -m 700 /opt/integrix-ops/diagnostics
+install -d -m 700 /opt/integrix-ops/rollbacks
+```
+
+Antes de mover qualquer artefato encontrado no worktree, registre seu caminho,
+tamanho e hash. Mova somente arquivos ja identificados e preserve seus nomes e
+datas; nunca apague diagnosticos ou rollbacks durante um deploy.
+
+O catalogo operacional `data/especialidade.csv` e privado e nao faz parte da
+imagem nem do Git. Mantenha sua copia ativa no host e confirme explicitamente
+como ela e disponibilizada ao runtime antes de trocar a aplicacao.
+
 ## Segredos E Acesso
 
 Segredos permanecem somente no ambiente privado. Nunca:
@@ -86,19 +109,48 @@ gravar credenciais permanentes.
 Leia tambem [deploy/README.md](../deploy/README.md). Para uma instalacao
 existente:
 
-1. Entregar ao host o commit aprovado de `main` sem sobrescrever estado local.
-2. Confirmar novamente o hash recebido e o diff esperado.
-3. Construir a nova imagem da aplicacao.
-4. Aplicar migrations em container temporario.
-5. Substituir somente o servico `app` quando banco e proxy nao mudaram.
-6. Validar health interno e publico, migration, logs e o fluxo alterado.
-7. Observar erros e metricas durante a janela definida para o rollout.
+1. Criar e validar o backup descrito abaixo.
+2. Entregar ao host o merge commit aprovado de `main`, sem sobrescrever estado
+   local.
+3. Comparar qualquer `deploy/Caddyfile` local com o arquivo aprovado. Se o diff
+   nao representar exatamente o hardening incorporado ao release, abortar.
+4. Guardar um diff intencional em stash nomeado e avancar `main` somente por
+   fast-forward.
+5. Marcar a imagem atual como rollback e construir a nova imagem.
+6. Aplicar migrations em container temporario e validar o schema.
+7. Substituir somente o servico `app` quando banco e proxy nao mudaram.
+8. Publicar a landing de forma atomica, mantendo o dist anterior em
+   `/opt/integrix-ops/rollbacks`.
+9. Validar health interno e publico, migration, headers, dashboard, metricas
+   bloqueadas, logs e o fluxo alterado.
+10. Observar erros e metricas durante toda a janela definida para o rollout.
+
+### Backup Verificavel
+
+Crie o backup em `/opt/integrix-ops/backups` no formato custom do PostgreSQL,
+valide o catalogo e registre o SHA-256 antes da migration. Use valores obtidos
+do `.env.production` sem imprimi-los no terminal ou em logs compartilhados.
+
+```bash
+docker compose -f docker-compose.production.yml --env-file .env.production \
+  exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' \
+  > /opt/integrix-ops/backups/pre-rollout.dump
+docker compose -f docker-compose.production.yml --env-file .env.production \
+  exec -T postgres pg_restore --list \
+  < /opt/integrix-ops/backups/pre-rollout.dump >/dev/null
+sha256sum /opt/integrix-ops/backups/pre-rollout.dump \
+  > /opt/integrix-ops/backups/pre-rollout.dump.sha256
+```
+
+Substitua o nome generico por um identificador imutavel de data e merge commit
+durante a execucao. Um backup vazio, ilegivel ou sem hash interrompe o rollout.
 
 Comandos da etapa de aplicacao, somente depois das confirmacoes anteriores:
 
 ```bash
 docker compose -f docker-compose.production.yml --env-file .env.production build app
 docker compose -f docker-compose.production.yml --env-file .env.production run --rm app alembic upgrade head
+docker compose -f docker-compose.production.yml --env-file .env.production run --rm app alembic check
 docker compose -f docker-compose.production.yml --env-file .env.production up -d --no-deps app
 docker compose -f docker-compose.production.yml --env-file .env.production exec -T app alembic current
 docker compose -f docker-compose.production.yml --env-file .env.production logs --tail=100 app
@@ -158,6 +210,10 @@ rollback de codigo:
 3. preservar chamadas e eventos brutos para reprocessamento;
 4. substituir somente a aplicacao;
 5. validar os mesmos sinais usados no rollout.
+
+Se a aplicacao falhar depois de uma migration compativel, restaure a imagem
+anterior sem executar downgrade do banco. Se somente a landing falhar, restaure
+o dist anterior preservado fora do worktree.
 
 Suspenda o rollout quando houver migration divergente, health instavel, erro de
 autorizacao, perda de tenant scope, duplicacao financeira ou aumento persistente

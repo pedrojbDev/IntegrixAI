@@ -81,16 +81,28 @@ https://integrix.com.br
 
 ## 8. Atualizar Depois De Mudancas
 
-Sempre que alterar a landing:
+Sempre que alterar a landing, construa em um diretorio temporario, preserve o
+dist anterior fora do worktree e publique os assets antes de substituir o
+`index.html`. O rename final evita que o HTML aponte para assets ainda ausentes.
 
 ```bash
-git pull
 cd landing
 npm ci
-npm run build
+npm run build -- --outDir dist.next --emptyOutDir
 cd ..
-docker compose -f deploy/docker-compose.landing.yml --env-file .env.landing restart caddy
+install -d -m 700 /opt/integrix-ops/rollbacks
+release_id="20260818T120000Z-abcdef0"
+cp -a landing/dist "/opt/integrix-ops/rollbacks/landing-${release_id}"
+install -d landing/dist
+find landing/dist.next -mindepth 1 -maxdepth 1 ! -name index.html \
+  -exec cp -a {} landing/dist/ \;
+install -m 644 landing/dist.next/index.html landing/dist/index.html.next
+mv landing/dist/index.html.next landing/dist/index.html
 ```
+
+Use um nome imutavel com data e merge commit para o rollback real. Se a
+validacao falhar, restaure o diretorio anterior sem alterar a aplicacao ou o
+banco.
 
 ## 9. Quando O Backend For Para VPS
 

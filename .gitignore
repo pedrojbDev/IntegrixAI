@@ -49,6 +49,7 @@ artifacts/
 *.sqlite3
 *.db
 *.db-journal
+/data/especialidade.csv
 
 # IDE / OS
 .idea/
