@@ -1,58 +1,43 @@
 ---
 name: pydantic-models-py
-description: Create Pydantic models following the multi-model pattern with Base, Create, Update, Response, and InDB variants. Use when defining API request/response schemas, database models, or data validation in Python applications using Pydantic v2.
+description: Create or change Pydantic v2 request, response, tool, or tenant contracts in IntegrixAI. Use when validation, serialization, aliases, discriminators, or API model boundaries change; do not use for SQLAlchemy ORM models or force a generic Base/Create/Update/InDB hierarchy.
 ---
 
-# Pydantic Models
+# Pydantic Contracts In IntegrixAI
 
-Create Pydantic models following the multi-model pattern for clean API contracts.
+## Place The Contract Correctly
 
-## Quick Start
+- Put HTTP-facing schemas in `app/schemas`.
+- Put shared tool envelopes in `app/core/tools/contracts.py`.
+- Put tenant-specific request/response vocabulary in the owning
+  `app/tenants/<tenant>/contracts.py` module.
+- Keep SQLAlchemy persistence models in `app/models`; they are not Pydantic
+  `InDB` documents.
+- Preserve compatibility re-exports in `app/schemas/__init__.py` or existing
+  shims when callers depend on them.
 
-Copy the template from [assets/template.py](assets/template.py) and replace placeholders:
-- `{{ResourceName}}` → PascalCase name (e.g., `Project`)
-- `{{resource_name}}` → snake_case name (e.g., `project`)
+## Modeling Rules
 
-## Multi-Model Pattern
+1. Inspect adjacent contracts and consumers before creating a hierarchy.
+2. Use Pydantic v2 APIs such as `ConfigDict`, `field_validator` and
+   `model_validator`; do not add v1 `class Config` patterns.
+3. Set `extra="forbid"` for controlled internal/admin inputs and
+   `extra="ignore"` only where provider compatibility requires forward
+   tolerance.
+4. Add aliases only when an external contract requires them. Preserve provider
+   field names at the boundary and translate to internal names explicitly.
+5. Keep update fields optional only when the endpoint truly supports partial
+   updates; distinguish omitted values from explicit `null` when behavior
+   depends on it.
+6. Bound strings and collections that reach persistence, logs or external
+   systems. Normalize deterministically in validators.
+7. Never silently add a Retell envelope to the Vapi contract; introduce a
+   provider-specific boundary translator and retain one internal invocation
+   model.
 
-| Model | Purpose |
-|-------|---------|
-| `Base` | Common fields shared across models |
-| `Create` | Request body for creation (required fields) |
-| `Update` | Request body for updates (all optional) |
-| `Response` | API response with all fields |
-| `InDB` | Database document with `doc_type` |
+## Validation
 
-## camelCase Aliases
-
-```python
-class MyModel(BaseModel):
-    workspace_id: str = Field(..., alias="workspaceId")
-    created_at: datetime = Field(..., alias="createdAt")
-    
-    class Config:
-        populate_by_name = True  # Accept both snake_case and camelCase
-```
-
-## Optional Update Fields
-
-```python
-class MyUpdate(BaseModel):
-    """All fields optional for PATCH requests."""
-    name: Optional[str] = Field(None, min_length=1)
-    description: Optional[str] = None
-```
-
-## Database Document
-
-```python
-class MyInDB(MyResponse):
-    """Adds doc_type for Cosmos DB queries."""
-    doc_type: str = "my_resource"
-```
-
-## Integration Steps
-
-1. Create models in `src/backend/app/models/`
-2. Export from `src/backend/app/models/__init__.py`
-3. Add corresponding TypeScript types
+- Test valid input, missing/extra fields, normalization and serialization.
+- Test compatibility envelopes with representative provider payloads.
+- For persistence changes, update SQLAlchemy models and Alembic separately and
+  validate all three together.

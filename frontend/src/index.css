@@ -1,0 +1,90 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --font-sans: "Geist", "Aptos", "Segoe UI", sans-serif;
+    --font-mono: "Geist Mono", "Cascadia Code", monospace;
+    --background: 220 24% 8%;
+    --foreground: 210 18% 92%;
+    --card: 220 22% 11%;
+    --card-foreground: 210 18% 92%;
+    --popover: 220 22% 11%;
+    --popover-foreground: 210 18% 92%;
+    --primary: 162 60% 54%;
+    --primary-foreground: 170 40% 8%;
+    --secondary: 219 16% 17%;
+    --secondary-foreground: 214 16% 86%;
+    --muted: 220 16% 15%;
+    --muted-foreground: 217 11% 63%;
+    --accent: 214 28% 20%;
+    --accent-foreground: 210 18% 92%;
+    --destructive: 2 70% 58%;
+    --destructive-foreground: 0 0% 98%;
+    --success: 146 54% 48%;
+    --success-foreground: 150 42% 8%;
+    --warning: 42 82% 58%;
+    --warning-foreground: 32 50% 9%;
+    --border: 219 17% 20%;
+    --input: 219 17% 20%;
+    --ring: 162 60% 54%;
+    --radius: 0.5rem;
+  }
+
+  .light {
+    --background: 210 30% 98%;
+    --foreground: 220 20% 9%;
+    --card: 0 0% 100%;
+    --card-foreground: 220 20% 9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 20% 9%;
+    --primary: 164 62% 34%;
+    --primary-foreground: 160 24% 96%;
+    --secondary: 210 22% 94%;
+    --secondary-foreground: 220 20% 12%;
+    --muted: 210 22% 94%;
+    --muted-foreground: 217 10% 42%;
+    --accent: 210 24% 90%;
+    --accent-foreground: 220 20% 12%;
+    --destructive: 2 70% 48%;
+    --destructive-foreground: 0 0% 98%;
+    --success: 146 54% 38%;
+    --success-foreground: 150 42% 98%;
+    --warning: 40 76% 45%;
+    --warning-foreground: 36 30% 98%;
+    --border: 214 18% 86%;
+    --input: 214 18% 86%;
+    --ring: 164 62% 34%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  html.light {
+    color-scheme: light;
+  }
+
+  body {
+    @apply min-h-screen bg-background text-foreground antialiased;
+    font-feature-settings: "tnum" 1, "cv02" 1, "cv03" 1, "cv04" 1;
+  }
+
+  ::selection {
+    @apply bg-primary text-primary-foreground;
+  }
+}
+
+@layer components {
+  .dashboard-grid {
+    background-image:
+      linear-gradient(hsl(var(--border) / 0.28) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(var(--border) / 0.28) 1px, transparent 1px);
+    background-size: 42px 42px;
+  }
+}

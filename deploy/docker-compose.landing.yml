@@ -1,0 +1,20 @@
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: integrix-landing-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      LANDING_DOMAIN: ${LANDING_DOMAIN:?LANDING_DOMAIN is required}
+      CADDY_EMAIL: ${CADDY_EMAIL:?CADDY_EMAIL is required}
+    volumes:
+      - ./deploy/Caddyfile.landing:/etc/caddy/Caddyfile:ro
+      - ./landing/dist:/srv/integrix/landing:ro
+      - landing_caddy_data:/data
+      - landing_caddy_config:/config
+
+volumes:
+  landing_caddy_data:
+  landing_caddy_config:

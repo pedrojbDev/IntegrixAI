@@ -1,0 +1,17 @@
+{
+	email {$CADDY_EMAIL}
+}
+
+{$LANDING_DOMAIN} {
+	encode zstd gzip
+
+	root * /srv/integrix/landing
+	try_files {path} /index.html
+	file_server
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+	}
+}

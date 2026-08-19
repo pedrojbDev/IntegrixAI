@@ -1,0 +1,26 @@
+[project]
+name = "IntegrixAI"
+language = "python"
+entrypoint = "app/main.py"
+test_command = "python -m unittest"
+
+[orchestration]
+max_parallel_agents = 3
+default_reasoning = "medium"
+prefer_specialized_agents = true
+require_explicit_ownership = true
+
+[sandbox]
+mode = "workspace-write"
+network_access = "restricted"
+
+[conventions]
+preserve_existing_skills = true
+preserve_compat_shims = true
+prefer_incremental_changes = true
+validate_after_changes = true
+
+[paths]
+skills_dir = ".agents/skills"
+agents_dir = ".codex/agents"
+docs_guide = ".codex/ORCHESTRATION.md"

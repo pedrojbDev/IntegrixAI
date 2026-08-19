@@ -1,0 +1,31 @@
+services:
+  alloy:
+    image: grafana/alloy:v1.18.0@sha256:491b0578c04983fd54fe99b587b6fab4404dc46d0dc16677bd6b00cc1140b308
+    container_name: integrix-alloy
+    restart: unless-stopped
+    privileged: true
+    depends_on:
+      - app
+    environment:
+      GRAFANA_CLOUD_PROMETHEUS_URL: ${GRAFANA_CLOUD_PROMETHEUS_URL:?GRAFANA_CLOUD_PROMETHEUS_URL is required}
+      GRAFANA_CLOUD_PROMETHEUS_USERNAME: ${GRAFANA_CLOUD_PROMETHEUS_USERNAME:?GRAFANA_CLOUD_PROMETHEUS_USERNAME is required}
+      GRAFANA_CLOUD_API_KEY: ${GRAFANA_CLOUD_API_KEY:?GRAFANA_CLOUD_API_KEY is required}
+      MONITORING_ENVIRONMENT: ${ENVIRONMENT:-production}
+      MONITORING_INSTANCE: ${MONITORING_INSTANCE:-integrix-vps}
+    command:
+      - run
+      - --server.http.listen-addr=127.0.0.1:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    volumes:
+      - ./deploy/monitoring/config.alloy:/etc/alloy/config.alloy:ro
+      - alloy_data:/var/lib/alloy/data
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /dev/disk:/dev/disk:ro
+
+volumes:
+  alloy_data:

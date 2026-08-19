@@ -13,12 +13,22 @@ class Base(DeclarativeBase):
 def get_engine():
     settings = get_settings()
     connect_args = {}
-    if settings.database_url.startswith("postgresql"):
+    engine_kwargs = {}
+    if settings.database_url.lower().startswith("postgresql"):
         connect_args["connect_timeout"] = int(settings.db_connect_timeout_seconds)
+        engine_kwargs.update(
+            {
+                "pool_size": settings.db_pool_size,
+                "max_overflow": settings.db_max_overflow,
+                "pool_timeout": settings.db_pool_timeout_seconds,
+                "pool_recycle": settings.db_pool_recycle_seconds,
+            }
+        )
     return create_engine(
         settings.database_url,
         pool_pre_ping=True,
         connect_args=connect_args,
+        **engine_kwargs,
     )
 
 

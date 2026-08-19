@@ -2,15 +2,18 @@
 .env
 .env.*
 !.env.example
+!.env.production.example
 
 # Virtual environments
 venv/
 .venv/
-env/
+/env/
 
 # Python cache / compiled
 __pycache__/
+**/__pycache__/
 *.py[cod]
+**/*.py[cod]
 *$py.class
 
 # Build / packaging
@@ -39,10 +42,14 @@ htmlcov/
 *.seed
 *.out
 
+# Local client/reference artifacts and document-render QA
+artifacts/
+
 # Databases / local data
 *.sqlite3
 *.db
 *.db-journal
+/data/especialidade.csv
 
 # IDE / OS
 .idea/

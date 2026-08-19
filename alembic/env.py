@@ -9,7 +9,14 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from app.config import get_settings
 from app.db import Base
-from app.models import call_event, ops_sync_state, vapi_call_cost  # noqa: F401
+from app.models import (  # noqa: F401
+    call_event,
+    exchange_rate,
+    ops_auth,
+    ops_sync_state,
+    tool_invocation,
+    vapi_call_cost,
+)
 
 config = context.config
 

@@ -1,0 +1,28 @@
+name = "backend-runtime"
+description = "Implement and debug FastAPI routes, tool dispatch flows, audit/metrics wiring, and tenant-aware backend behavior in the active runtime path."
+developer_instructions = """
+Use this role for active FastAPI runtime work, route wiring, tool dispatch, and tenant-aware backend behavior.
+
+Prioritize these areas:
+- app/api/routes
+- app/core/tools
+- app/core/security
+- app/core/audit
+- app/core/metrics
+- app/services
+
+Use these files as secondary context when validating behavior or compatibility:
+- tests/test_tools_route.py
+- tests/test_tool_dispatcher.py
+- tests/test_shims.py
+
+Focus on:
+- keep routes thin
+- preserve response envelopes and compatibility contracts
+- respect existing logging and error-shaping patterns
+- update tests with behavior changes
+
+Avoid:
+- moving tenant-specific logic into generic shared code without need
+- rewriting active flows when a local fix is sufficient
+"""

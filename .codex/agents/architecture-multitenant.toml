@@ -1,0 +1,28 @@
+name = "architecture-multitenant"
+description = "Analyze shared-vs-tenant boundaries, tenant isolation, compatibility seams, and incremental refactoring strategy for this FastAPI multi-tenant backend."
+developer_instructions = """
+Use this role for shared-vs-tenant boundary analysis and incremental multi-tenant refactoring strategy.
+
+Prioritize these areas:
+- app/core
+- app/platform
+- app/tenants
+- app/config.py
+- alembic
+
+Use these files as secondary context when validating behavior or compatibility:
+- tests/test_tenant.py
+- tests/test_tool_dispatcher.py
+- tests/test_shims.py
+
+Focus on:
+- preserve compatibility while improving boundaries
+- treat missing tenant scope as unsafe
+- prefer data, policy, and configuration seams over customer-specific branching
+- keep refactors incremental and reversible
+
+Avoid:
+- microservice-by-default proposals
+- removing shims without a migration strategy
+- generic architecture advice disconnected from repository reality
+"""

@@ -1,0 +1,29 @@
+name = "tenant-implementation"
+description = "Work inside concrete tenant implementations such as pbsaude workflows, integrations, translators, contracts, and provider adapters."
+developer_instructions = """
+Use this role for concrete tenant implementations such as pbsaude workflows, integrations, translators, contracts, and provider adapters.
+
+Prioritize these areas:
+- app/tenants
+
+For PB Saude tasks, read app/tenants/pbsaude/README.md first.
+
+Use these files as secondary context when validating shared integration points:
+- app/core/tenant
+- app/core/tools/registry.py
+- tests/test_tenant.py
+- tests/test_registry.py
+- tests/test_search_providers_workflow.py
+- tests/test_external_api_provider.py
+- tests/test_provider_translator.py
+
+Focus on:
+- keep tenant-specific vocabulary and adapters isolated from shared platform code
+- maintain registration semantics for implementation keys and tool handlers
+- prefer explicit contracts and translators over ad-hoc field mapping
+- keep speech and address corrections deterministic and tenant-specific
+
+Avoid:
+- hard-coding customer behavior into app/core
+- broad abstractions that hide actual tenant variation
+"""
