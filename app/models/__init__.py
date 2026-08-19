@@ -6,8 +6,12 @@ from .call_event import CallEvent
 from .exchange_rate import ExchangeRate
 from .ops_auth import OpsAuthEvent, OpsSession, OpsUser, OpsUserTenant
 from .ops_sync_state import OpsSyncState
+from .provider_event_receipt import ProviderEventReceipt
+from .provider_resource import ProviderResource, ProviderResourceOwnership
+from .tenant import TenantRecord
 from .tool_invocation import ToolBusinessErrorAttempt, ToolInvocationResult
 from .vapi_call_cost import VapiCallCost
+from .voice_call import VoiceCall
 
 __all__ = [
     "CallEvent",
@@ -17,7 +21,12 @@ __all__ = [
     "OpsUser",
     "OpsUserTenant",
     "OpsSyncState",
+    "ProviderEventReceipt",
+    "ProviderResource",
+    "ProviderResourceOwnership",
+    "TenantRecord",
     "ToolBusinessErrorAttempt",
     "ToolInvocationResult",
     "VapiCallCost",
+    "VoiceCall",
 ]

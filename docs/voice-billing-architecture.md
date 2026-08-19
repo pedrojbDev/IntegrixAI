@@ -1,9 +1,9 @@
 # Arquitetura De Chamadas, Billing, Wallet E FinOps
 
-> Status: proposta arquitetural de referencia para orientar as proximas fases.
+> Status: proposta arquitetural de referencia, com ownership e reconciliacao
+> de `voice_call` implementados em shadow e sem enforcement produtivo.
 >
-> Escopo: modelo de dominio e fluxos conceituais. Este documento nao define
-> schema SQL, migrations ou implementacao.
+> Escopo: modelo de dominio, fluxos conceituais e registro do estado incremental.
 >
 > Contexto operacional atual: a Integrix opera somente chamadas inbound.
 > Outbound aparece apenas como compatibilidade arquitetural futura e esta fora
@@ -11,6 +11,36 @@
 >
 > Publico: pessoas desenvolvedoras e assistentes de IA trabalhando no
 > repositorio IntegrixAI.
+
+## Estado Da Implementacao
+
+A migration `0008_tenant_ownership` introduz somente a fundacao persistida:
+`tenant`, `provider_resource` e `provider_resource_ownership`. Ela cadastra
+apenas o tenant `pbsaude`; nao cria um Tenant Demo e nao modifica os dados ou
+mappings legados usados pelo runtime atual.
+
+Existe tambem um avaliador read-only de shadow para extrair evidencias e testar
+ownership persistido. `assistantId` sozinho e insuficiente no shadow, mesmo que
+o resolver legado ainda o aceite durante a janela de compatibilidade.
+
+A migration `0009_voice_call_reconcile` adiciona `voice_calls`, a inbox
+idempotente `provider_event_receipts` e o vinculo opcional de
+`vapi_call_costs.voice_call_id`. O reconciliador:
+
+- fixa `tenant_id` no maximo uma vez, com protecao adicional no PostgreSQL;
+- preserva o tenant canonico diante de eventos posteriores;
+- mantem conflitos em reconciliacao/quarentena sem escolher vencedor;
+- deduplica observacoes sanitizadas e impede regressao por snapshot antigo;
+- usa o instante original da chamada para consultar ownership historico.
+
+O sync de custos pode alimentar esse caminho somente quando
+`VOICE_CALL_SHADOW_ENABLED=true`. A flag e `false` por padrao e falhas do shadow
+nao interrompem a projecao FinOps existente. `/tools`, dashboard e o resolver
+produtivo continuam inalterados. Como nao ha payload real validado nem webhook
+geral de eventos Vapi no projeto, nenhum endpoint novo foi inventado.
+
+Ainda nao foram implementados `assistant-request`, Billing, Wallet,
+Reservation, Rate Card, Usage Item, Ledger ou qualquer fluxo outbound.
 
 ## Como Um Assistente De IA Deve Usar Este Documento
 
@@ -75,8 +105,21 @@ flowchart LR
 - Conflitos entre DID, `phoneNumberId`, `assistantId` ou outros identificadores
   geram quarentena ou rejeicao. Nao existe prioridade silenciosa entre
   identificadores conflitantes.
-- No inbound, `customer.number` nao identifica tenant. A resolucao segura parte
-  do ownership persistido do `phoneNumberId` ou de um DID inequivoco.
+- No inbound, a identidade preferencial e `provider + orgId + phoneNumberId`.
+- Se `phoneNumberId` nao estiver disponivel, DID, endpoint SIP e
+  `telephony_credential_id` persistidos podem ser evidencias autoritativas.
+- `assistantId` e somente evidencia secundaria de consistencia. Ele nunca
+  identifica tenant sozinho, nunca vence conflito e nunca substitui um
+  `phoneNumberId` presente mas sem ownership conhecido.
+- No inbound, `customer.number` nao identifica tenant.
+- `telephony_credential_id` identifica a credencial do transporte SIP. Ele nao
+  representa e nunca deve armazenar segredo ou credencial de autenticacao de
+  Server URL/webhook.
+- A identidade da organizacao usa o `orgId` real da Vapi. O novo modelo nao usa
+  conta de provedor ficticia chamada `default`.
+- Para PB Saude, endpoint SIP/Phone Number pertence a `pbsaude`; assistants
+  atuais e futuros apenas corroboram esse ownership. Trocar assistant nao muda
+  tenant, historico, FinOps ou Billing.
 - Mappings e ownership de numeros e assistants sairao gradualmente de
   environment e serao persistidos com historico.
 - `vapi_call_costs` continuara como projecao FinOps do ultimo custo conhecido,
@@ -96,13 +139,48 @@ flowchart LR
 - Organizacao Vapi dedicada por cliente e uma excecao Enterprise.
 - Shadow mode vem antes de alertas e de qualquer enforcement.
 
+## Auditoria Dos Payloads Inbound Atuais
+
+Auditoria realizada em 19 de agosto de 2026. O codigo, os artefatos versionados
+e o PostgreSQL local nao contem um payload real completo de chamada inbound. A
+tabela `vapi_call_costs` local estava vazia e os 12 registros locais de
+`call_events` guardavam somente resultados de tools, nao o objeto `call` da
+Vapi. Assim, nenhum campo abaixo pode ser declarado obrigatorio com base no
+ambiente atual.
+
+| Campo | Leitura atual no codigo | Evidencia real local | Contrato esperado da Vapi | Decisao antes do runtime |
+|---|---|---|---|---|
+| `call.id` | `/tools` e sync leem | Nao observada em payload bruto | Existe no recurso Call | Capturar e confirmar |
+| `orgId` | Nao e lido | Nao observada | Existe no recurso Call/Phone Number | Persistir o valor real; sem `default` |
+| `phoneNumberId` | `/tools` e sync leem | Somente testes sinteticos | Existe no recurso Call | Evidencia principal se confirmado |
+| `phoneNumber.id` | `/tools` le como alternativa | Somente testes sinteticos | Existe no objeto Phone Number | Normalizar para `phone_number_id` |
+| Numero/DID | `call.to` e sync leem candidatos | Somente testes sinteticos | Existe em contratos telefonicos | Fallback apenas com ownership |
+| Credential SIP | Nao e lida | Nao observada | `credentialId` existe no recurso Phone Number | Aceitar apenas como `telephony_credential_id` inequívoco |
+| `assistantId` | `/tools` e sync leem | Somente testes; artefato contem ID de transferencia | Existe no recurso Call | Somente corroboracao |
+| Destino SIP | Nao e lido | Nao observado | A rota SIP usa endpoint/credential | Confirmar formato antes de ativar |
+| Headers SIP | Nao sao lidos | Nao observados | Podem existir no transporte SIP | Registrar no maximo nomes sanitizados |
+
+As referencias de contrato indicam o que a API pode fornecer, nao provam o que
+os webhooks atuais da conta Integrix realmente entregam. Antes de conectar o
+shadow ao runtime, devem ser capturadas amostras sanitizadas de pelo menos tres
+chamadas inbound da PB Saude, incluindo `assistant-request` quando ele for
+introduzido, evento final e resposta de consulta `GET /call`. Valores de
+headers, tokens e segredos nao devem ser persistidos nessa auditoria.
+
+Enquanto essa validacao nao ocorrer:
+
+- nenhum desses campos se torna obrigatorio nos endpoints existentes;
+- ausencia ou conflito e apenas resultado hipotetico do avaliador de shadow;
+- o resolver produtivo e seus mappings de environment permanecem intactos;
+- nao existe fallback automatico para `assistantId` no desenho novo.
+
 ## Invariantes De Seguranca E Contabilidade
 
 1. Depois de definido, `voice_call.tenant_id` nunca muda.
 2. Um evento posterior procura a chamada pelo vinculo canonico; nao executa
    novamente a resolucao de tenant.
 3. Um recurso Vapi so pode ter um ownership ativo por vez dentro da mesma
-   conta do provedor.
+   organizacao real do provedor.
 4. Transferencias de ownership preservam o historico e a vigencia temporal.
 5. Nenhuma chamada e admitida quando os identificadores apontam para tenants
    diferentes.
@@ -122,7 +200,7 @@ flowchart LR
 | Termo | Significado |
 |---|---|
 | Admissao | Decisao de aceitar uma chamada, fixar tenant e politica comercial e, quando aplicavel, reservar credito. |
-| Provider resource | Numero, DID, phone number ou assistant identificado dentro de uma conta Vapi. |
+| Provider resource | Numero, DID, endpoint SIP, credencial telefonica ou assistant identificado dentro de uma organizacao real da Vapi. |
 | Ownership | Relacao temporal entre um provider resource e um tenant. |
 | Voice call | Identidade interna e canonica de uma chamada. Na operacao atual, sempre inbound; o campo de direcao preserva compatibilidade futura. |
 | Provider cost | Custo operacional informado pela Vapi. |
@@ -175,22 +253,28 @@ erDiagram
 
 Este dominio precisa de dois conceitos persistidos:
 
-- `provider_resource`: provedor, conta ou organizacao, tipo, ID externo, DID e
-  metadados normalizados.
+- `provider_resource`: provedor, `provider_org_id` real, tipo, ID externo e
+  metadados normalizados. Os tipos iniciais sao `phone_number`, `did`,
+  `sip_endpoint`, `telephony_credential` e `assistant`.
 - `provider_resource_ownership`: tenant proprietario e periodo de vigencia.
 
 Regras:
 
-- **Responsabilidade:** registrar numeros, DIDs, `phoneNumberId`, assistants e
-  seu proprietario em determinado instante.
+- **Responsabilidade:** registrar numeros, DIDs, endpoints/credenciais SIP,
+  `phoneNumberId`, assistants e seu proprietario em determinado instante.
 - **Relacionamentos:** um recurso possui ownerships historicos; cada ownership
   aponta para um tenant. A voice call guarda os recursos usados como evidencia.
-- **Imutavel:** provedor, conta Vapi, tipo e ID externo do recurso. Troca de
-  tenant encerra um ownership e cria outro; nao sobrescreve historia.
+- **Imutavel:** provedor, `provider_org_id`, tipo e ID externo do recurso. Troca
+  de tenant encerra um ownership e cria outro; nao sobrescreve historia.
 - **Source of truth:** ownership do recurso no instante da admissao ou evento.
 
-A identidade do recurso inclui a conta ou organizacao Vapi mesmo enquanto a
-Integrix usar apenas uma. Isso permite a excecao Enterprise sem redesenho.
+A identidade do recurso inclui o `orgId` real da Vapi mesmo enquanto a Integrix
+usar apenas uma organizacao. Nao existe fallback para uma conta `default`. Isso
+permite a excecao Enterprise sem redesenho.
+
+`telephony_credential_id` nomeia exclusivamente a credencial/endpoint de
+telefonia SIP. Credenciais de Server URL e webhook pertencem ao dominio de
+seguranca da integracao e nao entram em `provider_resource`.
 
 ### Voice Call
 
@@ -347,7 +431,7 @@ sequenceDiagram
 
     Vapi-->>Ingestao: Evento ou fato de chamada inbound
     Ingestao->>Ingestao: Autentica e deduplica a observacao
-    Ingestao->>Calls: Procura por provider account e provider call ID
+    Ingestao->>Calls: Procura por provider org e provider call ID
 
     alt Voice call ja vinculada
         Calls-->>Ingestao: Retorna tenant canonico
@@ -367,10 +451,11 @@ sequenceDiagram
 
 Regras prioritarias:
 
-1. `provider account + provider call ID` identifica a chamada externa.
-2. `provider account + phoneNumberId` identifica o recurso telefonico.
-3. DID apenas corrobora ou resolve quando seu ownership for unico e persistido.
-4. `assistantId` e evidencia adicional; nao vence um conflito.
+1. `provider + orgId + provider call ID` identifica a chamada externa.
+2. `provider + orgId + phoneNumberId` identifica o recurso telefonico.
+3. DID, endpoint SIP ou `telephony_credential_id` resolvem somente quando
+   `phoneNumberId` nao estiver presente e seu ownership for unico e persistido.
+4. `assistantId` apenas corrobora; sozinho e insuficiente e nunca vence conflito.
 5. Uma voice call ja vinculada fornece o tenant para todos os eventos futuros.
 6. Sync e ingestao podem chegar em qualquer ordem e devem convergir para a
    mesma voice call.
@@ -422,10 +507,11 @@ sequenceDiagram
 ### Regras De Resolucao Inbound
 
 1. Autenticar a requisicao do provedor antes de resolver tenant.
-2. Usar `provider account + phoneNumberId` como identidade principal.
-3. Usar DID como fallback somente quando persistido e inequivoco.
-4. Tratar `assistantId` como evidencia de consistencia, nao como vencedor em
-   caso de conflito.
+2. Usar `provider + orgId + phoneNumberId` como identidade principal.
+3. Quando `phoneNumberId` estiver ausente, usar DID, endpoint SIP ou
+   `telephony_credential_id` somente quando persistido e inequivoco.
+4. Tratar `assistantId` somente como evidencia de consistencia. Ele sozinho e
+   insuficiente e nao vence conflito.
 5. Nunca usar `customer.number` como identidade do tenant.
 6. Resolver tenant antes de escolher assistant.
 7. Garantir que o assistant escolhido pertence ao tenant resolvido.
@@ -604,25 +690,33 @@ versao nao deve escolher silenciosamente uma dessas opcoes.
 
 ## Introducao Incremental No Projeto Atual
 
-### Agora: Ownership Inbound Persistido
+### Concluido Em Shadow: Ownership Inbound Persistido
 
 1. Introduzir tenant persistente, provider resources e ownership historico de
-   `phoneNumberId`, DID e assistants usados pelo inbound.
-2. Colocar uma camada persistente atras do resolvedor atual, preservando sua
-   interface.
-3. Manter environment como fallback temporario, observavel e desativavel.
-4. Detectar conflitos inicialmente em shadow.
-5. Nao introduzir nenhuma abstracao especifica de criacao outbound.
+   `phoneNumberId`, DID, endpoints/credenciais SIP e assistants usados pelo
+   inbound.
+2. Manter o avaliador persistido isolado e read-only em shadow, sem conecta-lo
+   ao resolvedor produtivo atual.
+3. Capturar payloads reais sanitizados e validar a disponibilidade e o formato
+   de cada evidencia antes de importar mappings ou exigir campos.
+4. Cadastrar ownership da PB Saude somente depois de confirmar o `orgId` e os
+   IDs reais; nao inventar uma organizacao `default`.
+5. Comparar resolucao atual e shadow antes de qualquer troca de comportamento.
+6. Nao introduzir nenhuma abstracao especifica de criacao outbound.
 
-### Proximo: Voice Call Inbound, Ingestao E Reconciliacao
+### Concluido Em Shadow: Voice Call Inbound, Ingestao E Reconciliacao
 
-1. Introduzir voice call canonica e inbox idempotente para fatos Vapi.
-2. Fazer ingestao e sync procurarem primeiro a voice call canonica.
-3. Impedir recalculo de tenant quando a chamada ja estiver vinculada.
-4. Backfill somente com nivel de confianca; casos ambiguos vao para quarentena.
-5. Preservar `/tools`, FinOps e dashboard atuais.
+1. A voice call canonica e a inbox idempotente existem na migration `0009`.
+2. O sync pode fazer dual-write no shadow sem substituir sua resolucao legada.
+3. O tenant fixado nao pode ser trocado pelo servico nem por update no banco.
+4. Nao foi executado backfill: sem `orgId` real confirmado, isso seria inseguro.
+5. `/tools`, FinOps e dashboard atuais foram preservados.
 
-### Depois: Assistant Request Inbound
+Antes de habilitar a flag em producao, ainda e obrigatorio cadastrar ownership
+real da PB Saude e validar amostras reais de payload. A inbox esta pronta para
+webhook futuro, mas nao existe rota de ingestao publica nesta fase.
+
+### Proximo: Validacao Real E Assistant Request Inbound
 
 1. Criar o contrato Vapi separado de `/tools` somente nesta fase.
 2. Resolver ownership persistido antes de escolher assistant.
@@ -760,9 +854,9 @@ sequenceDiagram
     end
 ```
 
-O modelo atual preserva somente os elementos neutros necessarios para evitar
+O desenho futuro preserva somente os elementos neutros necessarios para evitar
 redesenho: `voice_call.direction`, identidade do provedor, provider call ID e
-ownership por conta Vapi. Nenhum endpoint, reservation outbound, adapter,
+ownership por organizacao Vapi. Nenhum endpoint, reservation outbound, adapter,
 estado operacional exclusivo ou teste de criacao deve ser preparado agora.
 
 No eventual cenario de timeout em que a Vapi aceite a chamada, mas a Integrix
