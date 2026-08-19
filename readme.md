@@ -253,7 +253,7 @@ os dias às 07:00 no fuso `America/Sao_Paulo`. O relatório usa por padrão os
 
 | Variável | Uso |
 |---|---|
-| `DAILY_REPORT_RECIPIENTS` | destinatários separados por vírgula; inclui inicialmente `pedrojesuinobatista@gmail.com` |
+| `DAILY_REPORT_RECIPIENTS` | destinatários separados por vírgula; deixe vazio quando os relatórios estiverem desativados |
 | `DAILY_REPORT_TENANT_ID` | tenant obrigatório para o relatório agendado |
 | `DAILY_REPORT_ASSISTANT_ID` | filtro opcional por assistant |
 | `SMTP_HOST`, `SMTP_PORT` | servidor SMTP de envio |
