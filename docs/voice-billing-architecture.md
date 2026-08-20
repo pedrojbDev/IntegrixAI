@@ -141,18 +141,22 @@ flowchart LR
 
 ## Auditoria Dos Payloads Inbound Atuais
 
-Auditoria realizada em 19 de agosto de 2026. O codigo, os artefatos versionados
-e o PostgreSQL local nao contem um payload real completo de chamada inbound. A
-tabela `vapi_call_costs` local estava vazia e os 12 registros locais de
-`call_events` guardavam somente resultados de tools, nao o objeto `call` da
-Vapi. Assim, nenhum campo abaixo pode ser declarado obrigatorio com base no
-ambiente atual.
+Auditoria local realizada em 19 de agosto de 2026. Naquele momento, o codigo,
+os artefatos versionados e o PostgreSQL local nao continham um payload real
+completo de chamada inbound.
+
+Em 20 de agosto de 2026, uma auditoria sanitizada dos snapshots FinOps de
+producao encontrou dez chamadas `inboundPhoneCall`. Todas apresentavam o mesmo
+`orgId` real e o mesmo `phoneNumberId`; DID/`to` nao estava disponivel nesses
+snapshots. Registros `webCall` foram explicitamente excluidos como evidencia de
+ownership telefonico. Os valores reais permanecem somente no ambiente privado
+e nao devem ser versionados.
 
 | Campo | Leitura atual no codigo | Evidencia real local | Contrato esperado da Vapi | Decisao antes do runtime |
 |---|---|---|---|---|
-| `call.id` | `/tools` e sync leem | Nao observada em payload bruto | Existe no recurso Call | Capturar e confirmar |
-| `orgId` | Nao e lido | Nao observada | Existe no recurso Call/Phone Number | Persistir o valor real; sem `default` |
-| `phoneNumberId` | `/tools` e sync leem | Somente testes sinteticos | Existe no recurso Call | Evidencia principal se confirmado |
+| `call.id` | `/tools` e sync leem | Confirmado no snapshot FinOps inbound | Existe no recurso Call | Correlacao canonica |
+| `orgId` | Shadow e sync leem | Confirmado no snapshot FinOps inbound | Existe no recurso Call/Phone Number | Persistir o valor real; sem `default` |
+| `phoneNumberId` | `/tools` e sync leem | Confirmado no snapshot FinOps inbound | Existe no recurso Call | Evidencia principal |
 | `phoneNumber.id` | `/tools` le como alternativa | Somente testes sinteticos | Existe no objeto Phone Number | Normalizar para `phone_number_id` |
 | Numero/DID | `call.to` e sync leem candidatos | Somente testes sinteticos | Existe em contratos telefonicos | Fallback apenas com ownership |
 | Credential SIP | Nao e lida | Nao observada | `credentialId` existe no recurso Phone Number | Aceitar apenas como `telephony_credential_id` inequívoco |
@@ -167,10 +171,16 @@ chamadas inbound da PB Saude, incluindo `assistant-request` quando ele for
 introduzido, evento final e resposta de consulta `GET /call`. Valores de
 headers, tokens e segredos nao devem ser persistidos nessa auditoria.
 
-Enquanto essa validacao nao ocorrer:
+O cadastro operacional deve usar
+`python -m scripts.register_provider_resource_ownership`, que e dry-run por
+padrao e exige `--apply` para persistir. O comando rejeita tenant inexistente ou
+inativo, ownership ativo de outro tenant, sobreposicao historica e conflito de
+metadados de telefonia. IDs reais devem ser passados somente no host privado.
+
+Enquanto a validacao de DID, endpoint e credencial SIP nao ocorrer:
 
 - nenhum desses campos se torna obrigatorio nos endpoints existentes;
-- ausencia ou conflito e apenas resultado hipotetico do avaliador de shadow;
+- ausencia ou conflito continua sendo resultado do avaliador de shadow;
 - o resolver produtivo e seus mappings de environment permanecem intactos;
 - nao existe fallback automatico para `assistantId` no desenho novo.
 
