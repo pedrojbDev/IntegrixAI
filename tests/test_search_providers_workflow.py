@@ -59,6 +59,28 @@ class SearchProvidersWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("CIDADE_INVALIDA", exc.exception.code)
         provider.search_providers.assert_not_called()
 
+    async def test_normalizes_dermatologist_before_provider_call(self) -> None:
+        provider = Mock()
+        provider.search_providers.return_value = []
+
+        with patch(
+            "app.tenants.pbsaude.workflows.search_providers.get_data_provider",
+            return_value=provider,
+        ), patch(
+            "app.tenants.pbsaude.workflows.search_providers.asyncio.to_thread",
+            new=AsyncMock(side_effect=lambda func, *args: func(*args)),
+        ):
+            await search_providers(
+                {"cpf": "03457351538", "cidade": "Salvador", "especialidade": "dermatologista"},
+                Settings(_env_file=None),
+                "call_dermatologist",
+                "pbsaude",
+            )
+
+        provider.search_providers.assert_called_once_with(
+            "pbsaude", "call_dermatologist", "Salvador", "DERMATOLOGIA", "03457351538", None,
+        )
+
     async def test_accepts_blank_legacy_neighborhood_without_forwarding_it(self) -> None:
         provider = Mock()
         provider.search_providers.return_value = []
@@ -88,7 +110,7 @@ class SearchProvidersWorkflowTests(unittest.IsolatedAsyncioTestCase):
             "tenant_a",
             "call_123",
             "feira de santana",
-            "cardiologia",
+            "CARDIOLOGIA",
             "03457351538",
             None,
         )
@@ -120,7 +142,7 @@ class SearchProvidersWorkflowTests(unittest.IsolatedAsyncioTestCase):
             "tenant_a",
             "call_legacy",
             "feira de santana",
-            "cardiologia",
+            "CARDIOLOGIA",
             "03457351538",
             None,
         )
@@ -153,7 +175,7 @@ class SearchProvidersWorkflowTests(unittest.IsolatedAsyncioTestCase):
             "tenant_a",
             "call_without_neighborhood",
             "feira de santana",
-            "cardiologia",
+            "CARDIOLOGIA",
             "03457351538",
             None,
         )
