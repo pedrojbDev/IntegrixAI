@@ -16,6 +16,10 @@ antigos ou provisórios.
 - `workflows` valida e orquestra cada caso de uso.
 - `integration` contem auth, HTTP, retries, providers, traducao e texto de fala.
 - `catalog.py` resolve especialidades informais para valores canonicos.
+- `specialty_aliases.py` mantem o catalogo padrao de titulos profissionais,
+  abreviacoes, expressoes populares, servicos e exames. Ele fica ativo mesmo
+  sem CSV externo; um `SPECIALTIES_CSV_PATH` valido estende o catalogo e passa
+  a funcionar como lista autoritativa para termos desconhecidos.
 
 Nao mova regras PB Saude para `app/core`. Compartilhe apenas capacidades que
 tenham contrato de plataforma comprovado. Tenant e `call_id` devem continuar
