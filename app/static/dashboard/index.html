@@ -6,7 +6,7 @@
   <title>Integrix Ops Console</title>
   <meta
     name="description"
-    content="Painel operacional para acompanhar volume, custo, falha, handoff e auditoria."
+    content="Painel operacional para acompanhar volume, custo, falhas técnicas, handoff e auditoria."
   />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -23,7 +23,7 @@
         <span class="eyebrow">Integrix Ops Console</span>
         <h1>Leitura clara da operação.</h1>
         <p>
-          Volume, custo, falha, handoff e auditoria em uma interface mais limpa e
+          Volume, custo, falhas técnicas, handoff e auditoria em uma interface mais limpa e
           previsível.
         </p>
       </div>
@@ -114,7 +114,7 @@
           </article>
 
           <article class="kpi-card">
-            <span class="label">Handoff</span>
+            <span class="label">Sucesso com handoff</span>
             <strong id="k-handoff-rate" class="kpi-value">0%</strong>
             <span id="k-handoff-count" class="kpi-note">0 transferências</span>
           </article>
@@ -128,9 +128,9 @@
 
         <section class="kpi-grid kpi-grid-secondary">
           <article class="kpi-card kpi-card-soft">
-            <span class="label">Falha</span>
+            <span class="label">Falhas técnicas</span>
             <strong id="k-failure-rate" class="kpi-value">0%</strong>
-            <span id="k-failure-count" class="kpi-note">0 chamadas falhas</span>
+            <span id="k-failure-count" class="kpi-note">0 falhas técnicas</span>
           </article>
 
           <article class="kpi-card kpi-card-soft">
@@ -210,7 +210,7 @@
                   <th>Tool</th>
                   <th>Total</th>
                   <th>Resolução</th>
-                  <th>Falha</th>
+                  <th>Falha técnica</th>
                   <th>Handoff</th>
                   <th>Custo total</th>
                   <th>Custo / call</th>
@@ -268,7 +268,7 @@
           <article class="panel">
             <div class="panel-header">
               <div>
-                <h2>Falhas por bucket</h2>
+                <h2>Falhas técnicas por bucket</h2>
                 <p class="panel-copy">Onde a janela acumulou maior degradação.</p>
               </div>
             </div>
@@ -299,7 +299,7 @@
           <article class="panel">
             <div class="panel-header">
               <div>
-                <h2>Tools com pior falha</h2>
+                <h2>Tools com pior falha técnica</h2>
                 <p class="panel-copy">Prioridade objetiva de correção.</p>
               </div>
             </div>
@@ -356,9 +356,9 @@
             <p class="summary-copy">Resoluções automáticas registradas.</p>
           </article>
           <article class="summary-card">
-            <span class="label">Falha</span>
+            <span class="label">Falha técnica</span>
             <strong id="audit-failed-calls">0</strong>
-            <p class="summary-copy">Falhas funcionais ou operacionais.</p>
+            <p class="summary-copy">Timeouts e indisponibilidades de upstream.</p>
           </article>
           <article class="summary-card">
             <span class="label">Handoff</span>
@@ -397,7 +397,7 @@
               <select id="audit-ok" class="control">
                 <option value="all" selected>Todos</option>
                 <option value="true">Somente OK</option>
-                <option value="false">Somente falha</option>
+                <option value="false">Somente resposta não OK</option>
               </select>
             </label>
             <div class="audit-actions">

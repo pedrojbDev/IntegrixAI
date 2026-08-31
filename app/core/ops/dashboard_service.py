@@ -32,6 +32,9 @@ WINDOW_BUCKET_MINUTES = {
 }
 SYNC_FRESH_SECONDS = 15 * 60
 SYNC_DELAY_SECONDS = 60 * 60
+METRIC_VERSION = "v2"
+HANDOFF_TOOL_NAME = "handoff_human"
+TECHNICAL_ERROR_CODES = frozenset({"TIMEOUT", "UPSTREAM_503"})
 
 
 def _ensure_utc(dt: datetime | None) -> datetime | None:
@@ -121,6 +124,70 @@ def _latest_tool_completed_subquery(
     )
 
 
+def _tool_completed_filters(
+    *,
+    since: datetime,
+    tenant_id: str | None,
+    call_ids_filter: set[str] | None,
+) -> list[Any]:
+    filters: list[Any] = [
+        CallEvent.event_type == "tool_completed",
+        CallEvent.created_at >= since,
+    ]
+    if tenant_id:
+        filters.append(CallEvent.tenant_id == tenant_id)
+    if call_ids_filter is not None:
+        if not call_ids_filter:
+            return []
+        filters.append(CallEvent.call_id.in_(call_ids_filter))
+    return filters
+
+
+def _call_outcomes_subquery(
+    *,
+    since: datetime,
+    tenant_id: str | None,
+    call_ids_filter: set[str] | None,
+):
+    """Classify each call from all of its completed tool events.
+
+    A successful human handoff takes precedence over an earlier automatic
+    resolution because it represents the final successful continuation of the
+    service. Technical incidents stay out of this outcome classification and
+    are counted independently from tool events.
+    """
+    filters = _tool_completed_filters(
+        since=since,
+        tenant_id=tenant_id,
+        call_ids_filter=call_ids_filter,
+    )
+    if not filters:
+        return None
+
+    successful_handoff = and_(
+        CallEvent.tool_name == HANDOFF_TOOL_NAME,
+        CallEvent.ok.is_(True),
+        CallEvent.final_state == "TRANSFERIDA_HUMANO",
+    )
+    automatic_resolution = and_(
+        CallEvent.tool_name != HANDOFF_TOOL_NAME,
+        CallEvent.ok.is_(True),
+        CallEvent.final_state == "RESOLVIDA_AUTOMATICO",
+    )
+    return (
+        select(
+            CallEvent.tenant_id.label("tenant_id"),
+            CallEvent.call_id.label("call_id"),
+            func.min(CallEvent.created_at).label("first_event_at"),
+            func.max(case((successful_handoff, 1), else_=0)).label("successful_handoff"),
+            func.max(case((automatic_resolution, 1), else_=0)).label("automatic_resolution"),
+        )
+        .where(*filters)
+        .group_by(CallEvent.tenant_id, CallEvent.call_id)
+        .subquery()
+    )
+
+
 def _event_filters(
     *,
     since: datetime,
@@ -175,56 +242,120 @@ def get_overview(
         tenant_id=tenant_id,
         assistant_id=assistant_id,
     )
-    latest_events = _latest_tool_completed_subquery(
+    outcomes = _call_outcomes_subquery(
+        since=since,
+        tenant_id=tenant_id,
+        call_ids_filter=assistant_call_ids,
+    )
+    legacy_events = _latest_tool_completed_subquery(
+        since=since,
+        tenant_id=tenant_id,
+        call_ids_filter=assistant_call_ids,
+    )
+    tool_filters = _tool_completed_filters(
         since=since,
         tenant_id=tenant_id,
         call_ids_filter=assistant_call_ids,
     )
 
-    if latest_events is None:
-        total_calls = success_calls = handoff_calls = 0
+    if outcomes is None:
+        total_calls = automated_resolution_calls = successful_handoff_calls = unresolved_calls = 0
         avg_duration_ms = 0.0
-        series_rows: list[tuple[datetime | None, str | None]] = []
+        series_rows: list[tuple[datetime | None, int, int]] = []
     else:
-        totals = session.execute(
+        series_rows = session.execute(
             select(
-                func.count(latest_events.c.call_id).label("total_calls"),
+                outcomes.c.first_event_at,
+                outcomes.c.successful_handoff,
+                outcomes.c.automatic_resolution,
+            )
+            .select_from(outcomes)
+            .order_by(outcomes.c.first_event_at.asc())
+        ).all()
+        total_calls = len(series_rows)
+        successful_handoff_calls = sum(int(row.successful_handoff or 0) for row in series_rows)
+        automated_resolution_calls = sum(
+            int(bool(row.automatic_resolution) and not bool(row.successful_handoff))
+            for row in series_rows
+        )
+        unresolved_calls = total_calls - automated_resolution_calls - successful_handoff_calls
+
+    if legacy_events is None:
+        success_calls = failed_calls = handoff_calls = 0
+        legacy_series_rows: list[tuple[datetime | None, str | None]] = []
+    else:
+        legacy_totals = session.execute(
+            select(
+                func.count(legacy_events.c.call_id).label("total_calls"),
                 func.sum(
-                    case((latest_events.c.final_state == "RESOLVIDA_AUTOMATICO", 1), else_=0)
+                    case((legacy_events.c.final_state == "RESOLVIDA_AUTOMATICO", 1), else_=0)
                 ).label("success_calls"),
                 func.sum(
-                    case((latest_events.c.final_state == "TRANSFERIDA_HUMANO", 1), else_=0)
+                    case((legacy_events.c.final_state == "TRANSFERIDA_HUMANO", 1), else_=0)
                 ).label("handoff_calls"),
-                func.avg(latest_events.c.duration_ms).label("avg_duration_ms"),
-            ).select_from(latest_events)
+            ).select_from(legacy_events)
         ).one()
-        total_calls = int(totals.total_calls or 0)
-        success_calls = int(totals.success_calls or 0)
-        handoff_calls = int(totals.handoff_calls or 0)
-        avg_duration_ms = round(float(totals.avg_duration_ms or 0.0), 2)
-        series_rows = session.execute(
-            select(latest_events.c.created_at, latest_events.c.final_state)
-            .select_from(latest_events)
-            .order_by(latest_events.c.created_at.asc())
+        success_calls = int(legacy_totals.success_calls or 0)
+        failed_calls = int(legacy_totals.total_calls or 0) - success_calls
+        handoff_calls = int(legacy_totals.handoff_calls or 0)
+        legacy_series_rows = session.execute(
+            select(legacy_events.c.created_at, legacy_events.c.final_state)
+            .select_from(legacy_events)
+            .order_by(legacy_events.c.created_at.asc())
         ).all()
 
-    failed_calls = total_calls - success_calls
-    series_map: dict[str, dict[str, int]] = defaultdict(lambda: {"calls": 0, "handoffs": 0})
-    for created_at, final_state in series_rows:
+    if tool_filters:
+        tool_totals = session.execute(
+            select(
+                func.count(CallEvent.id).label("tool_execution_count"),
+                func.avg(CallEvent.duration_ms).label("avg_duration_ms"),
+                func.sum(
+                    case((CallEvent.error_code.in_(TECHNICAL_ERROR_CODES), 1), else_=0)
+                ).label("technical_failure_events"),
+            ).where(*tool_filters)
+        ).one()
+        tool_execution_count = int(tool_totals.tool_execution_count or 0)
+        technical_failure_events = int(tool_totals.technical_failure_events or 0)
+        avg_duration_ms = round(float(tool_totals.avg_duration_ms or 0.0), 2)
+    else:
+        tool_execution_count = technical_failure_events = 0
+
+    series_map: dict[str, dict[str, int]] = defaultdict(
+        lambda: {
+            "calls": 0,
+            "handoffs": 0,
+            "successful_handoffs": 0,
+            "automated_resolutions": 0,
+            "unresolved_calls": 0,
+        }
+    )
+    for created_at, successful_handoff, automatic_resolution in series_rows:
         created = _ensure_utc(created_at)
         if created is None:
             continue
         bucket = _floor_bucket(created, bucket_minutes).isoformat()
         series_map[bucket]["calls"] += 1
-        if final_state == "TRANSFERIDA_HUMANO":
-            series_map[bucket]["handoffs"] += 1
+        if successful_handoff:
+            series_map[bucket]["successful_handoffs"] += 1
+        elif automatic_resolution:
+            series_map[bucket]["automated_resolutions"] += 1
+        else:
+            series_map[bucket]["unresolved_calls"] += 1
+
+    for created_at, final_state in legacy_series_rows:
+        created = _ensure_utc(created_at)
+        if created is None or final_state != "TRANSFERIDA_HUMANO":
+            continue
+        bucket = _floor_bucket(created, bucket_minutes).isoformat()
+        series_map[bucket]["handoffs"] += 1
 
     series = [
-        {"timestamp": timestamp, "calls": values["calls"], "handoffs": values["handoffs"]}
+        {"timestamp": timestamp, **values}
         for timestamp, values in sorted(series_map.items())
     ]
 
     return {
+        "metric_version": METRIC_VERSION,
         "window": window,
         "since": since.isoformat(),
         "tenant_id": tenant_id,
@@ -235,6 +366,14 @@ def get_overview(
             "failed_calls": failed_calls,
             "handoff_calls": handoff_calls,
             "avg_duration_ms": avg_duration_ms,
+            "automated_resolution_calls": automated_resolution_calls,
+            "successful_handoff_calls": successful_handoff_calls,
+            "unresolved_calls": unresolved_calls,
+            "technical_failure_events": technical_failure_events,
+            "tool_execution_count": tool_execution_count,
+            "technical_failure_rate_pct": round(
+                (technical_failure_events / tool_execution_count) * 100.0, 2
+            ) if tool_execution_count else 0.0,
         },
         "series": series,
     }
@@ -488,19 +627,20 @@ def get_tools(
         assistant_id=assistant_id,
     )
 
-    filters = [CallEvent.event_type == "tool_completed", CallEvent.created_at >= since]
-    if tenant_id:
-        filters.append(CallEvent.tenant_id == tenant_id)
-    if assistant_call_ids is not None:
-        if not assistant_call_ids:
-            return {
-                "window": window,
-                "since": since.isoformat(),
-                "tenant_id": tenant_id,
-                "assistant_id": assistant_id,
-                "items": [],
-            }
-        filters.append(CallEvent.call_id.in_(assistant_call_ids))
+    filters = _tool_completed_filters(
+        since=since,
+        tenant_id=tenant_id,
+        call_ids_filter=assistant_call_ids,
+    )
+    if not filters:
+        return {
+            "metric_version": METRIC_VERSION,
+            "window": window,
+            "since": since.isoformat(),
+            "tenant_id": tenant_id,
+            "assistant_id": assistant_id,
+            "items": [],
+        }
 
     summary_stmt = (
         select(
@@ -508,6 +648,9 @@ def get_tools(
             func.count(CallEvent.id).label("total_calls"),
             func.sum(case((CallEvent.ok.is_(True), 1), else_=0)).label("success_calls"),
             func.sum(case((CallEvent.ok.is_(False), 1), else_=0)).label("failed_calls"),
+            func.sum(
+                case((CallEvent.error_code.in_(TECHNICAL_ERROR_CODES), 1), else_=0)
+            ).label("technical_failure_events"),
             func.sum(case((CallEvent.final_state == "TRANSFERIDA_HUMANO", 1), else_=0)).label(
                 "handoff_calls"
             ),
@@ -529,6 +672,7 @@ def get_tools(
             if total_calls
             else 0.0
         )
+        technical_failure_events = int(item.technical_failure_events or 0)
         tools.append(
             {
                 "tool_name": tool_name,
@@ -538,12 +682,19 @@ def get_tools(
                 "handoff_calls": int(item.handoff_calls or 0),
                 "avg_duration_ms": avg_duration,
                 "failure_rate_pct": failure_rate,
+                "technical_failure_events": technical_failure_events,
+                "technical_failure_rate_pct": (
+                    round((technical_failure_events / total_calls) * 100.0, 2)
+                    if total_calls
+                    else 0.0
+                ),
                 "unique_calls": unique_calls,
             }
         )
 
     tools.sort(key=lambda item: item["total_calls"], reverse=True)
     return {
+        "metric_version": METRIC_VERSION,
         "window": window,
         "since": since.isoformat(),
         "tenant_id": tenant_id,
@@ -639,11 +790,14 @@ def get_health(
     )
 
     total_calls = int(overview["kpis"]["total_calls"])
-    failure_rate = (
-        round((int(overview["kpis"]["failed_calls"]) / total_calls) * 100.0, 2) if total_calls else 0.0
+    tool_execution_count = sum(int(item["total_calls"]) for item in tools["items"])
+    technical_failure_events = sum(
+        int(item["technical_failure_events"]) for item in tools["items"]
     )
-    handoff_rate = (
-        round((int(overview["kpis"]["handoff_calls"]) / total_calls) * 100.0, 2) if total_calls else 0.0
+    technical_failure_rate = (
+        round((technical_failure_events / tool_execution_count) * 100.0, 2)
+        if tool_execution_count
+        else 0.0
     )
     coverage_pct = float(costs["summary"]["coverage_pct"])
 
@@ -651,16 +805,13 @@ def get_health(
         health_state = "no_data"
     elif (
         sync["freshness_state"] == "stale"
-        or failure_rate >= 25
-        or handoff_rate >= 40
+        or technical_failure_rate >= 25
         or coverage_pct < 50
     ):
         health_state = "critical"
     elif (
         sync["freshness_state"] == "delayed"
-        or repeated_business_errors > 0
-        or failure_rate >= 10
-        or handoff_rate >= 20
+        or technical_failure_rate >= 10
         or coverage_pct < 80
         or idempotency_hits > 0
     ):
@@ -671,14 +822,15 @@ def get_health(
     top_degrading_tools = sorted(
         tools["items"],
         key=lambda item: (
-            float(item["failure_rate_pct"]),
-            int(item["handoff_calls"]),
+            float(item["technical_failure_rate_pct"]),
+            int(item["technical_failure_events"]),
             int(item["total_calls"]),
         ),
         reverse=True,
     )[:3]
 
     return {
+        "metric_version": METRIC_VERSION,
         "window": window,
         "since": since.isoformat(),
         "tenant_id": tenant_id,
@@ -690,6 +842,9 @@ def get_health(
             "vapi_calls": int(costs["summary"]["vapi_calls"]),
             "failed_calls": int(overview["kpis"]["failed_calls"]),
             "handoff_calls": int(overview["kpis"]["handoff_calls"]),
+            "technical_failure_events": technical_failure_events,
+            "technical_failure_rate_pct": technical_failure_rate,
+            "tool_execution_count": tool_execution_count,
             "calls_with_cost": int(costs["summary"]["calls_with_cost"]),
             "calls_without_cost": int(costs["summary"]["calls_without_cost"]),
             "repeated_business_errors": repeated_business_errors,
@@ -728,6 +883,24 @@ def get_resilience(
     failed_rows = (
         [(created_at, 1) for created_at in session.execute(select(CallEvent.created_at).where(*failed_filters)).scalars().all()]
         if failed_filters
+        else []
+    )
+    technical_failure_filters = _tool_completed_filters(
+        since=since,
+        tenant_id=tenant_id,
+        call_ids_filter=assistant_call_ids,
+    )
+    technical_failure_rows = (
+        [
+            (created_at, 1)
+            for created_at in session.execute(
+                select(CallEvent.created_at).where(
+                    *technical_failure_filters,
+                    CallEvent.error_code.in_(TECHNICAL_ERROR_CODES),
+                )
+            ).scalars().all()
+        ]
+        if technical_failure_filters
         else []
     )
     idempotency_filters = _event_filters(
@@ -785,7 +958,11 @@ def get_resilience(
 
     top_failure_tools = sorted(
         tools["items"],
-        key=lambda item: (float(item["failure_rate_pct"]), int(item["total_calls"])),
+        key=lambda item: (
+            float(item["technical_failure_rate_pct"]),
+            int(item["technical_failure_events"]),
+            int(item["total_calls"]),
+        ),
         reverse=True,
     )[:5]
     top_handoff_tools = sorted(
@@ -804,6 +981,7 @@ def get_resilience(
     business_error_tools.sort(key=lambda item: (item["retries"], item["scopes"]), reverse=True)
 
     return {
+        "metric_version": METRIC_VERSION,
         "window": window,
         "since": since.isoformat(),
         "tenant_id": tenant_id,
@@ -814,11 +992,21 @@ def get_resilience(
             "total_calls": int(overview["kpis"]["total_calls"]),
             "failed_calls": int(overview["kpis"]["failed_calls"]),
             "handoff_calls": int(overview["kpis"]["handoff_calls"]),
+            "technical_failure_events": int(
+                health["counters"]["technical_failure_events"]
+            ),
+            "technical_failure_rate_pct": float(
+                health["counters"]["technical_failure_rate_pct"]
+            ),
             "repeated_business_errors": int(health["counters"]["repeated_business_errors"]),
             "idempotency_hits": int(health["counters"]["idempotency_hits"]),
         },
         "series": {
             "failed_calls": _bucket_series_from_rows(failed_rows, bucket_minutes=bucket_minutes),
+            "technical_failure_events": _bucket_series_from_rows(
+                technical_failure_rows,
+                bucket_minutes=bucket_minutes,
+            ),
             "idempotency_hits": _bucket_series_from_rows(idempotency_rows, bucket_minutes=bucket_minutes),
             "repeated_business_errors": _bucket_series_from_rows(
                 [(updated_at, max(int(attempts or 0) - 1, 0)) for updated_at, attempts in business_series_rows],

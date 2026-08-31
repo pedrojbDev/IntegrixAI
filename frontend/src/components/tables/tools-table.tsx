@@ -10,8 +10,8 @@ export function ToolsTable({ items }: { items: ToolPerformance[] }) {
         <TableRow>
           <TableHead>Tool</TableHead>
           <TableHead>Total</TableHead>
-          <TableHead>Resolução</TableHead>
-          <TableHead>Falha</TableHead>
+          <TableHead>Execução OK</TableHead>
+          <TableHead>Falha técnica</TableHead>
           <TableHead>Handoff</TableHead>
           <TableHead>Tempo tool</TableHead>
         </TableRow>
@@ -27,8 +27,8 @@ export function ToolsTable({ items }: { items: ToolPerformance[] }) {
                 <Badge variant="success">{formatPercent(resolution)}</Badge>
               </TableCell>
               <TableCell>
-                <Badge variant={item.failureRatePct >= 10 ? "destructive" : "secondary"}>
-                  {formatPercent(item.failureRatePct)}
+                <Badge variant={item.technicalFailureRatePct >= 10 ? "destructive" : "secondary"}>
+                  {formatPercent(item.technicalFailureRatePct)}
                 </Badge>
               </TableCell>
               <TableCell className="font-mono">{formatNumberBR(item.handoffCalls)}</TableCell>

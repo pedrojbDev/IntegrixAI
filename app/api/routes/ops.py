@@ -7,6 +7,8 @@ from ...config import Settings, get_settings
 from ...core.metrics.service import metrics_store
 from ...core.ops.cost_sync_service import VapiCostSyncService
 from ...core.ops.dashboard_service import (
+    METRIC_VERSION,
+    TECHNICAL_ERROR_CODES,
     get_costs,
     get_health,
     get_overview,
@@ -194,6 +196,7 @@ async def audit_summary(
         if assistant_call_ids is not None:
             if not assistant_call_ids:
                 return {
+                    "metric_version": METRIC_VERSION,
                     "enabled": True,
                     "window_minutes": since_minutes,
                     "totals": {
@@ -201,6 +204,7 @@ async def audit_summary(
                         "success_calls": 0,
                         "failed_calls": 0,
                         "handoff_calls": 0,
+                        "technical_failure_events": 0,
                         "avg_duration_ms": 0.0,
                     },
                     "per_tool": [],
@@ -211,6 +215,9 @@ async def audit_summary(
             func.count(CallEvent.id).label("total_calls"),
             func.sum(case((CallEvent.ok.is_(True), 1), else_=0)).label("success_calls"),
             func.sum(case((CallEvent.ok.is_(False), 1), else_=0)).label("failed_calls"),
+            func.sum(
+                case((CallEvent.error_code.in_(TECHNICAL_ERROR_CODES), 1), else_=0)
+            ).label("technical_failure_events"),
             func.sum(case((CallEvent.final_state == "TRANSFERIDA_HUMANO", 1), else_=0)).label(
                 "handoff_calls"
             ),
@@ -225,6 +232,9 @@ async def audit_summary(
             func.count(CallEvent.id).label("total_calls"),
             func.sum(case((CallEvent.ok.is_(True), 1), else_=0)).label("success_calls"),
             func.sum(case((CallEvent.ok.is_(False), 1), else_=0)).label("failed_calls"),
+            func.sum(
+                case((CallEvent.error_code.in_(TECHNICAL_ERROR_CODES), 1), else_=0)
+            ).label("technical_failure_events"),
             func.sum(case((CallEvent.final_state == "TRANSFERIDA_HUMANO", 1), else_=0)).label(
                 "handoff_calls"
             ),
@@ -235,6 +245,7 @@ async def audit_summary(
         per_tool_rows = session.execute(per_tool_stmt).all()
 
         return {
+            "metric_version": METRIC_VERSION,
             "enabled": True,
             "window_minutes": since_minutes,
             "totals": {
@@ -242,6 +253,7 @@ async def audit_summary(
                 "success_calls": totals.success_calls or 0,
                 "failed_calls": totals.failed_calls or 0,
                 "handoff_calls": totals.handoff_calls or 0,
+                "technical_failure_events": totals.technical_failure_events or 0,
                 "avg_duration_ms": round(float(totals.avg_duration_ms or 0.0), 2),
             },
             "per_tool": [
@@ -251,6 +263,7 @@ async def audit_summary(
                     "success_calls": row.success_calls or 0,
                     "failed_calls": row.failed_calls or 0,
                     "handoff_calls": row.handoff_calls or 0,
+                    "technical_failure_events": row.technical_failure_events or 0,
                     "avg_duration_ms": round(float(row.avg_duration_ms or 0.0), 2),
                 }
                 for row in per_tool_rows

@@ -46,7 +46,7 @@ export function AuditPage() {
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <StatCard icon={PhoneCall} label="Total" value={formatNumberBR(summary.totals.totalCalls)} />
         <StatCard icon={CheckCircle2} label="Sucesso" tone="success" value={formatNumberBR(summary.totals.successCalls)} />
-        <StatCard icon={XCircle} label="Falha" tone={summary.totals.failedCalls > 0 ? "danger" : "default"} value={formatNumberBR(summary.totals.failedCalls)} />
+        <StatCard icon={XCircle} label="Falha técnica" tone={summary.totals.technicalFailureEvents > 0 ? "danger" : "default"} value={formatNumberBR(summary.totals.technicalFailureEvents)} />
         <StatCard icon={ListFilter} label="Handoff" value={formatNumberBR(summary.totals.handoffCalls)} />
       </section>
 
@@ -95,7 +95,7 @@ export function AuditPage() {
             >
               <option value="all">Todos</option>
               <option value="true">Somente OK</option>
-              <option value="false">Somente falha</option>
+              <option value="false">Somente resposta não OK</option>
             </Select>
           </label>
         </CardContent>
