@@ -54,6 +54,9 @@ export type Health = {
     vapiCalls: number
     failedCalls: number
     handoffCalls: number
+    technicalFailureEvents: number
+    technicalFailureRatePct: number
+    toolExecutionCount: number
     callsWithCost: number
     callsWithoutCost: number
     repeatedBusinessErrors: number
@@ -72,11 +75,20 @@ export type Overview = {
     failedCalls: number
     handoffCalls: number
     avgDurationMs: number
+    automatedResolutionCalls: number
+    successfulHandoffCalls: number
+    unresolvedCalls: number
+    technicalFailureEvents: number
+    toolExecutionCount: number
+    technicalFailureRatePct: number
   }
   series: Array<{
     timestamp: string
     calls: number
     handoffs: number
+    successfulHandoffs: number
+    automatedResolutions: number
+    unresolvedCalls: number
   }>
 }
 
@@ -131,6 +143,8 @@ export type ToolPerformance = {
   handoffCalls: number
   avgDurationMs: number
   failureRatePct: number
+  technicalFailureEvents: number
+  technicalFailureRatePct: number
   uniqueCalls: number
 }
 
@@ -141,11 +155,14 @@ export type Resilience = {
     totalCalls: number
     failedCalls: number
     handoffCalls: number
+    technicalFailureEvents: number
+    technicalFailureRatePct: number
     repeatedBusinessErrors: number
     idempotencyHits: number
   }
   series: {
     failedCalls: ResiliencePoint[]
+    technicalFailureEvents: ResiliencePoint[]
     idempotencyHits: ResiliencePoint[]
     repeatedBusinessErrors: ResiliencePoint[]
   }
@@ -169,6 +186,7 @@ export type AuditSummary = {
     successCalls: number
     failedCalls: number
     handoffCalls: number
+    technicalFailureEvents: number
     avgDurationMs: number
   }
 }

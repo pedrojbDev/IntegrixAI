@@ -94,16 +94,16 @@ export function DiagnosticsPage() {
       <section className="grid gap-4 xl:grid-cols-2">
         <Card>
           <CardHeader>
-            <SectionHeader description="Falhas registradas em tool calls por bucket." title="Falhas por período" />
+            <SectionHeader description="Timeouts e indisponibilidades de upstream por bucket." title="Falhas técnicas por período" />
           </CardHeader>
           <CardContent>
-            {resilience.series.failedCalls.length ? (
+            {resilience.series.technicalFailureEvents.length ? (
               <ResponsiveLineChart
-                data={resilience.series.failedCalls}
-                series={[{ key: "value", label: "Falhas", color: "hsl(var(--destructive))", area: true }]}
+                data={resilience.series.technicalFailureEvents}
+                series={[{ key: "value", label: "Falhas técnicas", color: "hsl(var(--destructive))", area: true }]}
               />
             ) : (
-              <EmptyState description="Nenhum bucket com falha foi encontrado." title="Sem falhas na série" />
+              <EmptyState description="Nenhum bucket com falha técnica foi encontrado." title="Sem falhas técnicas" />
             )}
           </CardContent>
         </Card>
@@ -162,10 +162,10 @@ export function DiagnosticsPage() {
       <section className="grid gap-4 xl:grid-cols-2">
         <Card>
           <CardHeader>
-            <SectionHeader description="Tools ordenadas por taxa de falha." title="Piores falhas" />
+            <SectionHeader description="Tools ordenadas por timeout ou indisponibilidade de upstream." title="Piores falhas técnicas" />
           </CardHeader>
           <CardContent>
-            {resilience.topFailureTools.length ? <ToolsTable items={resilience.topFailureTools} /> : <EmptyState description="Sem tools com falha na janela." title="Sem falhas" />}
+            {resilience.topFailureTools.length ? <ToolsTable items={resilience.topFailureTools} /> : <EmptyState description="Sem tools com falha técnica na janela." title="Sem falhas técnicas" />}
           </CardContent>
         </Card>
         <Card>

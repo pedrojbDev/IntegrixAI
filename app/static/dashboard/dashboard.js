@@ -543,24 +543,25 @@ function renderOverview(model) {
   const tools = model.tools
   const health = model.health
   const totalCalls = Number(overview.kpis.total_calls || 0)
-  const successCalls = Number(overview.kpis.success_calls || 0)
-  const failedCalls = Number(overview.kpis.failed_calls || 0)
-  const handoffCalls = Number(overview.kpis.handoff_calls || 0)
-  const successRate = rateOf(successCalls, totalCalls)
-  const failureRate = rateOf(failedCalls, totalCalls)
-  const handoffRate = rateOf(handoffCalls, totalCalls)
+  const automatedResolutionCalls = Number(overview.kpis.automated_resolution_calls || 0)
+  const successfulHandoffCalls = Number(overview.kpis.successful_handoff_calls || 0)
+  const technicalFailureEvents = Number(overview.kpis.technical_failure_events || 0)
+  const toolExecutionCount = Number(overview.kpis.tool_execution_count || 0)
+  const successRate = rateOf(automatedResolutionCalls, totalCalls)
+  const failureRate = rateOf(technicalFailureEvents, toolExecutionCount)
+  const handoffRate = rateOf(successfulHandoffCalls, totalCalls)
   const coverageRate = rateOf(costs.summary.calls_with_cost, totalCalls)
 
   refs.total.textContent = numberFmt.format(totalCalls)
   refs.windowLabel.textContent = `Janela ${WINDOW_LABELS[overview.window]}`
   refs.successRate.textContent = formatPercent(successRate)
-  refs.successCount.textContent = `${numberFmt.format(successCalls)} calls resolvidas`
+  refs.successCount.textContent = `${numberFmt.format(automatedResolutionCalls)} calls resolvidas`
   refs.handoffRate.textContent = formatPercent(handoffRate)
-  refs.handoffCount.textContent = `${numberFmt.format(handoffCalls)} transferências`
+  refs.handoffCount.textContent = `${numberFmt.format(successfulHandoffCalls)} transferências iniciadas`
   refs.cost.textContent = formatUsd(costs.summary.total_cost_usd || 0)
   refs.costCalls.textContent = `${numberFmt.format(costs.summary.calls_with_cost || 0)} calls com custo`
   refs.failureRate.textContent = formatPercent(failureRate)
-  refs.failureCount.textContent = `${numberFmt.format(failedCalls)} chamadas falhas`
+  refs.failureCount.textContent = `${numberFmt.format(technicalFailureEvents)} falhas em ${numberFmt.format(toolExecutionCount)} execuções`
   refs.coverage.textContent = formatPercent(coverageRate)
   refs.coverageMeta.textContent =
     totalCalls > 0
@@ -572,7 +573,7 @@ function renderOverview(model) {
     `${numberFmt.format(costs.summary.calls_with_duration || 0)} calls com duração | total ${formatDurationSeconds(costs.summary.total_duration_seconds || 0)}`
 
   refs.overviewHeroCopy.textContent = totalCalls > 0
-    ? `A janela atual registrou ${numberFmt.format(totalCalls)} calls com ${formatPercent(successRate)} de resolução automática.`
+    ? `A janela atual registrou ${numberFmt.format(totalCalls)} calls com ${formatPercent(successRate)} de resolução automática e ${formatPercent(handoffRate)} de sucesso com handoff.`
     : "Nenhuma call encontrada para os filtros atuais."
   refs.overviewHeroStat.textContent = mapHealthState(health.health_state).label
   refs.overviewHeroMeta.textContent = buildHealthSummary(health)
@@ -608,10 +609,10 @@ function renderDiagnostics(model) {
     ? `${numberFmt.format(counters.calls_with_cost || 0)} de ${numberFmt.format(counters.total_calls || 0)} calls com custo associado.`
     : "Sem correlação suficiente."
 
-  renderTimelineList(refs.diagFailedSeries, resilience.series.failed_calls || [], {
+  renderTimelineList(refs.diagFailedSeries, resilience.series.technical_failure_events || [], {
     mode: "diagnostic",
     window: state.filters.window,
-    emptyText: "Nenhum bucket com falha registrada.",
+    emptyText: "Nenhum bucket com falha técnica registrada.",
   })
   renderTimelineList(refs.diagIdempotencySeries, resilience.series.idempotency_hits || [], {
     mode: "diagnostic",
@@ -624,7 +625,7 @@ function renderDiagnostics(model) {
     emptyText: "Nenhuma repetição de erro de negócio na janela.",
   })
 
-  renderFocusCards(refs.diagTopFailures, buildDiagnosticFocus(resilience.top_failure_tools || [], "Falha"))
+  renderFocusCards(refs.diagTopFailures, buildDiagnosticFocus(resilience.top_failure_tools || [], "Falha técnica"))
   renderFocusCards(refs.diagTopHandoffs, buildDiagnosticFocus(resilience.top_handoff_tools || [], "Handoff"))
   renderFocusCards(
     refs.diagBusinessTools,
@@ -652,7 +653,7 @@ function renderAudit(model) {
 
   refs.auditTotalCalls.textContent = numberFmt.format(totals.total_calls || 0)
   refs.auditSuccessCalls.textContent = numberFmt.format(totals.success_calls || 0)
-  refs.auditFailedCalls.textContent = numberFmt.format(totals.failed_calls || 0)
+  refs.auditFailedCalls.textContent = numberFmt.format(totals.technical_failure_events || 0)
   refs.auditHandoffCalls.textContent = numberFmt.format(totals.handoff_calls || 0)
 
   refs.auditTableBody.replaceChildren()
@@ -730,7 +731,7 @@ function buildOverviewFocusItems(items) {
   const topVolume = [...items].sort((left, right) => Number(right.total_calls || 0) - Number(left.total_calls || 0))[0]
   const topFailure = [...items]
     .filter((item) => Number(item.total_calls || 0) > 0)
-    .sort((left, right) => Number(right.failure_rate_pct || 0) - Number(left.failure_rate_pct || 0))[0]
+    .sort((left, right) => Number(right.technical_failure_rate_pct || 0) - Number(left.technical_failure_rate_pct || 0))[0]
   const topCost = [...items].sort((left, right) => Number(right.total_cost_usd || 0) - Number(left.total_cost_usd || 0))[0]
   return [
     topVolume
@@ -743,10 +744,10 @@ function buildOverviewFocusItems(items) {
       : null,
     topFailure
       ? {
-          label: "Maior falha",
+          label: "Maior falha técnica",
           title: topFailure.tool_name,
-          meta: formatPercent(topFailure.failure_rate_pct || 0),
-          caption: "Maior taxa de falha entre as tools observadas.",
+          meta: formatPercent(topFailure.technical_failure_rate_pct || 0),
+          caption: "Maior taxa de falha técnica entre as tools observadas.",
         }
       : null,
     topCost
@@ -766,7 +767,7 @@ function buildDiagnosticFocus(items, labelPrefix) {
     title: item.tool_name,
     meta: labelPrefix === "Handoff"
       ? `${numberFmt.format(item.handoff_calls || 0)} transferências`
-      : formatPercent(item.failure_rate_pct || 0),
+      : formatPercent(item.technical_failure_rate_pct || 0),
     caption: `${numberFmt.format(item.total_calls || 0)} execuções observadas.`,
   }))
 }
@@ -776,7 +777,7 @@ function buildDiagnosticHeroCopy(health, resilience) {
   if (!counters.total_calls) {
     return "Sem volume suficiente para avaliar robustez na janela atual."
   }
-  return `${numberFmt.format(counters.failed_calls || 0)} falhas, ${numberFmt.format(resilience.summary.repeated_business_errors || 0)} erros repetidos e ${numberFmt.format(resilience.summary.idempotency_hits || 0)} reaproveitamentos registrados.`
+  return `${numberFmt.format(counters.technical_failure_events || 0)} falhas técnicas, ${numberFmt.format(resilience.summary.repeated_business_errors || 0)} erros repetidos e ${numberFmt.format(resilience.summary.idempotency_hits || 0)} reaproveitamentos registrados.`
 }
 
 function renderSummaryCards(container, cards) {
@@ -844,7 +845,7 @@ function renderTimelineList(container, items, options) {
 
     if (options.mode === "calls") {
       const calls = Number(item.calls || 0)
-      const handoffs = Number(item.handoffs || 0)
+      const handoffs = Number(item.successful_handoffs ?? item.handoffs ?? 0)
       valueText = `${numberFmt.format(calls)} calls`
       primaryValue = calls
       secondaryWidth = `${calls > 0 ? (handoffs / maxValue) * 100 : 0}%`
@@ -873,8 +874,8 @@ function renderTimelineList(container, items, options) {
     foot.className = "timeline-foot"
     if (options.mode === "calls") {
       foot.append(
-        buildText("span", "", `Handoff ${numberFmt.format(item.handoffs || 0)}`),
-        buildText("span", "", `Taxa ${formatPercent(rateOf(item.handoffs || 0, item.calls || 0))}`),
+        buildText("span", "", `Handoff ${numberFmt.format(item.successful_handoffs ?? item.handoffs ?? 0)}`),
+        buildText("span", "", `Taxa ${formatPercent(rateOf(item.successful_handoffs ?? item.handoffs ?? 0, item.calls || 0))}`),
       )
     } else if (options.mode === "cost") {
       foot.append(
@@ -901,7 +902,7 @@ function renderToolsTable(items) {
     appendCell(row, item.tool_name, "tool-name")
     appendCell(row, numberFmt.format(item.total_calls || 0))
     appendCell(row, formatPercent(rateOf(item.success_calls || 0, item.total_calls || 0)))
-    appendCell(row, formatPercent(item.failure_rate_pct || 0))
+    appendCell(row, formatPercent(item.technical_failure_rate_pct || 0))
     appendCell(row, numberFmt.format(item.handoff_calls || 0))
     appendCell(row, formatUsd(item.total_cost_usd || 0))
     appendCell(row, formatUsd(item.avg_cost_per_call_usd || 0))
@@ -951,7 +952,7 @@ function mapHealthState(stateValue) {
 function buildHealthSummary(health) {
   const counters = health.counters || {}
   const syncState = formatSyncState(health.sync?.freshness_state)
-  return `${numberFmt.format(counters.failed_calls || 0)} falhas, ${numberFmt.format(counters.handoff_calls || 0)} handoffs, cobertura de ${formatPercent(counters.coverage_pct || 0)} e sync ${syncState.toLowerCase()}.`
+  return `${numberFmt.format(counters.technical_failure_events || 0)} falhas técnicas, ${numberFmt.format(counters.handoff_calls || 0)} handoffs, cobertura de ${formatPercent(counters.coverage_pct || 0)} e sync ${syncState.toLowerCase()}.`
 }
 
 function formatSyncState(syncState) {
@@ -1020,6 +1021,7 @@ function emptyHealthModel() {
       total_calls: 0,
       failed_calls: 0,
       handoff_calls: 0,
+      technical_failure_events: 0,
       calls_with_cost: 0,
       repeated_business_errors: 0,
       idempotency_hits: 0,
@@ -1038,6 +1040,11 @@ function emptyOverviewModel() {
         failed_calls: 0,
         handoff_calls: 0,
         avg_duration_ms: 0,
+        automated_resolution_calls: 0,
+        successful_handoff_calls: 0,
+        unresolved_calls: 0,
+        technical_failure_events: 0,
+        tool_execution_count: 0,
       },
       series: [],
     },
@@ -1067,6 +1074,7 @@ function emptyDiagnosticsModel() {
       },
       series: {
         failed_calls: [],
+        technical_failure_events: [],
         idempotency_hits: [],
         repeated_business_errors: [],
       },
@@ -1086,6 +1094,7 @@ function emptyAuditModel() {
         success_calls: 0,
         failed_calls: 0,
         handoff_calls: 0,
+        technical_failure_events: 0,
       },
     },
     auditRecent: {

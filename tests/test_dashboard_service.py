@@ -7,7 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.core.ops.dashboard_service import get_costs, get_health, get_resilience, get_tools
+from app.core.ops.dashboard_service import get_costs, get_health, get_overview, get_resilience, get_tools
 from app.core.ops.report_service import build_operational_report_pdf
 from app.db import Base
 from app.models.call_event import CallEvent
@@ -137,7 +137,7 @@ class DashboardServiceTests(unittest.TestCase):
                 assistant_id="asst_1",
             )
 
-        self.assertEqual("critical", health["health_state"])
+        self.assertEqual("warning", health["health_state"])
         self.assertEqual(1, health["counters"]["idempotency_hits"])
         self.assertEqual(1, health["counters"]["repeated_business_errors"])
         self.assertEqual("fresh", health["sync"]["freshness_state"])
@@ -148,10 +148,73 @@ class DashboardServiceTests(unittest.TestCase):
         self.assertEqual(1, resilience["summary"]["idempotency_hits"])
         self.assertEqual(1, resilience["summary"]["repeated_business_errors"])
         self.assertTrue(resilience["series"]["failed_calls"])
+        self.assertFalse(resilience["series"]["technical_failure_events"])
         self.assertTrue(resilience["series"]["idempotency_hits"])
         self.assertTrue(resilience["series"]["repeated_business_errors"])
         self.assertEqual("search_providers", resilience["top_failure_tools"][0]["tool_name"])
         self.assertEqual("search_providers", resilience["business_error_tools"][0]["tool_name"])
+
+    def test_v2_classifies_successful_handoff_and_technical_failures_independently(self) -> None:
+        session_local = self._session_local()
+        now = datetime.now(timezone.utc)
+
+        def event(
+            call_id: str,
+            tool_name: str,
+            *,
+            ok: bool,
+            final_state: str,
+            error_code: str | None = None,
+            minutes_ago: int = 1,
+            tenant_id: str = "tenant_a",
+        ) -> CallEvent:
+            return CallEvent(
+                tenant_id=tenant_id,
+                call_id=call_id,
+                tool_call_id=f"{call_id}-{tool_name}-{minutes_ago}",
+                tool_name=tool_name,
+                event_type="tool_completed",
+                final_state=final_state,
+                ok=ok,
+                duration_ms=500,
+                error_code=error_code,
+                payload_masked={},
+                created_at=now - timedelta(minutes=minutes_ago),
+            )
+
+        with session_local() as session:
+            session.add_all(
+                [
+                    event("automatic", "search_providers", ok=True, final_state="RESOLVIDA_AUTOMATICO", minutes_ago=8),
+                    event("handoff", "search_providers", ok=True, final_state="RESOLVIDA_AUTOMATICO", minutes_ago=7),
+                    event("handoff", "handoff_human", ok=True, final_state="TRANSFERIDA_HUMANO", minutes_ago=6),
+                    event("validation", "search_providers", ok=False, final_state="TRANSFERIDA_HUMANO", error_code="VALIDATION", minutes_ago=5),
+                    event("technical", "search_providers", ok=False, final_state="TRANSFERIDA_HUMANO", error_code="TIMEOUT", minutes_ago=4),
+                    event("technical", "handoff_human", ok=True, final_state="TRANSFERIDA_HUMANO", minutes_ago=3),
+                    event("handoff", "handoff_human", ok=True, final_state="TRANSFERIDA_HUMANO", tenant_id="tenant_b", minutes_ago=2),
+                ]
+            )
+            session.commit()
+
+            overview = get_overview(session, window="24h", tenant_id="tenant_a", assistant_id=None)
+            tools = get_tools(session, window="24h", tenant_id="tenant_a", assistant_id=None)
+            resilience = get_resilience(session, window="24h", tenant_id="tenant_a", assistant_id=None)
+
+        self.assertEqual("v2", overview["metric_version"])
+        self.assertEqual(4, overview["kpis"]["total_calls"])
+        self.assertEqual(1, overview["kpis"]["automated_resolution_calls"])
+        self.assertEqual(2, overview["kpis"]["successful_handoff_calls"])
+        self.assertEqual(1, overview["kpis"]["unresolved_calls"])
+        self.assertEqual(1, overview["kpis"]["technical_failure_events"])
+        self.assertEqual(6, overview["kpis"]["tool_execution_count"])
+        self.assertEqual(16.67, overview["kpis"]["technical_failure_rate_pct"])
+        self.assertEqual(2, sum(point["successful_handoffs"] for point in overview["series"]))
+
+        tools_by_name = {item["tool_name"]: item for item in tools["items"]}
+        self.assertEqual(1, tools_by_name["search_providers"]["technical_failure_events"])
+        self.assertEqual(0, tools_by_name["handoff_human"]["technical_failure_events"])
+        self.assertEqual(1, resilience["summary"]["technical_failure_events"])
+        self.assertTrue(resilience["series"]["technical_failure_events"])
 
     def test_operational_report_is_a_pdf_for_the_requested_tenant(self) -> None:
         session_local = self._session_local()

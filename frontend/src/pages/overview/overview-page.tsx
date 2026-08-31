@@ -56,9 +56,10 @@ export function OverviewPage() {
   }
 
   const totalCalls = overview.kpis.totalCalls
-  const successRate = rate(overview.kpis.successCalls, totalCalls)
-  const handoffRate = rate(overview.kpis.handoffCalls, totalCalls)
-  const failureRate = rate(overview.kpis.failedCalls, totalCalls)
+  const automatedResolutionRate = rate(overview.kpis.automatedResolutionCalls, totalCalls)
+  const successfulHandoffRate = rate(overview.kpis.successfulHandoffCalls, totalCalls)
+  const unresolvedRate = rate(overview.kpis.unresolvedCalls, totalCalls)
+  const technicalFailureRate = overview.kpis.technicalFailureRatePct
   const coverageRate = costs.summary.coveragePct
   const costPerMinute = costs.summary.totalDurationSeconds > 0
     ? costs.summary.totalCostUsd / (costs.summary.totalDurationSeconds / 60)
@@ -77,13 +78,14 @@ export function OverviewPage() {
       ) : null}
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <StatCard detail="Calls na janela atual" icon={Activity} label="Total de calls" value={formatNumberBR(totalCalls)} />
-        <StatCard detail={`${formatNumberBR(overview.kpis.successCalls)} resolvidas`} icon={CheckCircle2} label="Resolução" tone="success" value={formatPercent(successRate)} />
-        <StatCard detail={`${formatNumberBR(overview.kpis.handoffCalls)} transferências`} icon={PhoneForwarded} label="Handoff" tone={handoffRate >= 20 ? "warning" : "default"} value={formatPercent(handoffRate)} />
+        <StatCard detail={`${formatNumberBR(overview.kpis.automatedResolutionCalls)} resolvidas sem humano`} icon={CheckCircle2} label="Resolução automática" tone="success" value={formatPercent(automatedResolutionRate)} />
+        <StatCard detail={`${formatNumberBR(overview.kpis.successfulHandoffCalls)} transferências iniciadas`} icon={PhoneForwarded} label="Sucesso com handoff" tone="success" value={formatPercent(successfulHandoffRate)} />
         <StatCard detail={`${formatNumberBR(costs.summary.callsWithCost)} calls Vapi com custo`} icon={BadgeDollarSign} label="Custo Vapi em USD" value={financialVisible ? formatCurrencyUSD(costs.summary.totalCostUsd) : "Oculto"} />
       </section>
 
-      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard detail={`${formatNumberBR(overview.kpis.failedCalls)} falhas`} label="Falha" tone={failureRate >= 10 ? "danger" : "default"} value={formatPercent(failureRate)} />
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <StatCard detail={`${formatNumberBR(overview.kpis.unresolvedCalls)} sem resolução comprovada`} label="Não resolvida" tone={unresolvedRate >= 20 ? "warning" : "default"} value={formatPercent(unresolvedRate)} />
+        <StatCard detail={`${formatNumberBR(overview.kpis.technicalFailureEvents)} em ${formatNumberBR(overview.kpis.toolExecutionCount)} execuções`} label="Falhas técnicas da tool" tone={technicalFailureRate >= 10 ? "danger" : "default"} value={formatPercent(technicalFailureRate)} />
         <StatCard detail={`${formatNumberBR(costs.summary.callsWithoutCost)} de ${formatNumberBR(costs.summary.vapiCalls)} sem custo`} label="Cobertura Vapi" tone={coverageRate < 80 && costs.summary.vapiCalls > 0 ? "warning" : "default"} value={formatPercent(coverageRate)} />
         <StatCard detail={costs.fx.complete ? "PTAX histórica aplicada" : "Conversão parcial ou indisponível"} label="Custo em BRL" tone={costs.fx.complete ? "default" : "warning"} value={financialVisible ? formatCurrencyBRL(costs.summary.totalCostBrl) : "Oculto"} />
         <StatCard
@@ -97,7 +99,7 @@ export function OverviewPage() {
       <section className="grid gap-4 xl:grid-cols-2">
         <Card>
           <CardHeader>
-            <SectionHeader description="Volume de chamadas e transferências por bucket." title="Chamadas e handoff" />
+            <SectionHeader description="Volume de calls e transferências iniciadas com sucesso por bucket." title="Chamadas e handoff" />
           </CardHeader>
           <CardContent>
             {overview.series.length ? (
@@ -105,7 +107,7 @@ export function OverviewPage() {
                 data={overview.series}
                 series={[
                   { key: "calls", label: "Calls", color: "hsl(var(--primary))", area: true },
-                  { key: "handoffs", label: "Handoff", color: "hsl(var(--warning))" },
+                  { key: "successfulHandoffs", label: "Sucesso com handoff", color: "hsl(var(--success))" },
                 ]}
               />
             ) : (
@@ -213,7 +215,7 @@ export function OverviewPage() {
 
       <Card>
         <CardHeader>
-          <SectionHeader description="Performance, falha, handoff e duração por ferramenta. Custos não são atribuídos por tool." title="Desempenho por tool" />
+          <SectionHeader description="Performance, falhas técnicas, handoff e duração por ferramenta. Custos não são atribuídos por tool." title="Desempenho por tool" />
         </CardHeader>
         <CardContent>
           {tools.length ? <ToolsTable items={tools} /> : <EmptyState description="Nenhuma tool encontrada para os filtros atuais." title="Sem tools" />}

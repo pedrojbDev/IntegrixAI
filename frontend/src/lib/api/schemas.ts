@@ -29,6 +29,8 @@ export const toolPerformanceSchema = z
     handoff_calls: numeric,
     avg_duration_ms: numeric,
     failure_rate_pct: numeric,
+    technical_failure_events: numeric,
+    technical_failure_rate_pct: numeric,
     unique_calls: numeric,
   })
   .passthrough()
@@ -71,6 +73,9 @@ export const healthSchema = z
         vapi_calls: numeric,
         failed_calls: numeric,
         handoff_calls: numeric,
+        technical_failure_events: numeric,
+        technical_failure_rate_pct: numeric,
+        tool_execution_count: numeric,
         calls_with_cost: numeric,
         calls_without_cost: numeric,
         repeated_business_errors: numeric,
@@ -82,6 +87,9 @@ export const healthSchema = z
         vapi_calls: 0,
         failed_calls: 0,
         handoff_calls: 0,
+        technical_failure_events: 0,
+        technical_failure_rate_pct: 0,
+        tool_execution_count: 0,
         calls_with_cost: 0,
         calls_without_cost: 0,
         repeated_business_errors: 0,
@@ -103,6 +111,12 @@ export const overviewSchema = z
         failed_calls: numeric,
         handoff_calls: numeric,
         avg_duration_ms: numeric,
+        automated_resolution_calls: numeric,
+        successful_handoff_calls: numeric,
+        unresolved_calls: numeric,
+        technical_failure_events: numeric,
+        tool_execution_count: numeric,
+        technical_failure_rate_pct: numeric,
       })
       .catch({
         total_calls: 0,
@@ -110,6 +124,12 @@ export const overviewSchema = z
         failed_calls: 0,
         handoff_calls: 0,
         avg_duration_ms: 0,
+        automated_resolution_calls: 0,
+        successful_handoff_calls: 0,
+        unresolved_calls: 0,
+        technical_failure_events: 0,
+        tool_execution_count: 0,
+        technical_failure_rate_pct: 0,
       }),
     series: z
       .array(
@@ -117,6 +137,9 @@ export const overviewSchema = z
           timestamp: z.string(),
           calls: numeric,
           handoffs: numeric,
+          successful_handoffs: numeric,
+          automated_resolutions: numeric,
+          unresolved_calls: numeric,
         }),
       )
       .catch([]),
@@ -222,6 +245,8 @@ export const resilienceSchema = z
         total_calls: numeric,
         failed_calls: numeric,
         handoff_calls: numeric,
+        technical_failure_events: numeric,
+        technical_failure_rate_pct: numeric,
         repeated_business_errors: numeric,
         idempotency_hits: numeric,
       })
@@ -229,16 +254,19 @@ export const resilienceSchema = z
         total_calls: 0,
         failed_calls: 0,
         handoff_calls: 0,
+        technical_failure_events: 0,
+        technical_failure_rate_pct: 0,
         repeated_business_errors: 0,
         idempotency_hits: 0,
       }),
     series: z
       .object({
         failed_calls: z.array(z.object({ timestamp: z.string(), value: numeric })).catch([]),
+        technical_failure_events: z.array(z.object({ timestamp: z.string(), value: numeric })).catch([]),
         idempotency_hits: z.array(z.object({ timestamp: z.string(), value: numeric })).catch([]),
         repeated_business_errors: z.array(z.object({ timestamp: z.string(), value: numeric })).catch([]),
       })
-      .catch({ failed_calls: [], idempotency_hits: [], repeated_business_errors: [] }),
+      .catch({ failed_calls: [], technical_failure_events: [], idempotency_hits: [], repeated_business_errors: [] }),
     top_failure_tools: z.array(toolPerformanceSchema).catch([]),
     top_handoff_tools: z.array(toolPerformanceSchema).catch([]),
     business_error_tools: z
@@ -261,6 +289,7 @@ export const auditSummarySchema = z
         success_calls: numeric,
         failed_calls: numeric,
         handoff_calls: numeric,
+        technical_failure_events: numeric,
         avg_duration_ms: numeric,
       })
       .catch({
@@ -268,6 +297,7 @@ export const auditSummarySchema = z
         success_calls: 0,
         failed_calls: 0,
         handoff_calls: 0,
+        technical_failure_events: 0,
         avg_duration_ms: 0,
       }),
   })

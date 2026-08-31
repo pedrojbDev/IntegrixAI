@@ -39,6 +39,8 @@ export function mapTool(raw: RawTool): ToolPerformance {
     handoffCalls: raw.handoff_calls,
     avgDurationMs: raw.avg_duration_ms,
     failureRatePct: raw.failure_rate_pct,
+    technicalFailureEvents: raw.technical_failure_events,
+    technicalFailureRatePct: raw.technical_failure_rate_pct,
     uniqueCalls: raw.unique_calls,
   }
 }
@@ -70,6 +72,9 @@ export function mapHealth(raw: RawHealth): Health {
       vapiCalls: raw.counters.vapi_calls,
       failedCalls: raw.counters.failed_calls,
       handoffCalls: raw.counters.handoff_calls,
+      technicalFailureEvents: raw.counters.technical_failure_events,
+      technicalFailureRatePct: raw.counters.technical_failure_rate_pct,
+      toolExecutionCount: raw.counters.tool_execution_count,
       callsWithCost: raw.counters.calls_with_cost,
       callsWithoutCost: raw.counters.calls_without_cost,
       repeatedBusinessErrors: raw.counters.repeated_business_errors,
@@ -90,11 +95,20 @@ export function mapOverview(raw: RawOverview): Overview {
       failedCalls: raw.kpis.failed_calls,
       handoffCalls: raw.kpis.handoff_calls,
       avgDurationMs: raw.kpis.avg_duration_ms,
+      automatedResolutionCalls: raw.kpis.automated_resolution_calls,
+      successfulHandoffCalls: raw.kpis.successful_handoff_calls,
+      unresolvedCalls: raw.kpis.unresolved_calls,
+      technicalFailureEvents: raw.kpis.technical_failure_events,
+      toolExecutionCount: raw.kpis.tool_execution_count,
+      technicalFailureRatePct: raw.kpis.technical_failure_rate_pct,
     },
     series: raw.series.map((point) => ({
       timestamp: point.timestamp,
       calls: point.calls || 0,
       handoffs: point.handoffs || 0,
+      successfulHandoffs: point.successful_handoffs || 0,
+      automatedResolutions: point.automated_resolutions || 0,
+      unresolvedCalls: point.unresolved_calls || 0,
     })),
   }
 }
@@ -169,11 +183,17 @@ export function mapResilience(raw: RawResilience): Resilience {
       totalCalls: raw.summary.total_calls,
       failedCalls: raw.summary.failed_calls,
       handoffCalls: raw.summary.handoff_calls,
+      technicalFailureEvents: raw.summary.technical_failure_events,
+      technicalFailureRatePct: raw.summary.technical_failure_rate_pct,
       repeatedBusinessErrors: raw.summary.repeated_business_errors,
       idempotencyHits: raw.summary.idempotency_hits,
     },
     series: {
       failedCalls: raw.series.failed_calls.map((point) => ({
+        timestamp: point.timestamp,
+        value: point.value || 0,
+      })),
+      technicalFailureEvents: raw.series.technical_failure_events.map((point) => ({
         timestamp: point.timestamp,
         value: point.value || 0,
       })),
@@ -203,6 +223,7 @@ export function mapAuditSummary(raw: RawAuditSummary): AuditSummary {
       successCalls: raw.totals.success_calls,
       failedCalls: raw.totals.failed_calls,
       handoffCalls: raw.totals.handoff_calls,
+      technicalFailureEvents: raw.totals.technical_failure_events,
       avgDurationMs: raw.totals.avg_duration_ms,
     },
   }
