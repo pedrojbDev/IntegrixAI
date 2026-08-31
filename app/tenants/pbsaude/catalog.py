@@ -9,6 +9,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from ...config import Settings
+from .specialty_aliases import AMBIGUOUS_SPECIALTY_TERMS, DEFAULT_SPECIALTY_ALIASES
 
 FILLER_WORDS = {
     "de",
@@ -52,6 +53,7 @@ def _normalize_text(value: str) -> str:
 class SpecialtyCatalog:
     by_normalized: dict[str, str]
     by_alias: dict[str, tuple[str, ...]]
+    passthrough_unknown: bool = False
 
     def _candidate_keys(self, raw_value: str) -> list[str]:
         normalized = _normalize_text(raw_value)
@@ -72,6 +74,8 @@ class SpecialtyCatalog:
         return sorted((item for item in expanded if item), key=len, reverse=True)
 
     def resolve(self, raw_value: str) -> str | None:
+        if _normalize_text(raw_value) in AMBIGUOUS_SPECIALTY_TERMS:
+            return None
         candidate_keys = self._candidate_keys(raw_value)
         if not candidate_keys:
             return None
@@ -83,15 +87,24 @@ class SpecialtyCatalog:
                 return _pick_best_option(options, prefer_pediatric)
 
         for candidate in candidate_keys:
-            starts_with = [opt for key, values in self.by_alias.items() if key.startswith(candidate) for opt in values]
+            starts_with = [
+                option
+                for key, values in self.by_alias.items()
+                if key.startswith(candidate)
+                for option in values
+            ]
             if starts_with:
                 return _pick_best_option(starts_with, prefer_pediatric)
 
-        fuzzy_keys = get_close_matches(candidate_keys[0], self.by_alias.keys(), n=1, cutoff=0.86)
+        fuzzy_keys = get_close_matches(
+            candidate_keys[0], self.by_alias.keys(), n=1, cutoff=0.86
+        )
         if fuzzy_keys:
             options = self.by_alias[fuzzy_keys[0]]
             return _pick_best_option(options, prefer_pediatric)
 
+        if self.passthrough_unknown:
+            return " ".join(raw_value.strip().split()) or None
         return None
 
     def suggest(self, raw_value: str, limit: int = 3) -> list[str]:
@@ -99,7 +112,9 @@ class SpecialtyCatalog:
         if not candidate_keys:
             return []
 
-        fuzzy_keys = get_close_matches(candidate_keys[0], self.by_alias.keys(), n=limit * 2, cutoff=0.7)
+        fuzzy_keys = get_close_matches(
+            candidate_keys[0], self.by_alias.keys(), n=limit * 2, cutoff=0.7
+        )
         out: list[str] = []
         for key in fuzzy_keys:
             for candidate in self.by_alias[key]:
@@ -187,7 +202,7 @@ def _pick_best_option(options: list[str] | tuple[str, ...], prefer_pediatric: bo
 @lru_cache(maxsize=16)
 def _load_catalog(path_str: str) -> SpecialtyCatalog:
     path = Path(path_str)
-    if not path.exists():
+    if not path.is_file():
         return SpecialtyCatalog(by_normalized={}, by_alias={})
 
     with path.open("r", encoding="utf-8-sig", newline="") as csv_file:
@@ -197,6 +212,7 @@ def _load_catalog(path_str: str) -> SpecialtyCatalog:
         first_column = reader.fieldnames[0]
 
         mapping: dict[str, str] = {}
+        explicit_aliases: dict[str, set[str]] = {}
         for row in reader:
             raw_value = (row.get("BAQ_DESCRI") or row.get(first_column) or "").strip()
             if not raw_value:
@@ -207,19 +223,67 @@ def _load_catalog(path_str: str) -> SpecialtyCatalog:
                 continue
             if normalized not in mapping:
                 mapping[normalized] = canonical
+            aliases_value = row.get("ALIASES") or row.get("aliases") or ""
+            for alias in aliases_value.split("|"):
+                normalized_alias = _normalize_text(alias)
+                if normalized_alias:
+                    explicit_aliases.setdefault(normalized_alias, set()).add(canonical)
 
+    return _build_catalog(mapping, explicit_aliases)
+
+
+def _build_catalog(
+    mapping: dict[str, str],
+    explicit_aliases: dict[str, set[str]] | None = None,
+    *,
+    passthrough_unknown: bool = False,
+) -> SpecialtyCatalog:
     aliases_raw: dict[str, set[str]] = {key: {value} for key, value in mapping.items()}
     for normalized, canonical in mapping.items():
         for alias in _derive_aliases_from_canonical(normalized):
             aliases_raw.setdefault(alias, set()).add(canonical)
+    for alias, values in (explicit_aliases or {}).items():
+        aliases_raw.setdefault(alias, set()).update(values)
 
     aliases: dict[str, tuple[str, ...]] = {
         key: tuple(sorted(values, key=len)) for key, values in aliases_raw.items()
     }
-    return SpecialtyCatalog(by_normalized=mapping, by_alias=aliases)
+    return SpecialtyCatalog(by_normalized=mapping, by_alias=aliases, passthrough_unknown=passthrough_unknown)
+
+
+@lru_cache(maxsize=1)
+def _load_default_catalog() -> SpecialtyCatalog:
+    mapping: dict[str, str] = {}
+    explicit_aliases: dict[str, set[str]] = {}
+    for canonical, aliases in DEFAULT_SPECIALTY_ALIASES.items():
+        normalized = _normalize_text(canonical)
+        mapping[normalized] = canonical
+        for alias in aliases:
+            normalized_alias = _normalize_text(alias)
+            if normalized_alias:
+                explicit_aliases.setdefault(normalized_alias, set()).add(canonical)
+    return _build_catalog(mapping, explicit_aliases, passthrough_unknown=True)
+
+
+def _merge_catalogs(*catalogs: SpecialtyCatalog) -> SpecialtyCatalog:
+    mapping: dict[str, str] = {}
+    aliases: dict[str, set[str]] = {}
+    for catalog in catalogs:
+        mapping.update(catalog.by_normalized)
+        for alias, values in catalog.by_alias.items():
+            aliases.setdefault(alias, set()).update(values)
+    return SpecialtyCatalog(
+        by_normalized=mapping,
+        by_alias={key: tuple(sorted(values, key=len)) for key, values in aliases.items()},
+        passthrough_unknown=all(catalog.passthrough_unknown for catalog in catalogs),
+    )
 
 
 def get_specialty_catalog(settings: Settings) -> SpecialtyCatalog:
+    default_catalog = _load_default_catalog()
     if not settings.specialties_csv_path:
-        return SpecialtyCatalog(by_normalized={}, by_alias={})
-    return _load_catalog(settings.specialties_csv_path)
+        return default_catalog
+    external_catalog = _load_catalog(settings.specialties_csv_path)
+    if not external_catalog.is_enabled:
+        return default_catalog
+    return _merge_catalogs(default_catalog, external_catalog)
