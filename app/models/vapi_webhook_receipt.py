@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Index, Integer, JSON, String, Text, func
+from sqlalchemy import DateTime, Index, Integer, String, Text, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.types import JSON
 
 from ..db import Base
 
@@ -28,7 +30,9 @@ class VapiWebhookReceipt(Base):
     processing_status: Mapped[str] = mapped_column(String(32), nullable=False)
     identity_result: Mapped[str | None] = mapped_column(String(64), nullable=True)
     payload_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
-    payload_sanitized: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    payload_sanitized: Mapped[dict] = mapped_column(
+        JSONB().with_variant(JSON, "sqlite"), nullable=False, default=dict
+    )
     processing_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     provider_occurred_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     received_at: Mapped[datetime] = mapped_column(
