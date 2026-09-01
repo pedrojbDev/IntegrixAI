@@ -109,6 +109,13 @@ docker compose -f docker-compose.production.yml --env-file .env.production run -
 docker compose -f docker-compose.production.yml --env-file .env.production up -d --no-deps app
 ```
 
+Em VPS compartilhada, use preferencialmente
+`./deploy/rollout-app.sh --release-ref REF_VERIFICADA`. O script atualiza
+somente `app`, preserva Caddy e PostgreSQL, cria backup e imagem de rollback e
+recusa um release que altere o Caddyfile. Consulte
+[`docs/production-vps.md`](../docs/production-vps.md) para a instalacao unica
+de `CADDY_CONFIG_PATH` fora do worktree Git.
+
 Abra `/dashboard`, escolha **Configuracao inicial** e crie o primeiro
 administrador usando `OPS_DASHBOARD_TOKEN`. O primeiro sync administrativo faz
 o backfill de 90 dias; mantenha o custo v2 restrito a administradores ate
