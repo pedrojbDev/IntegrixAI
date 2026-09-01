@@ -97,6 +97,8 @@ export function mapOverview(raw: RawOverview): Overview {
       avgDurationMs: raw.kpis.avg_duration_ms,
       automatedResolutionCalls: raw.kpis.automated_resolution_calls,
       successfulHandoffCalls: raw.kpis.successful_handoff_calls,
+      successfulAgentCalls: raw.kpis.successful_agent_calls,
+      agentSuccessRatePct: raw.kpis.agent_success_rate_pct,
       unresolvedCalls: raw.kpis.unresolved_calls,
       technicalFailureEvents: raw.kpis.technical_failure_events,
       toolExecutionCount: raw.kpis.tool_execution_count,

@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     external_api_password: str | None = None
     external_api_provider_search_path: str = "/rest02/TNSCallCenter/busca-rede"
     external_api_timeout_seconds: float = 3.0
+    external_api_total_deadline_seconds: float = 4.0
     external_api_max_retries: int = 1
     external_api_retry_backoff_seconds: float = 0.2
     external_api_max_connections: int = 50
@@ -76,6 +77,9 @@ class Settings(BaseSettings):
     provider_timeout_seconds: float = 2.0
     webhook_secret: str | None = None
     webhook_secret_header: str = "x-webhook-secret"
+    vapi_slot_guard_enabled: bool = False
+    vapi_slot_state_hmac_secret: str | None = None
+    vapi_slot_state_retention_hours: int = 24
     specialties_csv_path: str | None = None
     vapi_api_key: str | None = None
     vapi_base_url: str = "https://api.vapi.ai"
@@ -335,6 +339,24 @@ class Settings(BaseSettings):
     def clamp_external_api_retry_backoff_seconds(cls, value: float) -> float:
         return max(0.0, min(2.0, value))
 
+    @field_validator("external_api_total_deadline_seconds")
+    @classmethod
+    def clamp_external_api_total_deadline_seconds(cls, value: float) -> float:
+        return max(0.5, min(10.0, value))
+
+    @field_validator("vapi_slot_state_retention_hours")
+    @classmethod
+    def clamp_vapi_slot_state_retention_hours(cls, value: int) -> int:
+        return max(1, min(168, value))
+
+    @field_validator("vapi_slot_state_hmac_secret", mode="before")
+    @classmethod
+    def normalize_vapi_slot_state_hmac_secret(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
+
     @field_validator("external_api_max_connections")
     @classmethod
     def clamp_external_api_max_connections(cls, value: int) -> int:
@@ -392,6 +414,8 @@ class Settings(BaseSettings):
         missing: list[str] = []
         if not self.webhook_secret:
             missing.append("WEBHOOK_SECRET")
+        if self.vapi_slot_guard_enabled and not self.vapi_slot_state_hmac_secret:
+            missing.append("VAPI_SLOT_STATE_HMAC_SECRET")
         if self.data_mode != "external_api":
             missing.append("DATA_MODE=external_api")
         if not self.db_enabled:
@@ -422,6 +446,7 @@ class Settings(BaseSettings):
         placeholder_fields = [
             ("DATABASE_URL", self.database_url),
             ("WEBHOOK_SECRET", self.webhook_secret),
+            ("VAPI_SLOT_STATE_HMAC_SECRET", self.vapi_slot_state_hmac_secret),
             ("OPS_DASHBOARD_TOKEN", self.ops_dashboard_token),
             ("EXTERNAL_API_BASE_URL", self.external_api_base_url),
             ("PROTHEUS_BASE_URL", self.protheus_base_url),

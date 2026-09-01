@@ -58,6 +58,7 @@ export function OverviewPage() {
   const totalCalls = overview.kpis.totalCalls
   const automatedResolutionRate = rate(overview.kpis.automatedResolutionCalls, totalCalls)
   const successfulHandoffRate = rate(overview.kpis.successfulHandoffCalls, totalCalls)
+  const agentSuccessRate = overview.kpis.agentSuccessRatePct
   const unresolvedRate = rate(overview.kpis.unresolvedCalls, totalCalls)
   const technicalFailureRate = overview.kpis.technicalFailureRatePct
   const coverageRate = costs.summary.coveragePct
@@ -76,8 +77,9 @@ export function OverviewPage() {
           Valores financeiros estão em reconciliação e ainda não foram liberados.
         </div>
       ) : null}
-      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <StatCard detail="Calls na janela atual" icon={Activity} label="Total de calls" value={formatNumberBR(totalCalls)} />
+        <StatCard detail={`${formatNumberBR(overview.kpis.successfulAgentCalls)} resolvidas ou transferidas`} icon={CheckCircle2} label="Sucesso do agente" tone="success" value={formatPercent(agentSuccessRate)} />
         <StatCard detail={`${formatNumberBR(overview.kpis.automatedResolutionCalls)} resolvidas sem humano`} icon={CheckCircle2} label="Resolução automática" tone="success" value={formatPercent(automatedResolutionRate)} />
         <StatCard detail={`${formatNumberBR(overview.kpis.successfulHandoffCalls)} transferências iniciadas`} icon={PhoneForwarded} label="Sucesso com handoff" tone="success" value={formatPercent(successfulHandoffRate)} />
         <StatCard detail={`${formatNumberBR(costs.summary.callsWithCost)} calls Vapi com custo`} icon={BadgeDollarSign} label="Custo Vapi em USD" value={financialVisible ? formatCurrencyUSD(costs.summary.totalCostUsd) : "Oculto"} />

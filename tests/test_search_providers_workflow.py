@@ -319,6 +319,8 @@ class SearchProvidersWorkflowTests(unittest.IsolatedAsyncioTestCase):
                 )
 
         self.assertEqual("CIDADE_SEM_COBERTURA", exc.exception.code)
+        self.assertEqual("offer_handoff", exc.exception.details["recovery_action"])
+        self.assertFalse(exc.exception.retryable)
 
     async def test_upstream_failure_never_invokes_static_policy_fallback(self) -> None:
         provider = Mock()

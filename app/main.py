@@ -10,6 +10,7 @@ from .api.routes.ops import router as ops_router
 from .api.routes.ops_admin import router as ops_admin_router
 from .api.routes.ops_session import router as ops_session_router
 from .api.routes.tools import router as tools_router
+from .api.routes.vapi_events import router as vapi_events_router
 from .config import get_settings
 from .core.audit.service import stop_audit_worker
 from .core.metrics.prometheus import PrometheusHttpMetricsMiddleware
@@ -25,6 +26,7 @@ app = FastAPI(title=settings.app_name)
 app.add_middleware(PrometheusHttpMetricsMiddleware)
 app.mount("/static", StaticFiles(directory=Path(__file__).resolve().parent / "static"), name="static")
 app.include_router(tools_router)
+app.include_router(vapi_events_router)
 app.include_router(ops_session_router)
 app.include_router(ops_router)
 app.include_router(ops_admin_router)
