@@ -160,6 +160,40 @@ O Caddy e o PostgreSQL nao devem ser recriados em uma atualizacao exclusiva da
 aplicacao. Use a URL de health registrada no inventario privado para o teste
 externo.
 
+### VPS Compartilhada: Isolamento Operacional Da Integrix
+
+Quando a VPS hospedar outro projeto, o Caddyfile ativo nao pode permanecer
+como alteracao local dentro deste worktree. Na primeira manutencao controlada,
+copie o arquivo atualmente utilizado para uma area operacional fora do Git e
+aponte `CADDY_CONFIG_PATH` no ambiente privado para essa copia:
+
+```bash
+./deploy/install-external-caddy-config.sh
+# registrar em .env.production, sem imprimir o arquivo:
+# CADDY_CONFIG_PATH=/opt/integrix-ops/gateway/integrix.Caddyfile
+```
+
+O script nao recarrega o Caddy e recusa sobrescrever uma configuracao externa
+existente. Assim, um `git pull`, merge ou rollback da Integrix nao apaga regras
+de outros dominios. Somente um rollout de proxy explicitamente autorizado pode
+editar ou recarregar esse arquivo.
+
+Para atualizar a API, prefira o guardrail abaixo a comandos Compose manuais:
+
+```bash
+./deploy/rollout-app.sh --release-ref REF_VERIFICADA
+```
+
+Ele exige fast-forward, bloqueia releases que mudem `deploy/Caddyfile`, faz
+backup verificavel do PostgreSQL, cria uma tag de rollback da imagem, usa lock
+contra rollouts simultaneos e executa apenas `build`, migration e `up` do
+servico `app`. Se existir drift conhecido do Caddy, a autorizacao precisa ser
+explícita com `--allow-caddy-drift`; nenhum outro arquivo modificado e aceito.
+
+Esses controles evitam erros de operacao e interferencia pelo worktree. Eles
+nao isolam usuarios com acesso `root` ou ao socket Docker: para esse nivel de
+protecao, a Integrix precisa de VPS e conta operacional dedicadas.
+
 ## Dashboard, Custos E Jobs
 
 O bootstrap do dashboard e uma operacao unica. Depois que existe um
