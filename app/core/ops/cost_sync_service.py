@@ -22,6 +22,7 @@ from ...platform.services.voice_call_reconciliation import (
     InboundCallObservation,
     VoiceCallReconciliationService,
 )
+from ...platform.services.vapi_event_ingestion import VapiEventIngestionService
 from ..tenant.resolver import resolve_tenant_details, should_reject_tenant_resolution
 from .fx_service import PtaxService
 
@@ -29,6 +30,20 @@ log = get_logger()
 COST_SYNC_ADVISORY_LOCK_ID = 732_118_408
 MINIMUM_SLICE_SECONDS = 1
 COMPONENT_NAMES = ("transport", "stt", "llm", "tts", "vapi", "analysis", "other")
+_SENSITIVE_VAPI_SNAPSHOT_KEYS = frozenset(
+    {
+        "artifact",
+        "analysis",
+        "summary",
+        "customer",
+        "transcript",
+        "recording",
+        "recordingurl",
+        "stereorecordingurl",
+        "messages",
+        "cpf",
+    }
+)
 
 
 @dataclass
@@ -92,6 +107,7 @@ class VapiCostSyncService:
             "unresolved_tenant": 0,
             "missing_fx": 0,
             "errors": 0,
+            "native_handoffs_reconciled": 0,
         }
         try:
             current = start
@@ -119,6 +135,9 @@ class VapiCostSyncService:
                 stats["created"] += created
                 stats["updated"] += updated
                 stats["missing_fx"] += missing_fx
+                stats["native_handoffs_reconciled"] += self._reconcile_native_handoffs(
+                    session, parsed_batch
+                )
                 session.commit()
                 current = end
 
@@ -253,7 +272,7 @@ class VapiCostSyncService:
             cost_total_usd=cost_total,
             cost_breakdown_json=breakdown,
             components=components,
-            raw_call_json=raw,
+            raw_call_json=self._sanitize_call_snapshot(raw),
             identity_evidence=identity_evidence,
         )
 
@@ -265,6 +284,44 @@ class VapiCostSyncService:
     ) -> tuple[int, int]:
         created, updated, _ = self._upsert_cost_batch_detailed(session, parsed_batch, synced_at)
         return created, updated
+
+    def _reconcile_native_handoffs(
+        self,
+        session: Session,
+        parsed_batch: list[ParsedCallCost],
+    ) -> int:
+        ingestor = VapiEventIngestionService(self.settings)
+        reconciled = 0
+        for parsed in parsed_batch:
+            raw = parsed.raw_call_json or {}
+            nested_call = raw.get("call") if isinstance(raw.get("call"), dict) else {}
+            ended_reason = self._as_optional_string(
+                raw.get("endedReason")
+                or raw.get("ended_reason")
+                or nested_call.get("endedReason")
+            )
+            reconciled += int(
+                ingestor.record_cost_sync_handoff(
+                    session,
+                    tenant_id=parsed.tenant_id,
+                    call_id=parsed.call_id,
+                    ended_reason=ended_reason,
+                )
+            )
+        return reconciled
+
+    @classmethod
+    def _sanitize_call_snapshot(cls, value: Any) -> Any:
+        """Keep cost reconciliation metadata without retaining call content or CPF."""
+        if isinstance(value, dict):
+            return {
+                str(key): cls._sanitize_call_snapshot(item)
+                for key, item in value.items()
+                if str(key).lower() not in _SENSITIVE_VAPI_SNAPSHOT_KEYS
+            }
+        if isinstance(value, list):
+            return [cls._sanitize_call_snapshot(item) for item in value]
+        return value
 
     def _upsert_cost_batch_detailed(
         self,

@@ -77,6 +77,8 @@ export type Overview = {
     avgDurationMs: number
     automatedResolutionCalls: number
     successfulHandoffCalls: number
+    successfulAgentCalls: number
+    agentSuccessRatePct: number
     unresolvedCalls: number
     technicalFailureEvents: number
     toolExecutionCount: number

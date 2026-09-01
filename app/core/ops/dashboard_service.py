@@ -34,6 +34,7 @@ SYNC_FRESH_SECONDS = 15 * 60
 SYNC_DELAY_SECONDS = 60 * 60
 METRIC_VERSION = "v2"
 HANDOFF_TOOL_NAME = "handoff_human"
+NATIVE_HANDOFF_EVENT_TYPE = "vapi_native_transfer_completed"
 TECHNICAL_ERROR_CODES = frozenset({"TIMEOUT", "UPSTREAM_503"})
 
 
@@ -156,20 +157,27 @@ def _call_outcomes_subquery(
     service. Technical incidents stay out of this outcome classification and
     are counted independently from tool events.
     """
-    filters = _tool_completed_filters(
-        since=since,
-        tenant_id=tenant_id,
-        call_ids_filter=call_ids_filter,
-    )
-    if not filters:
-        return None
+    filters: list[Any] = [
+        CallEvent.created_at >= since,
+        CallEvent.event_type.in_({"tool_completed", NATIVE_HANDOFF_EVENT_TYPE}),
+    ]
+    if tenant_id:
+        filters.append(CallEvent.tenant_id == tenant_id)
+    if call_ids_filter is not None:
+        if not call_ids_filter:
+            return None
+        filters.append(CallEvent.call_id.in_(call_ids_filter))
 
     successful_handoff = and_(
-        CallEvent.tool_name == HANDOFF_TOOL_NAME,
         CallEvent.ok.is_(True),
         CallEvent.final_state == "TRANSFERIDA_HUMANO",
+        (
+            (CallEvent.tool_name == HANDOFF_TOOL_NAME)
+            | (CallEvent.event_type == NATIVE_HANDOFF_EVENT_TYPE)
+        ),
     )
     automatic_resolution = and_(
+        CallEvent.event_type == "tool_completed",
         CallEvent.tool_name != HANDOFF_TOOL_NAME,
         CallEvent.ok.is_(True),
         CallEvent.final_state == "RESOLVIDA_AUTOMATICO",
@@ -247,11 +255,6 @@ def get_overview(
         tenant_id=tenant_id,
         call_ids_filter=assistant_call_ids,
     )
-    legacy_events = _latest_tool_completed_subquery(
-        since=since,
-        tenant_id=tenant_id,
-        call_ids_filter=assistant_call_ids,
-    )
     tool_filters = _tool_completed_filters(
         since=since,
         tenant_id=tenant_id,
@@ -280,29 +283,11 @@ def get_overview(
         )
         unresolved_calls = total_calls - automated_resolution_calls - successful_handoff_calls
 
-    if legacy_events is None:
-        success_calls = failed_calls = handoff_calls = 0
-        legacy_series_rows: list[tuple[datetime | None, str | None]] = []
-    else:
-        legacy_totals = session.execute(
-            select(
-                func.count(legacy_events.c.call_id).label("total_calls"),
-                func.sum(
-                    case((legacy_events.c.final_state == "RESOLVIDA_AUTOMATICO", 1), else_=0)
-                ).label("success_calls"),
-                func.sum(
-                    case((legacy_events.c.final_state == "TRANSFERIDA_HUMANO", 1), else_=0)
-                ).label("handoff_calls"),
-            ).select_from(legacy_events)
-        ).one()
-        success_calls = int(legacy_totals.success_calls or 0)
-        failed_calls = int(legacy_totals.total_calls or 0) - success_calls
-        handoff_calls = int(legacy_totals.handoff_calls or 0)
-        legacy_series_rows = session.execute(
-            select(legacy_events.c.created_at, legacy_events.c.final_state)
-            .select_from(legacy_events)
-            .order_by(legacy_events.c.created_at.asc())
-        ).all()
+    successful_agent_calls = automated_resolution_calls + successful_handoff_calls
+    # Compatibility fields now use the same outcome semantics as v2.
+    success_calls = successful_agent_calls
+    failed_calls = unresolved_calls
+    handoff_calls = successful_handoff_calls
 
     if tool_filters:
         tool_totals = session.execute(
@@ -342,12 +327,8 @@ def get_overview(
         else:
             series_map[bucket]["unresolved_calls"] += 1
 
-    for created_at, final_state in legacy_series_rows:
-        created = _ensure_utc(created_at)
-        if created is None or final_state != "TRANSFERIDA_HUMANO":
-            continue
-        bucket = _floor_bucket(created, bucket_minutes).isoformat()
-        series_map[bucket]["handoffs"] += 1
+    for values in series_map.values():
+        values["handoffs"] = values["successful_handoffs"]
 
     series = [
         {"timestamp": timestamp, **values}
@@ -368,6 +349,10 @@ def get_overview(
             "avg_duration_ms": avg_duration_ms,
             "automated_resolution_calls": automated_resolution_calls,
             "successful_handoff_calls": successful_handoff_calls,
+            "successful_agent_calls": successful_agent_calls,
+            "agent_success_rate_pct": round(
+                (successful_agent_calls / total_calls) * 100.0, 2
+            ) if total_calls else 0.0,
             "unresolved_calls": unresolved_calls,
             "technical_failure_events": technical_failure_events,
             "tool_execution_count": tool_execution_count,
