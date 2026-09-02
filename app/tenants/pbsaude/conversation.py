@@ -158,6 +158,9 @@ def _reduce(turns: list[dict]) -> dict:
         elif field == "especialidade" and entry.get("terms") and not entry.get("specialties") and not entry.get("city"):
             result["especialidade"] = entry["terms"]
             result["field_turns"][field] = entry["key"]
+        for updated_field, turn_key in result["field_turns"].items():
+            if turn_key == entry["key"]:
+                result["failures"][updated_field] = 0
         # Compatibility for complete user-only snapshots: no assistant text is
         # available to associate a question, so use only still-missing slots.
         if not assistant_seen and result["cpf"] and result["cidade"]:

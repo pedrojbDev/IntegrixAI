@@ -274,3 +274,11 @@ class ConversationFlowTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual('SLOT_UNCONFIRMED', result['data']['upstream_code'])
             self.validate()
         self.provider.search_providers.assert_not_called()
+
+    async def test_valid_answer_clears_previous_failed_confirmations(self):
+        ms = self.messages(('user', f"User's Keypad Entry: {CPF}#"),
+            ('bot', 'Qual cidade?'), ('user', 'Não'), ('user', 'Não'),
+            ('user', 'Salvador'), ('bot', 'Qual especialidade?'), ('user', 'Cardiologista'))
+        result = (await self.dispatch(ms, [self.tool(city='Cidade inventada')]))['results'][0]['result']
+        self.assertEqual(0, result['data']['attempt'])
+        self.validate()
