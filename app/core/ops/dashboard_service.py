@@ -32,7 +32,7 @@ WINDOW_BUCKET_MINUTES = {
 }
 SYNC_FRESH_SECONDS = 15 * 60
 SYNC_DELAY_SECONDS = 60 * 60
-METRIC_VERSION = "v3"
+METRIC_VERSION = "v4"
 HANDOFF_TOOL_NAME = "handoff_human"
 NATIVE_HANDOFF_EVENT_TYPE = "vapi_native_transfer_completed"
 NORMAL_COMPLETION_EVENT_TYPE = "vapi_normal_call_completed"
@@ -155,8 +155,8 @@ def _call_outcomes_subquery(
 
     A successful human handoff takes precedence over an earlier automatic
     resolution and remains unresolved from the automation perspective. A
-    normal end initiated by the customer or agent is a successful agent
-    completion. Technical incidents stay independent from call outcomes.
+    normal end initiated by the customer or agent is an automatic resolution.
+    Technical incidents stay independent from call outcomes.
     """
     filters: list[Any] = [
         CallEvent.created_at >= since,
@@ -221,22 +221,22 @@ def _summarize_call_outcomes(rows: list[Any]) -> dict[str, int]:
     }
     for row in rows:
         handoff = bool(row.successful_handoff)
-        automatic = bool(row.automatic_resolution) and not handoff
-        normal_completion = bool(row.normal_completion) and not handoff and not automatic
+        normal_completion = bool(row.normal_completion) and not handoff
+        automatic = (bool(row.automatic_resolution) or normal_completion) and not handoff
 
         if handoff:
             summary["successful_handoff_calls"] += 1
-        elif automatic:
+        if automatic:
             summary["automated_resolution_calls"] += 1
-        elif normal_completion:
+        if normal_completion:
             summary["normal_completion_calls"] += 1
 
-        if handoff or automatic or normal_completion:
+        if handoff or automatic:
             summary["successful_agent_calls"] += 1
 
         # Handoffs deliberately remain unresolved from the automated-service
         # viewpoint, even though escalation itself is a successful agent act.
-        if handoff or not (automatic or normal_completion):
+        if handoff or not automatic:
             summary["unresolved_calls"] += 1
     return summary
 
@@ -329,9 +329,7 @@ def get_overview(
         normal_completion_calls = summary["normal_completion_calls"]
         unresolved_calls = summary["unresolved_calls"]
 
-    successful_agent_calls = (
-        automated_resolution_calls + successful_handoff_calls + normal_completion_calls
-    )
+    successful_agent_calls = automated_resolution_calls + successful_handoff_calls
     # Compatibility fields retain the current agent-success semantics.
     success_calls = successful_agent_calls
     failed_calls = unresolved_calls
@@ -371,14 +369,15 @@ def get_overview(
         series_map[bucket]["calls"] += 1
         handoff = bool(successful_handoff)
         automatic = bool(automatic_resolution) and not handoff
-        normal = bool(normal_completion) and not handoff and not automatic
+        normal = bool(normal_completion) and not handoff
+        automatic = (bool(automatic_resolution) or normal) and not handoff
         if handoff:
             series_map[bucket]["successful_handoffs"] += 1
-        elif automatic:
+        if automatic:
             series_map[bucket]["automated_resolutions"] += 1
-        elif normal:
+        if normal:
             series_map[bucket]["normal_completions"] += 1
-        if handoff or not (automatic or normal):
+        if handoff or not automatic:
             series_map[bucket]["unresolved_calls"] += 1
 
     for values in series_map.values():
