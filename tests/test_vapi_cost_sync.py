@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import patch
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -11,6 +11,7 @@ from app.config import Settings
 from app.core.ops.cost_sync_service import ParsedCallCost, VapiCostSyncService
 from app.db import Base
 from app.models.ops_sync_state import OpsSyncState
+from app.models.call_event import CallEvent
 from app.models.vapi_call_cost import VapiCallCost
 
 
@@ -308,6 +309,43 @@ class VapiCostSyncTests(unittest.TestCase):
 
         self.assertTrue(result["locked"])
         self.assertEqual(0, result["processed"])
+
+    def test_saved_terminal_outcomes_backfill_is_tenant_scoped_and_idempotent(self) -> None:
+        session_local = self._session_local()
+        service = VapiCostSyncService(Settings(_env_file=None))
+        with session_local() as session:
+            session.add_all(
+                [
+                    VapiCallCost(
+                        call_id="customer_end",
+                        tenant_id="tenant_a",
+                        raw_call_json={"endedReason": "customer-ended-call"},
+                    ),
+                    VapiCallCost(
+                        call_id="agent_end",
+                        tenant_id="tenant_a",
+                        raw_call_json={"endedReason": "assistant-ended-call"},
+                    ),
+                    VapiCallCost(
+                        call_id="other_tenant",
+                        tenant_id="tenant_b",
+                        raw_call_json={"endedReason": "customer-ended-call"},
+                    ),
+                ]
+            )
+            session.commit()
+
+            first = service.reconcile_saved_terminal_outcomes(session, tenant_id="tenant_a")
+            session.commit()
+            second = service.reconcile_saved_terminal_outcomes(session, tenant_id="tenant_a")
+            events = session.execute(
+                select(CallEvent).where(CallEvent.event_type == "vapi_normal_call_completed")
+            ).scalars().all()
+
+        self.assertEqual({"scanned": 2, "successful_handoffs": 0, "normal_completions": 2}, first)
+        self.assertEqual({"scanned": 2, "successful_handoffs": 0, "normal_completions": 0}, second)
+        self.assertEqual({"customer_end", "agent_end"}, {event.call_id for event in events})
+        self.assertEqual({"ENCERRADA_USUARIO", "ENCERRADA_AGENTE"}, {event.final_state for event in events})
 
 
 if __name__ == "__main__":

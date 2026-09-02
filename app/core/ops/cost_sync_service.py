@@ -108,6 +108,7 @@ class VapiCostSyncService:
             "missing_fx": 0,
             "errors": 0,
             "native_handoffs_reconciled": 0,
+            "normal_completions_reconciled": 0,
         }
         try:
             current = start
@@ -135,9 +136,9 @@ class VapiCostSyncService:
                 stats["created"] += created
                 stats["updated"] += updated
                 stats["missing_fx"] += missing_fx
-                stats["native_handoffs_reconciled"] += self._reconcile_native_handoffs(
-                    session, parsed_batch
-                )
+                reconciled = self._reconcile_terminal_outcomes(session, parsed_batch)
+                stats["native_handoffs_reconciled"] += reconciled["successful_handoffs"]
+                stats["normal_completions_reconciled"] += reconciled["normal_completions"]
                 session.commit()
                 current = end
 
@@ -285,30 +286,66 @@ class VapiCostSyncService:
         created, updated, _ = self._upsert_cost_batch_detailed(session, parsed_batch, synced_at)
         return created, updated
 
-    def _reconcile_native_handoffs(
+    def _reconcile_terminal_outcomes(
         self,
         session: Session,
         parsed_batch: list[ParsedCallCost],
-    ) -> int:
+    ) -> dict[str, int]:
         ingestor = VapiEventIngestionService(self.settings)
-        reconciled = 0
+        reconciled = {"successful_handoffs": 0, "normal_completions": 0}
         for parsed in parsed_batch:
-            raw = parsed.raw_call_json or {}
-            nested_call = raw.get("call") if isinstance(raw.get("call"), dict) else {}
-            ended_reason = self._as_optional_string(
-                raw.get("endedReason")
-                or raw.get("ended_reason")
-                or nested_call.get("endedReason")
+            outcome = ingestor.record_cost_sync_terminal_outcome(
+                session,
+                tenant_id=parsed.tenant_id,
+                call_id=parsed.call_id,
+                ended_reason=self._ended_reason(parsed.raw_call_json),
             )
-            reconciled += int(
-                ingestor.record_cost_sync_handoff(
-                    session,
-                    tenant_id=parsed.tenant_id,
-                    call_id=parsed.call_id,
-                    ended_reason=ended_reason,
-                )
-            )
+            if outcome == "successful_handoff":
+                reconciled["successful_handoffs"] += 1
+            elif outcome == "normal_completion":
+                reconciled["normal_completions"] += 1
         return reconciled
+
+    def reconcile_saved_terminal_outcomes(
+        self,
+        session: Session,
+        *,
+        tenant_id: str,
+    ) -> dict[str, int]:
+        """Idempotently rebuild terminal outcomes from retained sanitized snapshots."""
+        rows = session.execute(
+            select(VapiCallCost.call_id, VapiCallCost.raw_call_json).where(
+                VapiCallCost.tenant_id == tenant_id,
+                VapiCallCost.is_verified.is_(True),
+            )
+        ).all()
+        parsed_batch = [
+            ParsedCallCost(
+                call_id=row.call_id,
+                tenant_id=tenant_id,
+                to_number=None,
+                started_at=None,
+                ended_at=None,
+                duration_seconds=None,
+                assistant_id=None,
+                status=None,
+                cost_total_usd=None,
+                cost_breakdown_json={},
+                raw_call_json=row.raw_call_json or {},
+            )
+            for row in rows
+        ]
+        reconciled = self._reconcile_terminal_outcomes(session, parsed_batch)
+        return {"scanned": len(rows), **reconciled}
+
+    def _ended_reason(self, raw: dict[str, Any] | None) -> str | None:
+        snapshot = raw or {}
+        nested_call = snapshot.get("call") if isinstance(snapshot.get("call"), dict) else {}
+        return self._as_optional_string(
+            snapshot.get("endedReason")
+            or snapshot.get("ended_reason")
+            or nested_call.get("endedReason")
+        )
 
     @classmethod
     def _sanitize_call_snapshot(cls, value: Any) -> Any:

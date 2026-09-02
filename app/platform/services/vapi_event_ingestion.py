@@ -226,6 +226,37 @@ class VapiEventIngestionService:
             return False
         return self._record_handoff_success(session, tenant_id, call_id, source="cost_sync")
 
+    def record_cost_sync_terminal_outcome(
+        self,
+        session: Session,
+        *,
+        tenant_id: str | None,
+        call_id: str,
+        ended_reason: str | None,
+    ) -> str | None:
+        """Rebuild a terminal outcome from a sanitized Vapi cost snapshot.
+
+        The semantic receipts used by the underlying recorders make this safe
+        to replay for an individual tenant or across the full retained range.
+        """
+        if not tenant_id or not ended_reason:
+            return None
+        if ended_reason in TRANSFER_SUCCESS_REASONS:
+            return (
+                "successful_handoff"
+                if self._record_handoff_success(session, tenant_id, call_id, source="cost_sync")
+                else None
+            )
+        if ended_reason in NORMAL_END_REASONS:
+            return (
+                "normal_completion"
+                if self._record_normal_completion(
+                    session, tenant_id, call_id, ended_reason=ended_reason
+                )
+                else None
+            )
+        return None
+
     def _capture_slot_provenance(
         self,
         session: Session,
