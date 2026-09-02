@@ -545,6 +545,7 @@ function renderOverview(model) {
   const totalCalls = Number(overview.kpis.total_calls || 0)
   const automatedResolutionCalls = Number(overview.kpis.automated_resolution_calls || 0)
   const successfulHandoffCalls = Number(overview.kpis.successful_handoff_calls || 0)
+  const normalCompletionCalls = Number(overview.kpis.normal_completion_calls || 0)
   const successfulAgentCalls = Number(overview.kpis.successful_agent_calls || 0)
   const technicalFailureEvents = Number(overview.kpis.technical_failure_events || 0)
   const toolExecutionCount = Number(overview.kpis.tool_execution_count || 0)
@@ -556,7 +557,7 @@ function renderOverview(model) {
   refs.total.textContent = numberFmt.format(totalCalls)
   refs.windowLabel.textContent = `Janela ${WINDOW_LABELS[overview.window]}`
   refs.successRate.textContent = formatPercent(successRate)
-  refs.successCount.textContent = `${numberFmt.format(successfulAgentCalls)} calls resolvidas ou transferidas`
+  refs.successCount.textContent = `${numberFmt.format(successfulAgentCalls)} calls resolvidas, encerradas ou transferidas`
   refs.handoffRate.textContent = formatPercent(handoffRate)
   refs.handoffCount.textContent = `${numberFmt.format(successfulHandoffCalls)} transferências iniciadas`
   refs.cost.textContent = formatUsd(costs.summary.total_cost_usd || 0)
@@ -574,7 +575,7 @@ function renderOverview(model) {
     `${numberFmt.format(costs.summary.calls_with_duration || 0)} calls com duração | total ${formatDurationSeconds(costs.summary.total_duration_seconds || 0)}`
 
   refs.overviewHeroCopy.textContent = totalCalls > 0
-    ? `A janela atual registrou ${numberFmt.format(totalCalls)} calls com ${formatPercent(successRate)} de sucesso do agente, incluindo ${formatPercent(handoffRate)} de sucesso com handoff e ${numberFmt.format(automatedResolutionCalls)} resoluções automáticas.`
+    ? `A janela atual registrou ${numberFmt.format(totalCalls)} calls com ${formatPercent(successRate)} de sucesso do agente, incluindo ${formatPercent(handoffRate)} de sucesso com handoff, ${numberFmt.format(automatedResolutionCalls)} resoluções automáticas e ${numberFmt.format(normalCompletionCalls)} encerramentos normais.`
     : "Nenhuma call encontrada para os filtros atuais."
   refs.overviewHeroStat.textContent = mapHealthState(health.health_state).label
   refs.overviewHeroMeta.textContent = buildHealthSummary(health)
@@ -1043,6 +1044,7 @@ function emptyOverviewModel() {
         avg_duration_ms: 0,
         automated_resolution_calls: 0,
         successful_handoff_calls: 0,
+        normal_completion_calls: 0,
         successful_agent_calls: 0,
         agent_success_rate_pct: 0,
         unresolved_calls: 0,

@@ -77,3 +77,28 @@ class VapiEventsRouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("vapi_native_transfer_completed", event.event_type)
         self.assertNotIn("transcript", str(event.payload_masked))
         self.assertNotIn("transcript", str(receipt.payload_sanitized))
+
+    async def test_records_normal_customer_end_without_transcript(self) -> None:
+        payload = {
+            "message": {
+                "type": "end-of-call-report",
+                "call": {"id": "call_customer_end", "to": "+5511999999999"},
+                "endedReason": "customer-ended-call",
+                "artifact": {"transcript": "must not be retained"},
+            }
+        }
+        with patch("app.api.routes.vapi_events.SessionLocal", self.session_local):
+            response = await ingest_vapi_event(
+                self._request({"x-webhook-secret": "secret"}),
+                VapiServerEvent(**payload),
+                self.settings,
+            )
+        self.assertEqual(204, response.status_code)
+        with self.session_local() as session:
+            event = session.scalar(select(CallEvent))
+            receipt = session.scalar(select(VapiWebhookReceipt))
+        self.assertEqual("vapi_normal_call_completed", event.event_type)
+        self.assertEqual("ENCERRADA_USUARIO", event.final_state)
+        self.assertTrue(event.ok)
+        self.assertNotIn("transcript", str(event.payload_masked))
+        self.assertNotIn("transcript", str(receipt.payload_sanitized))

@@ -113,6 +113,7 @@ export const overviewSchema = z
         avg_duration_ms: numeric,
         automated_resolution_calls: numeric,
         successful_handoff_calls: numeric,
+        normal_completion_calls: numeric,
         successful_agent_calls: numeric,
         agent_success_rate_pct: numeric,
         unresolved_calls: numeric,
@@ -128,6 +129,7 @@ export const overviewSchema = z
         avg_duration_ms: 0,
         automated_resolution_calls: 0,
         successful_handoff_calls: 0,
+        normal_completion_calls: 0,
         successful_agent_calls: 0,
         agent_success_rate_pct: 0,
         unresolved_calls: 0,
@@ -143,6 +145,7 @@ export const overviewSchema = z
           handoffs: numeric,
           successful_handoffs: numeric,
           automated_resolutions: numeric,
+          normal_completions: numeric,
           unresolved_calls: numeric,
         }),
       )
