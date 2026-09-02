@@ -86,6 +86,10 @@ Consultas operacionais resolvem o tenant a partir do principal. Escopo ausente,
 conflitante ou fora dos memberships falha fechado. Preserve limites, filtros,
 CSRF, revogacao de sessao e auditoria de autorizacao.
 
+No overview, uma conclusao normal da Vapi conta como resolucao automatica,
+independentemente de o cliente ou o agente encerrar a ligacao. Handoff permanece
+um resultado separado porque exige continuidade humana.
+
 ## Relatório diário por e-mail
 
 Quando `DAILY_REPORT_ENABLED=true`, cada worker inicia um verificador em
