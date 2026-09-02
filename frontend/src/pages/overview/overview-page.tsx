@@ -61,7 +61,6 @@ export function OverviewPage() {
   const normalCompletionRate = rate(overview.kpis.normalCompletionCalls, totalCalls)
   const agentSuccessRate = overview.kpis.agentSuccessRatePct
   const unresolvedRate = rate(overview.kpis.unresolvedCalls, totalCalls)
-  const technicalFailureRate = overview.kpis.technicalFailureRatePct
   const coverageRate = costs.summary.coveragePct
   const costPerMinute = costs.summary.totalDurationSeconds > 0
     ? costs.summary.totalCostUsd / (costs.summary.totalDurationSeconds / 60)
@@ -83,13 +82,12 @@ export function OverviewPage() {
         <StatCard detail={`${formatNumberBR(overview.kpis.successfulAgentCalls)} resolvidas, encerradas ou transferidas`} icon={CheckCircle2} label="Sucesso do agente" tone="success" value={formatPercent(agentSuccessRate)} />
         <StatCard detail={`${formatNumberBR(overview.kpis.automatedResolutionCalls)} resolvidas sem humano`} icon={CheckCircle2} label="Resolução automática" tone="success" value={formatPercent(automatedResolutionRate)} />
         <StatCard detail={`${formatNumberBR(overview.kpis.normalCompletionCalls)} encerradas pelo cliente ou agente`} icon={PhoneOff} label="Encerramento normal" tone="success" value={formatPercent(normalCompletionRate)} />
-        <StatCard detail={`${formatNumberBR(overview.kpis.successfulHandoffCalls)} transferências iniciadas`} icon={PhoneForwarded} label="Sucesso com handoff" tone="success" value={formatPercent(successfulHandoffRate)} />
+        <StatCard detail={`${formatNumberBR(overview.kpis.successfulHandoffCalls)} transferências iniciadas`} icon={PhoneForwarded} label="Handoff" tone="success" value={formatPercent(successfulHandoffRate)} />
         <StatCard detail={`${formatNumberBR(costs.summary.callsWithCost)} calls Vapi com custo`} icon={BadgeDollarSign} label="Custo Vapi em USD" value={financialVisible ? formatCurrencyUSD(costs.summary.totalCostUsd) : "Oculto"} />
       </section>
 
-      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <StatCard detail={`${formatNumberBR(overview.kpis.unresolvedCalls)} sem resolução automática; inclui handoffs`} label="Não resolvida automaticamente" tone={unresolvedRate >= 20 ? "warning" : "default"} value={formatPercent(unresolvedRate)} />
-        <StatCard detail={`${formatNumberBR(overview.kpis.technicalFailureEvents)} em ${formatNumberBR(overview.kpis.toolExecutionCount)} execuções`} label="Falhas técnicas da tool" tone={technicalFailureRate >= 10 ? "danger" : "default"} value={formatPercent(technicalFailureRate)} />
         <StatCard detail={`${formatNumberBR(costs.summary.callsWithoutCost)} de ${formatNumberBR(costs.summary.vapiCalls)} sem custo`} label="Cobertura Vapi" tone={coverageRate < 80 && costs.summary.vapiCalls > 0 ? "warning" : "default"} value={formatPercent(coverageRate)} />
         <StatCard detail={costs.fx.complete ? "PTAX histórica aplicada" : "Conversão parcial ou indisponível"} label="Custo em BRL" tone={costs.fx.complete ? "default" : "warning"} value={financialVisible ? formatCurrencyBRL(costs.summary.totalCostBrl) : "Oculto"} />
         <StatCard
@@ -112,7 +110,7 @@ export function OverviewPage() {
                 series={[
                   { key: "calls", label: "Calls", color: "hsl(var(--primary))", area: true },
                   { key: "normalCompletions", label: "Encerramento normal", color: "hsl(var(--chart-3))" },
-                  { key: "successfulHandoffs", label: "Sucesso com handoff", color: "hsl(var(--success))" },
+                  { key: "successfulHandoffs", label: "Handoff", color: "hsl(var(--success))" },
                 ]}
               />
             ) : (
