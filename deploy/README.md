@@ -160,12 +160,17 @@ Header:
 x-webhook-secret: mesmo valor de WEBHOOK_SECRET
 ```
 
-Mantenha apenas as tools ativas:
+Para o assistente de Rede Credenciada PB Saúde, mantenha os anexos:
 
 ```text
 search_providers
-handoff_human
+transfer_call_tool_PB
+end_call_tool
 ```
+
+O backend preserva `handoff_human` para compatibilidade. O assistente usa a
+transferência nativa. Veja o [fluxo Vapi PB Saúde](../app/tenants/pbsaude/vapi/README.md)
+para preparar o prompt, os anexos e o rollback sem trocar modelo ou voz.
 
 ## 8. Comandos Úteis
 

@@ -14,12 +14,22 @@ from ..provider_policy import (
     apply_provider_policy,
     apply_provider_policy_business_override,
 )
-from ..slot_guard import reopen_slot_collection, validate_search_slot_provenance
+from ..slot_guard import reopen_slot_collection, validate_search_slot_provenance, recovery_attempt, clear_recovery_attempts
 
 log = get_logger()
 
 
-async def search_providers(
+async def search_providers(args: dict, settings: Settings, call_id: str, tenant_id: str) -> tuple[dict, CallFinalState]:
+    try:
+        return await _search_providers(args, settings, call_id, tenant_id)
+    except BusinessRuleError as exc:
+        if settings.vapi_slot_guard_enabled:
+            exc.attempt = recovery_attempt(settings=settings, tenant_id=tenant_id, call_id=call_id,
+                                           field=exc.field, code=exc.code)
+        raise
+
+
+async def _search_providers(
     args: dict,
     settings: Settings,
     call_id: str,
@@ -27,6 +37,16 @@ async def search_providers(
 ) -> tuple[dict, CallFinalState]:
     provider = get_data_provider(settings)
     payload = SearchProvidersRequest(**args, call_id=call_id, to_number=None)
+    catalog = get_specialty_catalog(settings)
+    validate_search_slot_provenance(
+        settings=settings,
+        tenant_id=tenant_id,
+        call_id=call_id,
+        cpf=payload.cpf,
+        city=payload.city,
+        query=payload.query,
+        catalog=catalog,
+    )
     if not normalize_cpf(payload.cpf or ""):
         raise BusinessRuleError(
             code="CPF_INVALIDO",
@@ -47,16 +67,6 @@ async def search_providers(
             message="Especialidade obrigatoria para busca de rede",
             details={"recovery_action": "collect_especialidade"},
         )
-    catalog = get_specialty_catalog(settings)
-    validate_search_slot_provenance(
-        settings=settings,
-        tenant_id=tenant_id,
-        call_id=call_id,
-        cpf=payload.cpf,
-        city=payload.city,
-        query=payload.query,
-        catalog=catalog,
-    )
     if catalog.is_enabled:
         canonical_specialty = catalog.resolve(payload.query)
         if canonical_specialty is None:
@@ -174,6 +184,8 @@ async def search_providers(
         tool_name=TOOL_SEARCH_PROVIDERS,
         final_state=CallFinalState.RESOLVIDA_AUTOMATICO,
     )
+    clear_recovery_attempts(settings=settings, tenant_id=tenant_id, call_id=call_id,
+                            cpf=payload.cpf, city=payload.city, query=payload.query, catalog=catalog)
     response = SearchProvidersResponse(providers=list(providers))
     return response.model_dump(), CallFinalState.RESOLVIDA_AUTOMATICO
 

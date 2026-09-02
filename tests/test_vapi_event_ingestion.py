@@ -21,6 +21,8 @@ from app.tenants.pbsaude.slot_guard import validate_search_slot_provenance
 
 class VapiEventIngestionTests(unittest.TestCase):
     def setUp(self) -> None:
+        from app.tenants.pbsaude.tool_handlers import register_pbsaude_handlers
+        register_pbsaude_handlers()
         engine = create_engine(
             "sqlite://",
             connect_args={"check_same_thread": False},
@@ -129,8 +131,8 @@ class VapiEventIngestionTests(unittest.TestCase):
         self.assertEqual("collect_cidade", raised.exception.details["recovery_action"])
         with self.session_local() as session:
             state = session.get(VapiCallSlotState, {"tenant_id": "tenant_a", "call_id": "call_1"})
-        self.assertEqual("cidade", state.phase)
-        self.assertFalse(state.city_term_hmacs)
+        self.assertEqual("especialidade", state.phase)
+        self.assertTrue(state.city_term_hmacs)  # Reject the proposal, preserve valid evidence.
 
     def test_native_handoff_is_idempotent_success_and_isolated_by_tenant(self) -> None:
         end_payload = {

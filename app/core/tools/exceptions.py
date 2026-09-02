@@ -12,6 +12,7 @@ class BusinessRuleError(Exception):
         details: dict | None = None,
         retryable: bool = True,
         handoff_after_retry: bool = True,
+        attempt: int | None = None,
     ):
         super().__init__(message)
         self.code = code
@@ -20,3 +21,5 @@ class BusinessRuleError(Exception):
         self.details = details or {}
         self.retryable = retryable
         self.handoff_after_retry = handoff_after_retry
+        # Tenant policies may count real user turns instead of tool invocations.
+        self.attempt = attempt

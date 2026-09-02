@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
-import re
-import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Iterable, Mapping
+from typing import Any, Mapping
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -35,14 +32,6 @@ AGENT_NORMAL_END_REASONS = frozenset(
 )
 CUSTOMER_NORMAL_END_REASONS = frozenset({"customer-ended-call"})
 NORMAL_END_REASONS = AGENT_NORMAL_END_REASONS | CUSTOMER_NORMAL_END_REASONS
-_MAX_TRACKED_MESSAGE_HASHES = 32
-_MAX_TERMS = 64
-_MAX_NGRAM_WORDS = 6
-_TOKEN_RE = re.compile(r"[a-z0-9]+")
-_KEYPAD_ENTRY_RE = re.compile(
-    r"(?:user'?s\s+keypad\s+entry|keypad\s+entry)\s*:\s*([0-9\s.#*-]+)",
-    re.IGNORECASE,
-)
 log = get_logger()
 
 
@@ -69,62 +58,19 @@ def _as_text(value: object) -> str | None:
 
 
 def _parse_datetime(value: object) -> datetime | None:
-    if not isinstance(value, str) or not value.strip():
+    stamp = event_time(value)
+    if stamp is None or not 0 <= stamp <= 253402300799000:
         return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+    return datetime.fromtimestamp(stamp / 1000, timezone.utc)
 
 
-def normalize_text(value: str) -> str:
-    decomposed = unicodedata.normalize("NFKD", value)
-    unaccented = "".join(char for char in decomposed if not unicodedata.combining(char))
-    return " ".join(_TOKEN_RE.findall(unaccented.lower()))
-
-
-def keyed_hmac(secret: str, value: str) -> str:
-    return hmac.new(secret.encode("utf-8"), value.encode("utf-8"), hashlib.sha256).hexdigest()
-
-
-def term_hmacs(secret: str, value: str) -> set[str]:
-    tokens = normalize_text(value).split()
-    terms: set[str] = set()
-    for start in range(len(tokens)):
-        for end in range(start + 1, min(len(tokens), start + _MAX_NGRAM_WORDS) + 1):
-            terms.add(" ".join(tokens[start:end]))
-    return {keyed_hmac(secret, term) for term in sorted(terms)[:_MAX_TERMS]}
+# Compatibility exports; tenant reducers share these provider-neutral primitives.
+from .vapi_conversation import capture_conversation, event_time, keyed_hmac, lock_call, normalize_text, term_hmacs
 
 
 def _payload_sha256(payload: Mapping[str, Any]) -> str:
     serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
-
-
-def _extract_user_messages(message: Mapping[str, Any]) -> Iterable[str]:
-    artifact = _as_mapping(message.get("artifact"))
-    candidates = (message.get("messages"), artifact.get("messages"), message.get("conversation"))
-    for candidate in candidates:
-        collection = _as_mapping(candidate).get("messages") if isinstance(candidate, Mapping) else candidate
-        if not isinstance(collection, list):
-            continue
-        for item in collection:
-            item_map = _as_mapping(item)
-            if str(item_map.get("role") or "").lower() not in {"user", "customer"}:
-                continue
-            text = _as_text(item_map.get("message")) or _as_text(item_map.get("content")) or _as_text(item_map.get("text"))
-            if text:
-                yield text
-        return
-
-
-def _keypad_cpf(value: str) -> str | None:
-    match = _KEYPAD_ENTRY_RE.search(value)
-    if match is None:
-        return None
-    digits = "".join(character for character in match.group(1) if character.isdigit())
-    return digits if len(digits) == 11 else None
 
 
 class VapiEventIngestionService:
@@ -157,6 +103,7 @@ class VapiEventIngestionService:
             )
             raise VapiEventValidationError("tenant could not be resolved")
         tenant_id = resolution.tenant_id
+        lock_call(session, tenant_id, call_id)
         payload_hash = _payload_sha256(payload)
         receipt_key = hashlib.sha256(f"{tenant_id}:{payload_hash}".encode("utf-8")).hexdigest()
         existing = session.scalar(
@@ -208,6 +155,31 @@ class VapiEventIngestionService:
         elif event_type == "end-of-call-report":
             self._record_end_outcome(session, tenant_id, call_id, ended_reason)
 
+        if event_type == "end-of-call-report" or (event_type == "status-update" and status == "forwarding"):
+            state = session.get(VapiCallSlotState, {"tenant_id": tenant_id, "call_id": call_id})
+            if state is None:
+                state = VapiCallSlotState(tenant_id=tenant_id, call_id=call_id,
+                    expires_at=datetime.now(timezone.utc) + timedelta(hours=self.settings.vapi_slot_state_retention_hours))
+                session.add(state)
+            meta = dict(state.conversation_meta or {})
+            # An end report is final even if older lifecycle events arrive later.
+            stamp = event_time(message.get("timestamp")) or 0
+            if event_type == "end-of-call-report" or (
+                meta.get("terminal") != "ended" and stamp >= meta.get("terminal_at", 0)
+            ):
+                meta.update(terminal="ended" if event_type == "end-of-call-report" else "forwarding",
+                            terminal_at=stamp)
+            state.conversation_meta = meta
+        elif event_type == "status-update" and status == "in-progress":
+            state = session.get(VapiCallSlotState, {"tenant_id": tenant_id, "call_id": call_id})
+            meta = dict(state.conversation_meta or {}) if state else {}
+            stamp = event_time(message.get("timestamp")) or 0
+            if state and meta.get("terminal") != "ended" and stamp > meta.get("terminal_at", 0):
+                # A provider-confirmed return to active conversation can follow
+                # a failed transfer. Never reopen a call with an end report.
+                meta.pop("terminal", None)
+                meta["terminal_at"] = stamp
+                state.conversation_meta = meta
         receipt.processing_status = "succeeded" if event_type in SUPPORTED_EVENT_TYPES else "ignored"
         session.commit()
         return VapiIngestResult(True, False, tenant_id, event_type)
@@ -257,50 +229,8 @@ class VapiEventIngestionService:
             )
         return None
 
-    def _capture_slot_provenance(
-        self,
-        session: Session,
-        tenant_id: str,
-        call_id: str,
-        message: Mapping[str, Any],
-        occurred_at: datetime | None,
-    ) -> None:
-        secret = self.settings.vapi_slot_state_hmac_secret
-        if not secret:
-            raise VapiEventValidationError("VAPI_SLOT_STATE_HMAC_SECRET is required when slot guard is enabled")
-        now = datetime.now(timezone.utc)
-        state = session.get(VapiCallSlotState, {"tenant_id": tenant_id, "call_id": call_id})
-        if state is None or _is_expired(state.expires_at, now):
-            state = VapiCallSlotState(
-                tenant_id=tenant_id,
-                call_id=call_id,
-                phase="cpf",
-                city_term_hmacs=[],
-                specialty_term_hmacs=[],
-                processed_message_hmacs=[],
-                expires_at=now + timedelta(hours=self.settings.vapi_slot_state_retention_hours),
-            )
-            session.add(state)
-
-        processed = set(state.processed_message_hmacs or [])
-        for user_text in _extract_user_messages(message):
-            message_hash = keyed_hmac(secret, normalize_text(user_text))
-            if not normalize_text(user_text) or message_hash in processed:
-                continue
-            processed.add(message_hash)
-            cpf = _keypad_cpf(user_text)
-            if state.phase == "cpf" and cpf:
-                state.cpf_hmac = keyed_hmac(secret, cpf)
-                state.phase = "cidade"
-            elif state.phase == "cidade" and not cpf:
-                state.city_term_hmacs = sorted(term_hmacs(secret, user_text))
-                state.phase = "especialidade"
-            elif state.phase == "especialidade" and not cpf:
-                state.specialty_term_hmacs = sorted(term_hmacs(secret, user_text))
-
-        state.processed_message_hmacs = sorted(processed)[-_MAX_TRACKED_MESSAGE_HASHES:]
-        state.last_event_at = occurred_at or now
-        state.expires_at = now + timedelta(hours=self.settings.vapi_slot_state_retention_hours)
+    def _capture_slot_provenance(self, session, tenant_id, call_id, message, occurred_at) -> None:
+        capture_conversation(session, self.settings, tenant_id, call_id, message)
 
     def _record_end_outcome(
         self,

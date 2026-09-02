@@ -13,6 +13,23 @@ class TenantToolRegistry:
 
     def __init__(self) -> None:
         self._handlers: dict[str, dict[str, ToolHandler]] = {}
+        self._preparers: dict[str, Callable] = {}
+        self._batch_limits: dict[tuple[str, str], int] = {}
+
+    def register_request_preparer(self, implementation_key: str, preparer: Callable) -> None:
+        self._preparers[implementation_key] = preparer
+
+    def prepare_request(self, implementation_key: str, payload: dict, settings: Settings,
+                        call_id: str, tenant_id: str) -> None:
+        preparer = self._preparers.get(implementation_key)
+        if preparer:
+            preparer(payload, settings, call_id, tenant_id)
+
+    def set_batch_limit(self, implementation_key: str, tool_name: str, limit: int) -> None:
+        self._batch_limits[(implementation_key, tool_name)] = limit
+
+    def batch_limit(self, implementation_key: str, tool_name: str) -> int | None:
+        return self._batch_limits.get((implementation_key, tool_name))
 
     def register(self, implementation_key: str, tool_name: str, handler: ToolHandler) -> None:
         self._handlers.setdefault(implementation_key, {})[tool_name] = handler

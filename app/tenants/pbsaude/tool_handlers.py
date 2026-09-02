@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from ...core.tools.registry import TenantToolRegistry, ToolHandler, tool_registry
+from ...db import SessionLocal
+from ...platform.services.vapi_conversation import register_conversation_policy
+from .conversation import capture_pbsaude_conversation
 from .mappings import (
     TOOL_AUTHENTICATE_MEMBER,
     TOOL_GET_AUTHORIZATION_STATUS,
@@ -23,8 +26,19 @@ PBSAUDE_TOOL_HANDLERS: dict[str, ToolHandler] = {
 }
 
 
+def prepare_pbsaude_request(payload, settings, call_id, tenant_id) -> None:
+    if not settings.vapi_slot_guard_enabled:
+        return
+    with SessionLocal() as session:
+        capture_pbsaude_conversation(session, settings, tenant_id, call_id, payload.get("message", {}))
+        session.commit()
+
+
 def register_pbsaude_handlers(registry: TenantToolRegistry | None = None) -> TenantToolRegistry:
+    register_conversation_policy(PBSAUDE_IMPLEMENTATION_KEY, capture_pbsaude_conversation)
     active_registry = registry or tool_registry
+    active_registry.register_request_preparer(PBSAUDE_IMPLEMENTATION_KEY, prepare_pbsaude_request)
+    active_registry.set_batch_limit(PBSAUDE_IMPLEMENTATION_KEY, TOOL_SEARCH_PROVIDERS, 1)
     for tool_name, handler in PBSAUDE_TOOL_HANDLERS.items():
         if not is_tool_enabled(tool_name):
             continue
