@@ -263,3 +263,14 @@ class ConversationFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result['results'][0]['result']['ok'])
         self.assertEqual(2, self.provider.search_providers.call_count)
         with self.assertRaises(BusinessRuleError): self.validate(query='Cardiologia')
+
+    async def test_empty_model_arguments_do_not_count_as_invalid_user_answers(self):
+        ms = self.standard()
+        for index, field in enumerate(['cpf', 'city', 'query']):
+            tool = self.tool(f'missing-{index}')
+            tool['function']['arguments'][field] = ''
+            result = (await self.dispatch(ms, [tool]))['results'][0]['result']
+            self.assertEqual(0, result['data']['attempt'])
+            self.assertEqual('SLOT_UNCONFIRMED', result['data']['upstream_code'])
+            self.validate()
+        self.provider.search_providers.assert_not_called()

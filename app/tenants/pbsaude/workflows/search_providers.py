@@ -37,6 +37,16 @@ async def _search_providers(
 ) -> tuple[dict, CallFinalState]:
     provider = get_data_provider(settings)
     payload = SearchProvidersRequest(**args, call_id=call_id, to_number=None)
+    catalog = get_specialty_catalog(settings)
+    validate_search_slot_provenance(
+        settings=settings,
+        tenant_id=tenant_id,
+        call_id=call_id,
+        cpf=payload.cpf,
+        city=payload.city,
+        query=payload.query,
+        catalog=catalog,
+    )
     if not normalize_cpf(payload.cpf or ""):
         raise BusinessRuleError(
             code="CPF_INVALIDO",
@@ -57,16 +67,6 @@ async def _search_providers(
             message="Especialidade obrigatoria para busca de rede",
             details={"recovery_action": "collect_especialidade"},
         )
-    catalog = get_specialty_catalog(settings)
-    validate_search_slot_provenance(
-        settings=settings,
-        tenant_id=tenant_id,
-        call_id=call_id,
-        cpf=payload.cpf,
-        city=payload.city,
-        query=payload.query,
-        catalog=catalog,
-    )
     if catalog.is_enabled:
         canonical_specialty = catalog.resolve(payload.query)
         if canonical_specialty is None:
