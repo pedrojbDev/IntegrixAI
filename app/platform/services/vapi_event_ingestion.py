@@ -25,6 +25,16 @@ from .provider_identity_shadow import extract_vapi_inbound_identity
 SUPPORTED_EVENT_TYPES = frozenset({"conversation-update", "status-update", "end-of-call-report"})
 TRANSFER_SUCCESS_REASONS = frozenset({"assistant-forwarded-call", "assistant-forwarded"})
 TRANSFER_FAILURE_MARKER = "error-transfer-failed"
+AGENT_NORMAL_END_REASONS = frozenset(
+    {
+        "assistant-ended-call",
+        "assistant-ended-call-after-message-spoken",
+        "assistant-ended-call-with-hangup-task",
+        "assistant-said-end-call-phrase",
+    }
+)
+CUSTOMER_NORMAL_END_REASONS = frozenset({"customer-ended-call"})
+NORMAL_END_REASONS = AGENT_NORMAL_END_REASONS | CUSTOMER_NORMAL_END_REASONS
 _MAX_TRACKED_MESSAGE_HASHES = 32
 _MAX_TERMS = 64
 _MAX_NGRAM_WORDS = 6
@@ -281,6 +291,62 @@ class VapiEventIngestionService:
                 error_code="TRANSFER_FAILED",
                 payload={"source": "end-of-call-report", "ended_reason": ended_reason},
             )
+        elif ended_reason in NORMAL_END_REASONS:
+            self._record_normal_completion(session, tenant_id, call_id, ended_reason=ended_reason)
+
+    def _record_normal_completion(
+        self,
+        session: Session,
+        tenant_id: str,
+        call_id: str,
+        *,
+        ended_reason: str,
+    ) -> bool:
+        """Record an idempotent normal terminal outcome without storing call content."""
+        semantic_key = hashlib.sha256(
+            f"normal-call-completion:{tenant_id}:{call_id}".encode("utf-8")
+        ).hexdigest()
+        existing = session.scalar(
+            select(VapiWebhookReceipt.id).where(
+                VapiWebhookReceipt.receipt_key == semantic_key,
+            )
+        )
+        if existing:
+            return False
+        final_state = (
+            CallFinalState.ENCERRADA_USUARIO.value
+            if ended_reason in CUSTOMER_NORMAL_END_REASONS
+            else CallFinalState.ENCERRADA_AGENTE.value
+        )
+        session.add(
+            VapiWebhookReceipt(
+                tenant_id=tenant_id,
+                receipt_key=semantic_key,
+                source="end-of-call-report",
+                event_type="normal_call_completion",
+                provider_call_id=call_id,
+                processing_status="succeeded",
+                identity_result="tenant_scoped",
+                payload_sha256=semantic_key,
+                payload_sanitized={
+                    "event_type": "normal_call_completion",
+                    "call_id": call_id,
+                    "ended_reason": ended_reason,
+                    "tenant_id": tenant_id,
+                },
+            )
+        )
+        self._add_call_event(
+            session,
+            tenant_id=tenant_id,
+            call_id=call_id,
+            event_type="vapi_normal_call_completed",
+            ok=True,
+            final_state=final_state,
+            error_code=None,
+            payload={"source": "end-of-call-report", "ended_reason": ended_reason},
+        )
+        return True
 
     def _record_handoff_success(self, session: Session, tenant_id: str, call_id: str, *, source: str) -> bool:
         semantic_key = hashlib.sha256(
@@ -334,7 +400,11 @@ class VapiEventIngestionService:
             CallEvent(
                 tenant_id=tenant_id,
                 call_id=call_id,
-                tool_name="vapi_native_transfer",
+                tool_name=(
+                    "vapi_native_transfer"
+                    if event_type.startswith("vapi_native_transfer")
+                    else "vapi_call_lifecycle"
+                ),
                 event_type=event_type,
                 final_state=final_state,
                 ok=ok,

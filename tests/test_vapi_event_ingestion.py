@@ -179,6 +179,43 @@ class VapiEventIngestionTests(unittest.TestCase):
         # One raw receipt plus one semantic handoff receipt for each tenant.
         self.assertEqual(4, receipt_count)
 
+    def test_normal_customer_and_agent_ends_are_idempotent_agent_successes(self) -> None:
+        customer_end_payload = {
+            "message": {
+                "type": "end-of-call-report",
+                "call": {"id": "customer_end", "to": "+5511999999999"},
+                "endedReason": "customer-ended-call",
+                "artifact": {"transcript": "private conversation"},
+            }
+        }
+        agent_end_payload = {
+            "message": {
+                "type": "end-of-call-report",
+                "call": {"id": "agent_end", "to": "+5511999999999"},
+                "endedReason": "assistant-ended-call",
+            }
+        }
+        with self.session_local() as session:
+            service = VapiEventIngestionService(self.settings)
+            service.ingest(session, customer_end_payload)
+            service.ingest(session, customer_end_payload)
+            service.ingest(session, agent_end_payload)
+            events = session.execute(
+                select(CallEvent).where(CallEvent.event_type == "vapi_normal_call_completed")
+            ).scalars().all()
+            overview = get_overview(session, window="24h", tenant_id="tenant_a", assistant_id=None)
+
+        self.assertEqual(2, len(events))
+        self.assertEqual(
+            {"ENCERRADA_USUARIO", "ENCERRADA_AGENTE"},
+            {event.final_state for event in events},
+        )
+        self.assertTrue(all(event.ok for event in events))
+        self.assertNotIn("private conversation", str(events))
+        self.assertEqual(2, overview["kpis"]["normal_completion_calls"])
+        self.assertEqual(2, overview["kpis"]["successful_agent_calls"])
+        self.assertEqual(0, overview["kpis"]["unresolved_calls"])
+
     def test_cost_sync_snapshot_redacts_transcript_recording_and_cpf(self) -> None:
         parsed = VapiCostSyncService(self.settings)._parse_call(
             {

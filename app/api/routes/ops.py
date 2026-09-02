@@ -10,6 +10,7 @@ from ...core.ops.dashboard_service import (
     METRIC_VERSION,
     TECHNICAL_ERROR_CODES,
     _call_outcomes_subquery,
+    _summarize_call_outcomes,
     get_costs,
     get_health,
     get_overview,
@@ -207,6 +208,7 @@ async def audit_summary(
                         "handoff_calls": 0,
                         "automated_resolution_calls": 0,
                         "successful_handoff_calls": 0,
+                        "normal_completion_calls": 0,
                         "successful_agent_calls": 0,
                         "agent_success_rate_pct": 0.0,
                         "unresolved_calls": 0,
@@ -226,16 +228,19 @@ async def audit_summary(
             outcome_rows = []
         else:
             outcome_rows = session.execute(
-                select(outcomes.c.successful_handoff, outcomes.c.automatic_resolution)
+                select(
+                    outcomes.c.successful_handoff,
+                    outcomes.c.automatic_resolution,
+                    outcomes.c.normal_completion,
+                )
             ).all()
-        outcome_total_calls = len(outcome_rows)
-        successful_handoff_calls = sum(int(row.successful_handoff or 0) for row in outcome_rows)
-        automated_resolution_calls = sum(
-            int(bool(row.automatic_resolution) and not bool(row.successful_handoff))
-            for row in outcome_rows
-        )
-        successful_agent_calls = automated_resolution_calls + successful_handoff_calls
-        unresolved_calls = outcome_total_calls - successful_agent_calls
+        outcome_summary = _summarize_call_outcomes(outcome_rows)
+        outcome_total_calls = outcome_summary["total_calls"]
+        successful_handoff_calls = outcome_summary["successful_handoff_calls"]
+        automated_resolution_calls = outcome_summary["automated_resolution_calls"]
+        normal_completion_calls = outcome_summary["normal_completion_calls"]
+        successful_agent_calls = outcome_summary["successful_agent_calls"]
+        unresolved_calls = outcome_summary["unresolved_calls"]
 
         base_stmt = select(
             func.count(CallEvent.id).label("total_calls"),
@@ -281,6 +286,7 @@ async def audit_summary(
                 "handoff_calls": successful_handoff_calls,
                 "automated_resolution_calls": automated_resolution_calls,
                 "successful_handoff_calls": successful_handoff_calls,
+                "normal_completion_calls": normal_completion_calls,
                 "successful_agent_calls": successful_agent_calls,
                 "agent_success_rate_pct": round(
                     (successful_agent_calls / outcome_total_calls) * 100.0, 2

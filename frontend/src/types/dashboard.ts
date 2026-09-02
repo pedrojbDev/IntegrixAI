@@ -77,6 +77,7 @@ export type Overview = {
     avgDurationMs: number
     automatedResolutionCalls: number
     successfulHandoffCalls: number
+    normalCompletionCalls: number
     successfulAgentCalls: number
     agentSuccessRatePct: number
     unresolvedCalls: number
@@ -90,6 +91,7 @@ export type Overview = {
     handoffs: number
     successfulHandoffs: number
     automatedResolutions: number
+    normalCompletions: number
     unresolvedCalls: number
   }>
 }
