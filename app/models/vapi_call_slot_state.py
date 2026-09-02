@@ -36,6 +36,10 @@ class VapiCallSlotState(Base):
     processed_message_hmacs: Mapped[list[str]] = mapped_column(
         JSONB().with_variant(JSON, "sqlite"), nullable=False, default=list
     )
+    conversation_meta: Mapped[dict] = mapped_column(
+        JSONB().with_variant(JSON, "sqlite"), nullable=False, default=dict,
+        server_default="{}",
+    )
     last_event_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(

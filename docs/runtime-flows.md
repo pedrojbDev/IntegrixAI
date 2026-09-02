@@ -51,6 +51,15 @@ Handlers recebem argumentos, settings, `call_id` e `tenant_id`. Essa assinatura
 mantem tenant explicito ate o workflow. Nao introduza handlers que dependam de
 estado global para descobrir tenant.
 
+O registry permite preparacao autenticada da requisicao e limite por tool no
+lote. PB Saude ingere o historico do proprio `/tools` antes de validar a busca,
+usando a mesma politica de conversa dos eventos Vapi. Falha nessa persistencia
+bloqueia a execucao. `app/platform/services/vapi_conversation.py` normaliza os
+turnos e coordena locks por tenant/chamada; a interpretacao dos dados pertence
+a `app/tenants/pbsaude/conversation.py`. Veja o
+[fluxo Vapi PB Saude](../app/tenants/pbsaude/vapi/README.md) e os testes
+`test_vapi_conversation_flow.py` e `test_vapi_conversation_postgres.py`.
+
 ## Auditoria, Metricas E Idempotencia
 
 O dispatcher registra metricas em `metrics_store` e eventos por

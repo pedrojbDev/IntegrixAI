@@ -147,14 +147,36 @@ class ToolDispatcher:
                     error_code="IGNORED",
                 )
 
+            try:
+                self.registry.prepare_request(implementation_key, payload, self.settings,
+                                              parsed_request.call_id, tenant_id)
+            except Exception:
+                # Evidence persistence failure must never fall through to a tool.
+                self.log.error("tool_request_preparation_failed", tenant_id=tenant_id,
+                               call_id=parsed_request.call_id, implementation_key=implementation_key)
+                return {"results": [self._finalize_invocation(
+                    item, ToolResponse(ok=False, tool_name=item.tool_name,
+                        error=ToolError(code="UPSTREAM_503", message="Nao foi possivel confirmar os dados"),
+                        data={"retryable": False, "recovery_action": "offer_handoff"},
+                        final_state=CallFinalState.TRANSFERIDA_HUMANO),
+                    call_id=parsed_request.call_id, tenant_id=tenant_id, started_at=time.perf_counter(),
+                    event_type="request_preparation_failed", error_code="UPSTREAM_503",
+                    save_idempotency=False) for item in parsed_request.invocations]}
+
             results = []
+            admitted: dict[str, int] = {}
             for parsed in parsed_request.invocations:
+                limit = self.registry.batch_limit(implementation_key, parsed.tool_name)
+                blocked = limit is not None and admitted.get(parsed.tool_name, 0) >= limit
+                if parsed.arguments is not None and parsed.arguments_error is None and parsed.tool_call_id:
+                    admitted[parsed.tool_name] = admitted.get(parsed.tool_name, 0) + 1
                 results.append(
                     await self._dispatch_one(
                         parsed,
                         call_id=parsed_request.call_id,
                         tenant_id=tenant_id,
                         implementation_key=implementation_key,
+                        batch_blocked=blocked,
                     )
                 )
             return {"results": results}
@@ -168,6 +190,7 @@ class ToolDispatcher:
         call_id: str,
         tenant_id: str,
         implementation_key: str,
+        batch_blocked: bool = False,
     ) -> dict:
         cached = get_cached_tool_result(
             settings=self.settings,
@@ -293,6 +316,16 @@ class ToolDispatcher:
                 error_code=error.code,
             )
 
+        if batch_blocked:
+            return self._finalize_invocation(
+                parsed, ToolResponse(ok=False, tool_name=parsed.tool_name,
+                    error=ToolError(code="VALIDATION", message="Apresente a busca atual antes da proxima"),
+                    data={"retryable": True, "attempt": 0, "recovery_action": "wait_current_search",
+                          "upstream_code": "BATCH_DEFERRED"},
+                    final_state=CallFinalState.RESOLVIDA_AUTOMATICO),
+                call_id=call_id, tenant_id=tenant_id, started_at=started_at,
+                event_type="tool_deferred", error_code="VALIDATION")
+
         response = await self._run_handler(
             handler,
             parsed=parsed,
@@ -403,7 +436,7 @@ class ToolDispatcher:
                 final_state=CallFinalState.TRANSFERIDA_HUMANO,
             )
         except BusinessRuleError as exc:
-            attempt = record_business_error_attempt(
+            attempt = exc.attempt if exc.attempt is not None else record_business_error_attempt(
                 settings=self.settings,
                 tenant_id=tenant_id,
                 call_id=call_id,

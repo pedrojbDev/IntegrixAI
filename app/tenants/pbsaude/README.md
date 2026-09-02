@@ -27,6 +27,9 @@ explicitos ate o provider.
 
 ## Fluxo De `search_providers`
 
+O [fluxo de conversa Vapi](vapi/README.md) documenta evidência por turno,
+recuperação, múltiplos pedidos e preparação do prompt com rollback.
+
 1. `workflows/search_providers.py` valida CPF, cidade e especialidade.
 2. O catalogo resolve a especialidade canonica sem usar a forma sem acentos como
    texto de saida.
