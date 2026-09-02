@@ -195,6 +195,27 @@ class ExternalApiProviderTests(unittest.TestCase):
 
         self.assertEqual(1, len(fake_client.calls))
 
+    def test_caps_each_attempt_by_the_total_voice_deadline(self) -> None:
+        fake_client = FakeClient([success_response()])
+        provider = ExternalApiDataProvider(
+            settings(external_api_timeout_seconds=8.0, external_api_total_deadline_seconds=0.5)
+        )
+
+        with patch(
+            "app.tenants.pbsaude.integration.http_client.get_external_api_client",
+            return_value=fake_client,
+        ):
+            provider.search_providers(
+                "tenant_a",
+                "call_123",
+                "feira de santana",
+                "cardiologia",
+                "03457351538",
+                None,
+            )
+
+        self.assertLessEqual(fake_client.calls[0]["kwargs"]["timeout"], 0.5)
+
     def test_logs_attempt_without_full_cpf(self) -> None:
         fake_client = FakeClient([success_response()])
         provider = ExternalApiDataProvider(settings())

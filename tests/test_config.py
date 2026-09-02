@@ -107,6 +107,15 @@ class SettingsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, "placeholder production values"):
             production_settings(webhook_secret="replace-with-strong-vapi-webhook-secret")
 
+    def test_production_slot_guard_requires_hmac_secret(self) -> None:
+        with self.assertRaisesRegex(ValidationError, "VAPI_SLOT_STATE_HMAC_SECRET"):
+            production_settings(vapi_slot_guard_enabled=True)
+        settings = production_settings(
+            vapi_slot_guard_enabled=True,
+            vapi_slot_state_hmac_secret="slot-state-secret",
+        )
+        self.assertTrue(settings.vapi_slot_guard_enabled)
+
     def test_production_rejects_placeholder_external_api_values(self) -> None:
         with self.assertRaisesRegex(ValidationError, "placeholder production values"):
             production_settings(

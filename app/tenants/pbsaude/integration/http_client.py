@@ -64,11 +64,17 @@ def post_json_with_retries(
     auth: httpx.Auth | None,
     timeout_seconds: float,
 ) -> httpx.Response:
-    attempts_total = settings.external_api_max_retries + 1
+    # Voice calls have a strict end-to-end budget. Do not turn one slow
+    # upstream request into two full-length waits.
+    attempts_total = min(settings.external_api_max_retries, 1) + 1
+    deadline = time.monotonic() + settings.external_api_total_deadline_seconds
     last_timeout: httpx.TimeoutException | None = None
     last_request_error: httpx.RequestError | None = None
 
     for attempt in range(1, attempts_total + 1):
+        remaining_seconds = deadline - time.monotonic()
+        if remaining_seconds <= 0:
+            raise httpx.TimeoutException("external API total deadline exceeded")
         started_at = time.perf_counter()
         try:
             response = get_external_api_client(settings).post(
@@ -76,7 +82,7 @@ def post_json_with_retries(
                 json=payload,
                 headers=headers,
                 auth=auth,
-                timeout=timeout_seconds,
+                timeout=min(timeout_seconds, remaining_seconds),
             )
         except httpx.TimeoutException as exc:
             last_timeout = exc
@@ -89,8 +95,7 @@ def post_json_with_retries(
                 duration_ms=_elapsed_ms(started_at),
                 outcome="timeout",
             )
-            if attempt < attempts_total:
-                _sleep_before_retry(settings)
+            if attempt < attempts_total and _sleep_before_retry(settings, deadline):
                 continue
             raise
         except httpx.RequestError as exc:
@@ -105,8 +110,7 @@ def post_json_with_retries(
                 outcome="request_error",
                 error_type=exc.__class__.__name__,
             )
-            if attempt < attempts_total:
-                _sleep_before_retry(settings)
+            if attempt < attempts_total and _sleep_before_retry(settings, deadline):
                 continue
             raise
 
@@ -122,8 +126,7 @@ def post_json_with_retries(
             outcome="transient_http" if transient_http else "response",
             status_code=response.status_code,
         )
-        if transient_http and attempt < attempts_total:
-            _sleep_before_retry(settings)
+        if transient_http and attempt < attempts_total and _sleep_before_retry(settings, deadline):
             continue
         return response
 
@@ -134,9 +137,14 @@ def post_json_with_retries(
     raise RuntimeError("external API retry loop ended without response")
 
 
-def _sleep_before_retry(settings: Settings) -> None:
-    if settings.external_api_retry_backoff_seconds > 0:
-        time.sleep(settings.external_api_retry_backoff_seconds)
+def _sleep_before_retry(settings: Settings, deadline: float) -> bool:
+    remaining_seconds = deadline - time.monotonic()
+    if remaining_seconds <= 0:
+        return False
+    delay_seconds = min(settings.external_api_retry_backoff_seconds, remaining_seconds)
+    if delay_seconds > 0:
+        time.sleep(delay_seconds)
+    return deadline > time.monotonic()
 
 
 def _elapsed_ms(started_at: float) -> float:

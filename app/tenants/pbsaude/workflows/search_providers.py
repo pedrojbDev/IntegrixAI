@@ -14,6 +14,7 @@ from ..provider_policy import (
     apply_provider_policy,
     apply_provider_policy_business_override,
 )
+from ..slot_guard import reopen_slot_collection, validate_search_slot_provenance
 
 log = get_logger()
 
@@ -37,14 +38,25 @@ async def search_providers(
             code="CIDADE_INVALIDA",
             field="cidade",
             message="Cidade obrigatoria para busca de rede",
+            details={"recovery_action": "collect_cidade"},
         )
     if not payload.query:
         raise BusinessRuleError(
             code="ESPECIALIDADE_INVALIDA",
             field="especialidade",
             message="Especialidade obrigatoria para busca de rede",
+            details={"recovery_action": "collect_especialidade"},
         )
     catalog = get_specialty_catalog(settings)
+    validate_search_slot_provenance(
+        settings=settings,
+        tenant_id=tenant_id,
+        call_id=call_id,
+        cpf=payload.cpf,
+        city=payload.city,
+        query=payload.query,
+        catalog=catalog,
+    )
     if catalog.is_enabled:
         canonical_specialty = catalog.resolve(payload.query)
         if canonical_specialty is None:
@@ -53,7 +65,7 @@ async def search_providers(
                 code="ESPECIALIDADE_INVALIDA",
                 field="especialidade",
                 message="Especialidade nao encontrada na lista disponivel",
-                details={"suggestions": suggestions},
+                details={"suggestions": suggestions, "recovery_action": "collect_especialidade"},
             )
     else:
         canonical_specialty = payload.query
@@ -71,11 +83,20 @@ async def search_providers(
                 payload.cpf,
                 payload.tipo_atendimento,
             ),
-            timeout=settings.provider_timeout_seconds,
+            timeout=min(
+                settings.provider_timeout_seconds,
+                settings.external_api_total_deadline_seconds,
+            ),
         )
     except asyncio.TimeoutError as exc:
         raise TimeoutError("Timeout na busca de rede") from exc
     except BusinessRuleError as exc:
+        exc = _apply_business_recovery(
+            exc,
+            settings=settings,
+            tenant_id=tenant_id,
+            call_id=call_id,
+        )
         policy_application = _apply_business_override(
             settings=settings,
             tenant_id=tenant_id,
@@ -85,7 +106,7 @@ async def search_providers(
             business_error=exc,
         )
         if not policy_application.applied:
-            raise
+            raise exc
         providers = policy_application.providers
         business_override_code = exc.code
     except ServiceUnavailable as exc:
@@ -180,6 +201,55 @@ def _apply_business_override(
         )
     except (OSError, ValueError) as exc:
         _raise_invalid_policy(exc, tenant_id=tenant_id, call_id=call_id, city=city)
+
+
+def _apply_business_recovery(
+    error: BusinessRuleError,
+    *,
+    settings: Settings,
+    tenant_id: str,
+    call_id: str,
+) -> BusinessRuleError:
+    if error.code == "CIDADE_SEM_COBERTURA":
+        return BusinessRuleError(
+            code=error.code,
+            field=None,
+            message=error.message,
+            details={**error.details, "recovery_action": "offer_handoff"},
+            retryable=False,
+            handoff_after_retry=False,
+        )
+    if error.code == "CIDADE_INVALIDA":
+        reopen_slot_collection(
+            settings=settings,
+            tenant_id=tenant_id,
+            call_id=call_id,
+            field="cidade",
+        )
+        return BusinessRuleError(
+            code=error.code,
+            field="cidade",
+            message=error.message,
+            details={**error.details, "recovery_action": "collect_cidade"},
+            retryable=True,
+            handoff_after_retry=True,
+        )
+    if error.code == "ESPECIALIDADE_INVALIDA":
+        reopen_slot_collection(
+            settings=settings,
+            tenant_id=tenant_id,
+            call_id=call_id,
+            field="especialidade",
+        )
+        return BusinessRuleError(
+            code=error.code,
+            field="especialidade",
+            message=error.message,
+            details={**error.details, "recovery_action": "collect_especialidade"},
+            retryable=True,
+            handoff_after_retry=True,
+        )
+    return error
 
 
 def _raise_invalid_policy(

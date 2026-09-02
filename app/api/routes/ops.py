@@ -9,6 +9,8 @@ from ...core.ops.cost_sync_service import VapiCostSyncService
 from ...core.ops.dashboard_service import (
     METRIC_VERSION,
     TECHNICAL_ERROR_CODES,
+    _call_outcomes_subquery,
+    _summarize_call_outcomes,
     get_costs,
     get_health,
     get_overview,
@@ -204,12 +206,41 @@ async def audit_summary(
                         "success_calls": 0,
                         "failed_calls": 0,
                         "handoff_calls": 0,
+                        "automated_resolution_calls": 0,
+                        "successful_handoff_calls": 0,
+                        "normal_completion_calls": 0,
+                        "successful_agent_calls": 0,
+                        "agent_success_rate_pct": 0.0,
+                        "unresolved_calls": 0,
                         "technical_failure_events": 0,
                         "avg_duration_ms": 0.0,
                     },
                     "per_tool": [],
                 }
             filters.append(CallEvent.call_id.in_(assistant_call_ids))
+
+        outcomes = _call_outcomes_subquery(
+            since=cutoff or datetime(1970, 1, 1, tzinfo=timezone.utc),
+            tenant_id=tenant_id,
+            call_ids_filter=assistant_call_ids,
+        )
+        if outcomes is None:
+            outcome_rows = []
+        else:
+            outcome_rows = session.execute(
+                select(
+                    outcomes.c.successful_handoff,
+                    outcomes.c.automatic_resolution,
+                    outcomes.c.normal_completion,
+                )
+            ).all()
+        outcome_summary = _summarize_call_outcomes(outcome_rows)
+        outcome_total_calls = outcome_summary["total_calls"]
+        successful_handoff_calls = outcome_summary["successful_handoff_calls"]
+        automated_resolution_calls = outcome_summary["automated_resolution_calls"]
+        normal_completion_calls = outcome_summary["normal_completion_calls"]
+        successful_agent_calls = outcome_summary["successful_agent_calls"]
+        unresolved_calls = outcome_summary["unresolved_calls"]
 
         base_stmt = select(
             func.count(CallEvent.id).label("total_calls"),
@@ -249,10 +280,18 @@ async def audit_summary(
             "enabled": True,
             "window_minutes": since_minutes,
             "totals": {
-                "total_calls": totals.total_calls or 0,
-                "success_calls": totals.success_calls or 0,
-                "failed_calls": totals.failed_calls or 0,
-                "handoff_calls": totals.handoff_calls or 0,
+                "total_calls": outcome_total_calls,
+                "success_calls": successful_agent_calls,
+                "failed_calls": unresolved_calls,
+                "handoff_calls": successful_handoff_calls,
+                "automated_resolution_calls": automated_resolution_calls,
+                "successful_handoff_calls": successful_handoff_calls,
+                "normal_completion_calls": normal_completion_calls,
+                "successful_agent_calls": successful_agent_calls,
+                "agent_success_rate_pct": round(
+                    (successful_agent_calls / outcome_total_calls) * 100.0, 2
+                ) if outcome_total_calls else 0.0,
+                "unresolved_calls": unresolved_calls,
                 "technical_failure_events": totals.technical_failure_events or 0,
                 "avg_duration_ms": round(float(totals.avg_duration_ms or 0.0), 2),
             },

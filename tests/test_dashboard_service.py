@@ -154,7 +154,7 @@ class DashboardServiceTests(unittest.TestCase):
         self.assertEqual("search_providers", resilience["top_failure_tools"][0]["tool_name"])
         self.assertEqual("search_providers", resilience["business_error_tools"][0]["tool_name"])
 
-    def test_v2_classifies_successful_handoff_and_technical_failures_independently(self) -> None:
+    def test_v3_classifies_normal_ends_handoffs_and_technical_failures_independently(self) -> None:
         session_local = self._session_local()
         now = datetime.now(timezone.utc)
 
@@ -167,13 +167,14 @@ class DashboardServiceTests(unittest.TestCase):
             error_code: str | None = None,
             minutes_ago: int = 1,
             tenant_id: str = "tenant_a",
+            event_type: str = "tool_completed",
         ) -> CallEvent:
             return CallEvent(
                 tenant_id=tenant_id,
                 call_id=call_id,
                 tool_call_id=f"{call_id}-{tool_name}-{minutes_ago}",
                 tool_name=tool_name,
-                event_type="tool_completed",
+                event_type=event_type,
                 final_state=final_state,
                 ok=ok,
                 duration_ms=500,
@@ -192,6 +193,22 @@ class DashboardServiceTests(unittest.TestCase):
                     event("technical", "search_providers", ok=False, final_state="TRANSFERIDA_HUMANO", error_code="TIMEOUT", minutes_ago=4),
                     event("technical", "handoff_human", ok=True, final_state="TRANSFERIDA_HUMANO", minutes_ago=3),
                     event("handoff", "handoff_human", ok=True, final_state="TRANSFERIDA_HUMANO", tenant_id="tenant_b", minutes_ago=2),
+                    event(
+                        "normal_customer_end",
+                        "vapi_call_lifecycle",
+                        ok=True,
+                        final_state="ENCERRADA_USUARIO",
+                        event_type="vapi_normal_call_completed",
+                        minutes_ago=2,
+                    ),
+                    event(
+                        "normal_agent_end",
+                        "vapi_call_lifecycle",
+                        ok=True,
+                        final_state="ENCERRADA_AGENTE",
+                        event_type="vapi_normal_call_completed",
+                        minutes_ago=1,
+                    ),
                 ]
             )
             session.commit()
@@ -200,15 +217,22 @@ class DashboardServiceTests(unittest.TestCase):
             tools = get_tools(session, window="24h", tenant_id="tenant_a", assistant_id=None)
             resilience = get_resilience(session, window="24h", tenant_id="tenant_a", assistant_id=None)
 
-        self.assertEqual("v2", overview["metric_version"])
-        self.assertEqual(4, overview["kpis"]["total_calls"])
+        self.assertEqual("v3", overview["metric_version"])
+        self.assertEqual(6, overview["kpis"]["total_calls"])
         self.assertEqual(1, overview["kpis"]["automated_resolution_calls"])
         self.assertEqual(2, overview["kpis"]["successful_handoff_calls"])
-        self.assertEqual(1, overview["kpis"]["unresolved_calls"])
+        self.assertEqual(2, overview["kpis"]["normal_completion_calls"])
+        self.assertEqual(5, overview["kpis"]["successful_agent_calls"])
+        self.assertEqual(83.33, overview["kpis"]["agent_success_rate_pct"])
+        self.assertEqual(5, overview["kpis"]["success_calls"])
+        # A handoff succeeds as an agent action but remains unresolved by automation.
+        self.assertEqual(3, overview["kpis"]["failed_calls"])
+        self.assertEqual(3, overview["kpis"]["unresolved_calls"])
         self.assertEqual(1, overview["kpis"]["technical_failure_events"])
         self.assertEqual(6, overview["kpis"]["tool_execution_count"])
         self.assertEqual(16.67, overview["kpis"]["technical_failure_rate_pct"])
         self.assertEqual(2, sum(point["successful_handoffs"] for point in overview["series"]))
+        self.assertEqual(2, sum(point["normal_completions"] for point in overview["series"]))
 
         tools_by_name = {item["tool_name"]: item for item in tools["items"]}
         self.assertEqual(1, tools_by_name["search_providers"]["technical_failure_events"])
