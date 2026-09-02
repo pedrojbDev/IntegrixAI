@@ -154,7 +154,7 @@ class DashboardServiceTests(unittest.TestCase):
         self.assertEqual("search_providers", resilience["top_failure_tools"][0]["tool_name"])
         self.assertEqual("search_providers", resilience["business_error_tools"][0]["tool_name"])
 
-    def test_v3_classifies_normal_ends_handoffs_and_technical_failures_independently(self) -> None:
+    def test_v4_counts_normal_ends_as_automatic_resolutions(self) -> None:
         session_local = self._session_local()
         now = datetime.now(timezone.utc)
 
@@ -217,9 +217,9 @@ class DashboardServiceTests(unittest.TestCase):
             tools = get_tools(session, window="24h", tenant_id="tenant_a", assistant_id=None)
             resilience = get_resilience(session, window="24h", tenant_id="tenant_a", assistant_id=None)
 
-        self.assertEqual("v3", overview["metric_version"])
+        self.assertEqual("v4", overview["metric_version"])
         self.assertEqual(6, overview["kpis"]["total_calls"])
-        self.assertEqual(1, overview["kpis"]["automated_resolution_calls"])
+        self.assertEqual(3, overview["kpis"]["automated_resolution_calls"])
         self.assertEqual(2, overview["kpis"]["successful_handoff_calls"])
         self.assertEqual(2, overview["kpis"]["normal_completion_calls"])
         self.assertEqual(5, overview["kpis"]["successful_agent_calls"])
@@ -232,6 +232,7 @@ class DashboardServiceTests(unittest.TestCase):
         self.assertEqual(6, overview["kpis"]["tool_execution_count"])
         self.assertEqual(16.67, overview["kpis"]["technical_failure_rate_pct"])
         self.assertEqual(2, sum(point["successful_handoffs"] for point in overview["series"]))
+        self.assertEqual(3, sum(point["automated_resolutions"] for point in overview["series"]))
         self.assertEqual(2, sum(point["normal_completions"] for point in overview["series"]))
 
         tools_by_name = {item["tool_name"]: item for item in tools["items"]}
