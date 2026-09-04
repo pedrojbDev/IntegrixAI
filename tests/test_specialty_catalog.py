@@ -27,6 +27,7 @@ class SpecialtyCatalogTests(unittest.TestCase):
     def test_default_catalog_normalizes_services_and_exams(self) -> None:
         catalog = get_specialty_catalog(Settings(_env_file=None))
         self.assertEqual("LABORATORIO", catalog.resolve("exame de sangue"))
+        self.assertEqual("LABORATORIO", catalog.resolve("exames de sangue"))
         self.assertEqual("RESSONANCIA MAGNETICA", catalog.resolve("ressonância"))
         self.assertEqual("RADIOLOGIA", catalog.resolve("raio-X"))
 
@@ -35,6 +36,11 @@ class SpecialtyCatalogTests(unittest.TestCase):
         for raw_value in ("neuro", "vascular", "terapeuta", "médico da coluna"):
             with self.subTest(raw_value=raw_value):
                 self.assertIsNone(catalog.resolve(raw_value))
+
+    def test_partial_or_misspelled_alias_is_not_substituted_as_a_medical_specialty(self) -> None:
+        catalog = get_specialty_catalog(Settings(_env_file=None))
+        self.assertEqual("cardiolog", catalog.resolve("cardiolog"))
+        self.assertEqual("cardiologai", catalog.resolve("cardiologai"))
 
     def test_unknown_term_is_preserved_without_external_authoritative_catalog(self) -> None:
         catalog = get_specialty_catalog(Settings(_env_file=None))

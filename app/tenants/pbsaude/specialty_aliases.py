@@ -40,7 +40,7 @@ DEFAULT_SPECIALTY_ALIASES: dict[str, tuple[str, ...]] = {
     "CLINICA MEDICA": ("clinico", "clinico geral", "medico geral"),
     "CIRURGIA GERAL": ("cirurgiao geral",),
     "CIRURGIA BUCOMAXILOFACIAL": ("buco", "bucomaxilo", "cirurgiao bucomaxilofacial"),
-    "LABORATORIO": ("exames laboratoriais", "exame de sangue", "coleta de sangue", "onde faco coleta"),
+    "LABORATORIO": ("exames laboratoriais", "exame de sangue", "exames de sangue", "coleta de sangue", "onde faco coleta"),
     "DIAGNOSTICO POR IMAGEM": ("clinica de imagem", "servico de diagnostico por imagem"),
     "RESSONANCIA MAGNETICA": ("ressonancia",),
     "TOMOGRAFIA COMPUTADORIZADA": ("tomografia",),

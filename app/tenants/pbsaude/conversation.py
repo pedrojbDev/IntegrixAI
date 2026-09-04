@@ -12,6 +12,13 @@ from .catalog import get_specialty_catalog
 
 MAX_TURNS = 256
 KEYPAD = re.compile(r"(?:user'?s\s+keypad\s+entry|keypad\s+entry)\s*:\s*([0-9\s.#*-]+)", re.I)
+CPF_CHANGE = re.compile(r"\b(?:corrigir|corrigindo|trocar|mudar)\b.*\bcpf\b|\bcpf\b.*\b(?:corrigir|corrigindo|trocar|mudar)\b")
+CPF_INVALIDATION = re.compile(r"\bcpf\b.*\b(?:errado|incorreto|outro|diferente)\b")
+CPF_NEGATED_CHANGE = re.compile(
+    r"\bnao\b(?:\s+\w+){0,4}\s+(?:corrigir|corrigindo|trocar|mudar)\b.*\bcpf\b"
+    r"|\bcpf\b.*\bnao\b(?:\s+\w+){0,4}\s+(?:corrigir|corrigindo|trocar|mudar)\b"
+)
+SPOKEN_CPF = re.compile(r"\b(?:(?:esse|este)\s+(?:e|eh|esta|ta)\s+)?(?:meu\s+)?cpf\b|\b\d{11}\b")
 NOISE = re.compile(r"^(alo|oi|ola|sim estou ouvindo|esta ouvindo|ta ouvindo|so um momento|um momento|aguarde|pera ai|deixa eu ver|nao entendi)[ !?.]*$")
 YES = {"sim", "isso", "isso mesmo", "correto", "certo", "exatamente", "pode", "pode sim"}
 ALL = {"todos", "todos os tres", "todos os 3", "os tres", "os 3", "ambos", "as duas", "os dois"}
@@ -53,6 +60,18 @@ def _question(value: str) -> str | None:
     return None
 
 
+def _last_question(value: str) -> str:
+    questions = re.findall(r"[^.!?]*\?", value)
+    if questions:
+        return questions[-1]
+    return re.split(r"[.!?]", value.rstrip(" .!?"))[-1]
+
+
+def _is_cpf_correction(value: str) -> bool:
+    return bool("cpf" in value and not CPF_NEGATED_CHANGE.search(value)
+                and (CPF_CHANGE.search(value) or CPF_INVALIDATION.search(value)))
+
+
 def _encode(turn: dict, secret: str, catalog) -> dict:
     raw = turn["text"]
     normalized = normalize_text(raw)
@@ -61,12 +80,15 @@ def _encode(turn: dict, secret: str, catalog) -> dict:
     if turn["role"] == "assistant":
         entry["question"] = _question(raw)
         # A read-back is evidence only after a subsequent explicit assent.
-        confirmation = any(t in normalized for t in ("confirmar", "voce quis dizer", "voce quer dizer")) or normalized.endswith("certo")
+        question_text = _last_question(raw)
+        question_normalized = normalize_text(question_text)
+        confirmation = (any(t in question_normalized for t in ("confirmar", "voce quis dizer", "voce quer dizer"))
+                        or question_normalized.endswith("certo"))
         if confirmation:
-            entry["confirmation"] = sorted(term_hmacs(secret, raw))
-            if not entry["question"] and _specialties(normalized, catalog):
+            entry["confirmation"] = sorted(term_hmacs(secret, question_text))
+            if not entry["question"] and _specialties(question_normalized, catalog):
                 entry["question"] = "especialidade"
-            entry["ambiguous"] = " ou " in f" {normalized} "
+            entry["ambiguous"] = " ou " in f" {question_normalized} "
         return entry
 
     match = KEYPAD.search(raw)
@@ -74,28 +96,51 @@ def _encode(turn: dict, secret: str, catalog) -> dict:
         digits = re.sub(r"\D", "", match.group(1))
         entry["keypad"] = True
         entry["cpf"] = keyed_hmac(secret, digits) if len(digits) == 11 else None
-        # Speech surrounding keypad input is not implicitly another slot.
-        return entry
+        # Vapi may combine a keypad event and speech in one transcript turn.
+        # Keep their evidence separate: keypad digits are CPF-only, while the
+        # remaining speech can still prove a city or specialty.
+        raw = raw[:match.start()] + raw[match.end():]
+        normalized = normalize_text(raw)
     entry["yes"] = normalized in YES
     entry["all"] = normalized in ALL
     entry["noise"] = bool(NOISE.fullmatch(normalized)) or not normalized
     entry["negative"] = normalized in {"nao", "nao e isso", "nenhum", "nenhuma"}
+    entry["cpf_correction"] = _is_cpf_correction(normalized)
+    entry["correction"] = bool(re.search(r"\b(?:na verdade|corrigindo|corrigir|trocar|mudar|agora quero)\b", normalized))
     if entry["noise"] or entry["yes"] or entry["all"] or entry["negative"]:
         return entry
-    if "cpf" in normalized or re.search(r"\d{11}", normalized):
-        entry["noise"] = True  # Spoken identifiers must never become a city.
-        return entry
-    entry["terms"] = sorted(term_hmacs(secret, raw))
+    spoken_cpf = "cpf" in normalized or bool(re.search(r"\d{11}", normalized))
+    if spoken_cpf:
+        # Discard spoken identifier context but retain independently spoken
+        # city and specialty evidence from a combined keypad transcript.
+        normalized = " ".join(SPOKEN_CPF.sub(" ", normalized).split())
+        entry["noise"] = bool(NOISE.fullmatch(normalized)) or not normalized
+        if entry["noise"]:
+            return entry
     specialties = _specialties(normalized, catalog)
-    entry["specialties"] = sorted(keyed_hmac(secret, t) for t in specialties)
     location = re.search(r"(?:\bem\s+|\bcidade(?:\s+e|\s+de)?\s+)(.+)", normalized)
+    if spoken_cpf and not specialties and not location:
+        entry["noise"] = True
+        return entry
+    entry["terms"] = sorted(term_hmacs(secret, normalized))
+    entry["specialties"] = sorted(keyed_hmac(secret, t) for t in specialties)
     if location:
         # Stop a location phrase before a subsequent explicit search request.
         city = re.split(r"\b(?:quero|preciso|procuro|busco)\b", location.group(1))[0].strip()
         if city and not _specialties(city, catalog):
             entry["city"] = sorted(term_hmacs(secret, city))
-    entry["correction"] = bool(re.search(r"\b(?:na verdade|corrigindo|corrigir|trocar|mudar|agora quero)\b", normalized))
     return entry
+
+
+def _confirmation_for_pending(entry: dict, result: dict) -> tuple[str, list[str]] | None:
+    """Bind an assent only to evidence for the latest actual question."""
+    field = result["pending"]
+    if field not in {"cidade", "especialidade"}:
+        return None
+    confirmed = set(entry.get("confirmation") or [])
+    existing = set(result[field])
+    overlap = sorted(confirmed & existing)
+    return (field, overlap) if overlap else None
 
 
 def _reduce(turns: list[dict]) -> dict:
@@ -108,29 +153,45 @@ def _reduce(turns: list[dict]) -> dict:
             assistant_seen = True
             if entry.get("question"):
                 result["pending"] = entry["question"]
-            confirmation = entry.get("confirmation") if not entry.get("ambiguous") else None
+            confirmation = (
+                _confirmation_for_pending(entry, result)
+                if entry.get("confirmation") and not entry.get("ambiguous") else None
+            )
             continue
         result["last_user"] = entry["key"]
         result["last_order"] = entry["order"]
         field = result["pending"]
-        if entry.get("noise"):
+        if entry.get("cpf_correction"):
+            # A spoken correction is explicit evidence that the previous CPF
+            # must not authorize a search while the replacement is collected.
+            result["cpf"] = None
+            result["field_turns"].pop("cpf", None)
+            result["pending"] = "cpf"
+            field = "cpf"
+        if entry.get("noise") and not entry.get("keypad"):
             continue
         if entry.get("keypad"):
-            if entry.get("cpf"):
-                result["cpf"] = entry["cpf"]
-                result["field_turns"]["cpf"] = entry["key"]
-                if field == "cpf":
+            # A keypad marker outside CPF collection is incidental. It must
+            # neither replace nor invalidate a valid CPF.
+            if field == "cpf":
+                if entry.get("cpf"):
+                    result["cpf"] = entry["cpf"]
+                    result["field_turns"]["cpf"] = entry["key"]
                     result["pending"] = "cidade" if not result["cidade"] else "especialidade"
-                result["failures"]["cpf"] = 0
-            else:
-                result["cpf"] = None
-                result["failures"]["cpf"] = result["failures"].get("cpf", 0) + 1
-            continue
+                    result["failures"]["cpf"] = 0
+                else:
+                    result["cpf"] = None
+                    result["failures"]["cpf"] = result["failures"].get("cpf", 0) + 1
+            field = result["pending"]
         if entry.get("yes") or entry.get("all"):
-            if confirmation and field in {"cidade", "especialidade"}:
-                result[field] = sorted(set(result[field]) | set(confirmation)) if field == "especialidade" else confirmation
-                result["field_turns"][field] = entry["key"]
-                result["failures"][field] = 0
+            if confirmation:
+                confirmed_field, confirmed_values = confirmation
+                result[confirmed_field] = (
+                    sorted(set(result[confirmed_field]) | set(confirmed_values))
+                    if confirmed_field == "especialidade" else confirmed_values
+                )
+                result["field_turns"][confirmed_field] = entry["key"]
+                result["failures"][confirmed_field] = 0
             confirmation = None
             continue
         if entry.get("negative"):

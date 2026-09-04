@@ -64,9 +64,9 @@ class ConversationFlowTests(unittest.IsolatedAsyncioTestCase):
         with self.sessions() as session:
             return session.get(VapiCallSlotState, {'tenant_id':tenant,'call_id':'same-call'})
 
-    def validate(self, city='Salvador', query='Cardiologia', tenant='tenant_a'):
+    def validate(self, city='Salvador', query='Cardiologia', tenant='tenant_a', cpf=CPF):
         validate_search_slot_provenance(settings=self.settings, tenant_id=tenant, call_id='same-call',
-            cpf=CPF, city=city, query=query, catalog=get_specialty_catalog(self.settings))
+            cpf=cpf, city=city, query=query, catalog=get_specialty_catalog(self.settings))
 
     def tool(self, id='tc1', city='Salvador', query='Cardiologia'):
         return {'id':id,'function':{'name':'search_providers','arguments':{'cpf':CPF,'city':city,'query':query}}}
@@ -211,7 +211,7 @@ class ConversationFlowTests(unittest.IsolatedAsyncioTestCase):
                 call_id='same-call', field='cpf', code='SLOT_UNCONFIRMED'))
 
     def test_invalid_keypad_correction_invalidates_previous_cpf(self):
-        ms = self.standard() + [{'role': 'user', 'message': "User's Keypad Entry: 123#", 'time': self.base+6000}]
+        ms = self.standard() + [{'role': 'user', 'message': "Corrigindo meu CPF: User's Keypad Entry: 123#", 'time': self.base+6000}]
         self.ingest(ms)
         with self.assertRaises(BusinessRuleError):
             self.validate()
@@ -281,4 +281,92 @@ class ConversationFlowTests(unittest.IsolatedAsyncioTestCase):
             ('user', 'Salvador'), ('bot', 'Qual especialidade?'), ('user', 'Cardiologista'))
         result = (await self.dispatch(ms, [self.tool(city='Cidade inventada')]))['results'][0]['result']
         self.assertEqual(0, result['data']['attempt'])
+        self.validate()
+
+    def test_incidental_keypad_keeps_cpf_and_preserves_city_speech(self):
+        ms = self.messages(
+            ('bot', 'Digite o CPF no teclado.'),
+            ('user', f"User's Keypad Entry: {CPF}#"),
+            ('bot', 'Pode me falar a cidade para atendimento?'),
+            ('user', "User's Keypad Entry: 7# moro em Salvador, Bahia."),
+            ('bot', 'Qual especialidade ou tipo de exame você procura?'),
+            ('user', 'Cardiologista'),
+        )
+        self.ingest(ms)
+        self.validate()
+
+    def test_explicit_cpf_correction_blocks_old_cpf_until_replacement_is_valid(self):
+        replacement = '98765432109'
+        ms = self.standard() + [
+            {'role': 'user', 'message': 'Preciso corrigir meu CPF.', 'time': self.base + 6000},
+            {'role': 'bot', 'message': 'Digite o CPF no teclado.', 'time': self.base + 7000},
+        ]
+        self.ingest(ms)
+        with self.assertRaises(BusinessRuleError):
+            self.validate()
+        ms.append({'role': 'user', 'message': f"User's Keypad Entry: {replacement}#", 'time': self.base + 8000})
+        self.ingest(ms, rev=2)
+        self.validate(cpf=replacement)
+        with self.assertRaises(BusinessRuleError):
+            self.validate()
+
+    def test_confirmation_for_known_city_cannot_authorize_it_as_specialty(self):
+        ms = self.messages(
+            ('bot', 'Digite o CPF no teclado.'),
+            ('user', f"User's Keypad Entry: {CPF}#"),
+            ('bot', 'Pode me falar a cidade para atendimento?'),
+            ('user', 'Salvador, Bahia.'),
+            ('bot', 'Qual especialidade ou tipo de exame você procura?'),
+            ('bot', 'Você quis dizer Salvador, certo?'),
+            ('user', 'Sim'),
+            ('user', 'Cardiologista'),
+        )
+        self.ingest(ms)
+        self.validate()
+        with self.assertRaises(BusinessRuleError):
+            self.validate(query='Salvador')
+
+    def test_cpf_error_statement_blocks_the_previous_cpf(self):
+        ms = self.standard() + [
+            {'role': 'user', 'message': 'Meu CPF está errado, digitei errado.', 'time': self.base + 6000},
+        ]
+        self.ingest(ms)
+        with self.assertRaises(BusinessRuleError):
+            self.validate()
+
+    def test_cpf_replacement_statement_blocks_the_previous_cpf(self):
+        ms = self.standard() + [
+            {'role': 'user', 'message': 'O CPF correto é outro.', 'time': self.base + 6000},
+        ]
+        self.ingest(ms)
+        with self.assertRaises(BusinessRuleError):
+            self.validate()
+
+    def test_negated_cpf_change_keeps_the_confirmed_cpf(self):
+        ms = self.standard() + [
+            {'role': 'user', 'message': 'Não quero mudar meu CPF.', 'time': self.base + 6000},
+        ]
+        self.ingest(ms)
+        self.validate()
+
+    def test_later_hearing_question_does_not_consume_city_readback_confirmation(self):
+        ms = self.messages(
+            ('bot', 'Digite o CPF no teclado.'),
+            ('user', f"User's Keypad Entry: {CPF}#"),
+            ('bot', 'Pode me falar a cidade para atendimento?'),
+            ('user', 'Feira de Santana'),
+            ('bot', 'Você quis dizer Feira, certo? Está me ouvindo?'),
+            ('user', 'Sim'),
+            ('bot', 'Qual especialidade ou tipo de exame você procura?'),
+            ('user', 'Cardiologista'),
+        )
+        self.ingest(ms)
+        self.validate(city='Feira de Santana')
+
+    def test_keypad_turn_with_cpf_mention_keeps_city_and_specialty_speech(self):
+        ms = self.messages(
+            ('bot', 'Digite o CPF no teclado.'),
+            ('user', f"User's Keypad Entry: {CPF}# Esse é meu CPF, moro em Salvador e preciso de cardiologista."),
+        )
+        self.ingest(ms)
         self.validate()
