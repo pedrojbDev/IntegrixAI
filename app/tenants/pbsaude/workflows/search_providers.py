@@ -1,10 +1,13 @@
 import asyncio
+import json
 from typing import NoReturn
 
 from ....config import Settings
 from ....logging import get_logger
 from ....utils.enums import CallFinalState
 from ..catalog import get_specialty_catalog
+from ..search_execution import execute_search
+from ....platform.services.vapi_conversation import normalize_text
 from ..contracts import SearchProvidersRequest, SearchProvidersResponse
 from ..integration.client import BusinessRuleError, ServiceUnavailable, get_data_provider
 from ..integration.translator import normalize_cpf
@@ -21,15 +24,28 @@ log = get_logger()
 
 async def search_providers(args: dict, settings: Settings, call_id: str, tenant_id: str) -> tuple[dict, CallFinalState]:
     try:
-        return await _search_providers(args, settings, call_id, tenant_id)
+        worker = asyncio.ensure_future(asyncio.to_thread(_search_providers, args, settings, call_id, tenant_id))
+        # Shield the synchronous owner: cancelling a request cannot stop its HTTP
+        # thread or release the database search lock early.
+        worker.add_done_callback(_consume_worker_exception)
+        try:
+            return await asyncio.wait_for(asyncio.shield(worker), timeout=min(
+                settings.provider_timeout_seconds, settings.external_api_total_deadline_seconds))
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError("Timeout na busca de rede") from exc
     except BusinessRuleError as exc:
-        if settings.vapi_slot_guard_enabled:
+        if settings.vapi_slot_guard_enabled and not getattr(exc, "_vapi_recovery_applied", False):
             exc.attempt = recovery_attempt(settings=settings, tenant_id=tenant_id, call_id=call_id,
                                            field=exc.field, code=exc.code)
         raise
 
 
-async def _search_providers(
+def _consume_worker_exception(worker):
+    if not worker.cancelled():
+        worker.exception()
+
+
+def _search_providers(
     args: dict,
     settings: Settings,
     call_id: str,
@@ -71,42 +87,63 @@ async def _search_providers(
         canonical_specialty = catalog.resolve(payload.query)
         if canonical_specialty is None:
             suggestions = catalog.suggest(payload.query)
+            clarification = {}
+            if normalize_text(payload.query) == 'exame de vista':
+                clarification['clarification_question'] = (
+                    'Voce procura uma consulta com oftalmologista ou um exame especifico? Qual exame?')
             raise BusinessRuleError(
                 code="ESPECIALIDADE_INVALIDA",
                 field="especialidade",
                 message="Especialidade nao encontrada na lista disponivel",
-                details={"suggestions": suggestions, "recovery_action": "collect_especialidade"},
+                details={"suggestions": suggestions, "recovery_action": "collect_especialidade", **clarification},
             )
     else:
         canonical_specialty = payload.query
 
+    def validate(session):
+        validate_search_slot_provenance(settings=settings, tenant_id=tenant_id, call_id=call_id,
+            cpf=payload.cpf, city=payload.city, query=payload.query, catalog=catalog, session=session)
+
+    def execute():
+        return _execute_provider_search(payload, settings, call_id, tenant_id, provider, canonical_specialty)
+
+    def complete(session):
+        clear_recovery_attempts(settings=settings, tenant_id=tenant_id, call_id=call_id,
+            cpf=payload.cpf, city=payload.city, query=payload.query, catalog=catalog, session=session)
+
+    def recover(error, session, discarded):
+        if discarded:
+            error.attempt = 0
+        else:
+            error = _apply_business_recovery(error, settings=settings, tenant_id=tenant_id,
+                                             call_id=call_id, session=session)
+            error.attempt = recovery_attempt(settings=settings, tenant_id=tenant_id, call_id=call_id,
+                                            field=error.field, code=error.code, session=session)
+        # The async caller must not count this error again against a newer turn.
+        error._vapi_recovery_applied = True
+        return error
+
+    if settings.vapi_slot_guard_enabled:
+        signature = json.dumps([normalize_cpf(payload.cpf or ""), normalize_text(payload.city),
+                                normalize_text(canonical_specialty), payload.tipo_atendimento], ensure_ascii=True)
+        result = execute_search(settings=settings, tenant_id=tenant_id, call_id=call_id,
+                                signature=signature, validate=validate, execute=execute,
+                                complete=complete, recover=recover)
+    else:
+        try:
+            result = execute()
+        except BusinessRuleError as exc:
+            raise _apply_business_recovery(exc, settings=settings, tenant_id=tenant_id, call_id=call_id)
+    return result
+
+
+def _execute_provider_search(payload, settings, call_id, tenant_id, provider, canonical_specialty):
     policy_application: ProviderPolicyApplication
     business_override_code: str | None = None
     try:
-        providers = await asyncio.wait_for(
-            asyncio.to_thread(
-                provider.search_providers,
-                tenant_id,
-                call_id,
-                payload.city,
-                canonical_specialty,
-                payload.cpf,
-                payload.tipo_atendimento,
-            ),
-            timeout=min(
-                settings.provider_timeout_seconds,
-                settings.external_api_total_deadline_seconds,
-            ),
-        )
-    except asyncio.TimeoutError as exc:
-        raise TimeoutError("Timeout na busca de rede") from exc
+        providers = provider.search_providers(tenant_id, call_id, payload.city,
+            canonical_specialty, payload.cpf, payload.tipo_atendimento)
     except BusinessRuleError as exc:
-        exc = _apply_business_recovery(
-            exc,
-            settings=settings,
-            tenant_id=tenant_id,
-            call_id=call_id,
-        )
         policy_application = _apply_business_override(
             settings=settings,
             tenant_id=tenant_id,
@@ -184,8 +221,6 @@ async def _search_providers(
         tool_name=TOOL_SEARCH_PROVIDERS,
         final_state=CallFinalState.RESOLVIDA_AUTOMATICO,
     )
-    clear_recovery_attempts(settings=settings, tenant_id=tenant_id, call_id=call_id,
-                            cpf=payload.cpf, city=payload.city, query=payload.query, catalog=catalog)
     response = SearchProvidersResponse(providers=list(providers))
     return response.model_dump(), CallFinalState.RESOLVIDA_AUTOMATICO
 
@@ -221,6 +256,7 @@ def _apply_business_recovery(
     settings: Settings,
     tenant_id: str,
     call_id: str,
+    session=None,
 ) -> BusinessRuleError:
     if error.code == "CIDADE_SEM_COBERTURA":
         return BusinessRuleError(
@@ -237,6 +273,7 @@ def _apply_business_recovery(
             tenant_id=tenant_id,
             call_id=call_id,
             field="cidade",
+            session=session,
         )
         return BusinessRuleError(
             code=error.code,
@@ -252,6 +289,7 @@ def _apply_business_recovery(
             tenant_id=tenant_id,
             call_id=call_id,
             field="especialidade",
+            session=session,
         )
         return BusinessRuleError(
             code=error.code,

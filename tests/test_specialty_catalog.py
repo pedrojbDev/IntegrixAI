@@ -24,6 +24,12 @@ class SpecialtyCatalogTests(unittest.TestCase):
         self.assertEqual("CARDIOLOGIA", catalog.resolve("médico do coração"))
         self.assertEqual("CIRURGIA BUCOMAXILOFACIAL", catalog.resolve("cirurgião bucomaxilofacial"))
 
+    def test_eye_consultation_aliases_do_not_resolve_ambiguous_exam(self):
+        catalog = get_specialty_catalog(Settings(_env_file=None))
+        for query in ('oculista', 'oculistas'):
+            self.assertEqual('OFTALMOLOGIA', catalog.resolve(query))
+        self.assertIsNone(catalog.resolve('exame de vista'))
+
     def test_default_catalog_normalizes_services_and_exams(self) -> None:
         catalog = get_specialty_catalog(Settings(_env_file=None))
         self.assertEqual("LABORATORIO", catalog.resolve("exame de sangue"))

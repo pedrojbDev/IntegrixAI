@@ -10,7 +10,7 @@ DEFAULT_SPECIALTY_ALIASES: dict[str, tuple[str, ...]] = {
     "ORTOPEDIA": ("ortoped", "ortopedista", "medico dos ossos", "medico do joelho"),
     "PEDIATRIA": ("pediatra", "medico de crianca", "medico infantil"),
     "DERMATOLOGIA": ("dermato", "dermatologista", "medico de pele"),
-    "OFTALMOLOGIA": ("oftalmo", "oftalmologista", "medico dos olhos", "medico de vista"),
+    "OFTALMOLOGIA": ("oculista", "oculistas", "oftalmo", "oftalmologista", "medico dos olhos", "medico de vista"),
     "OTORRINOLARINGOLOGIA": (
         "otorrino", "otorrinolaringologista", "medico de ouvido", "medico de nariz e garganta",
     ),
@@ -56,5 +56,5 @@ DEFAULT_SPECIALTY_ALIASES: dict[str, tuple[str, ...]] = {
 
 
 AMBIGUOUS_SPECIALTY_TERMS = {
-    "cirurgiao", "medico da coluna", "medico de circulacao", "neuro", "terapeuta", "vascular",
+    "cirurgiao", "medico da coluna", "medico de circulacao", "neuro", "terapeuta", "vascular", "exame de vista",
 }

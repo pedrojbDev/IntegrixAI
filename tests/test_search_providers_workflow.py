@@ -261,12 +261,13 @@ class SearchProvidersWorkflowTests(unittest.IsolatedAsyncioTestCase):
             message="Não há rede credenciada nessa cidade",
         )
 
+        provider.search_providers.side_effect = business_error
         with patch(
             "app.tenants.pbsaude.workflows.search_providers.get_data_provider",
             return_value=provider,
         ), patch(
             "app.tenants.pbsaude.workflows.search_providers.asyncio.to_thread",
-            new=AsyncMock(side_effect=business_error),
+            new=AsyncMock(side_effect=lambda func, *args: func(*args)),
         ):
             data, final_state = await search_providers(
                 {
@@ -295,12 +296,14 @@ class SearchProvidersWorkflowTests(unittest.IsolatedAsyncioTestCase):
             message="Não há rede credenciada nessa cidade",
         )
 
+        provider = Mock()
+        provider.search_providers.side_effect = business_error
         with patch(
             "app.tenants.pbsaude.workflows.search_providers.get_data_provider",
-            return_value=Mock(),
+            return_value=provider,
         ), patch(
             "app.tenants.pbsaude.workflows.search_providers.asyncio.to_thread",
-            new=AsyncMock(side_effect=business_error),
+            new=AsyncMock(side_effect=lambda func, *args: func(*args)),
         ):
             with self.assertRaises(BusinessRuleError) as exc:
                 await search_providers(
@@ -331,7 +334,7 @@ class SearchProvidersWorkflowTests(unittest.IsolatedAsyncioTestCase):
             return_value=provider,
         ), patch(
             "app.tenants.pbsaude.workflows.search_providers.asyncio.to_thread",
-            new=AsyncMock(side_effect=ServiceUnavailable("API indisponível")),
+            new=AsyncMock(side_effect=lambda func, *args: func(*args)),
         ), patch(
             "app.tenants.pbsaude.workflows.search_providers.apply_provider_policy",
         ) as policy:
@@ -420,3 +423,16 @@ class SearchProvidersWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SearchClarificationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_eye_exam_requests_clarification_without_upstream(self):
+        provider = Mock()
+        with patch('app.tenants.pbsaude.workflows.search_providers.get_data_provider', return_value=provider):
+            with self.assertRaises(BusinessRuleError) as error:
+                await search_providers({'cpf': '12345678901', 'cidade': 'Salvador',
+                    'especialidade': 'exame de vista'}, Settings(_env_file=None), 'call', 'tenant_a')
+        self.assertEqual('collect_especialidade', error.exception.details['recovery_action'])
+        self.assertIn('consulta', error.exception.details['clarification_question'])
+        self.assertIn('exame', error.exception.details['clarification_question'])
+        provider.search_providers.assert_not_called()

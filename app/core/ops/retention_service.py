@@ -11,6 +11,7 @@ from ...models.call_event import CallEvent
 from ...models.provider_event_receipt import ProviderEventReceipt
 from ...models.vapi_call_cost import VapiCallCost
 from ...models.vapi_call_slot_state import VapiCallSlotState
+from ...models.vapi_search_execution import VapiSearchExecution
 from ...models.vapi_webhook_receipt import VapiWebhookReceipt
 
 
@@ -27,6 +28,7 @@ def prune_operational_data(
             "call_events_deleted": 0,
             "vapi_call_costs_deleted": 0,
             "vapi_call_slot_states_deleted": 0,
+            "vapi_search_executions_deleted": 0,
             "vapi_webhook_receipts_deleted": 0,
             "provider_event_receipts_deleted": 0,
         }
@@ -45,6 +47,9 @@ def prune_operational_data(
     slot_state_result = session.execute(
         delete(VapiCallSlotState).where(VapiCallSlotState.expires_at < reference_time)
     )
+    search_result = session.execute(
+        delete(VapiSearchExecution).where(VapiSearchExecution.expires_at < reference_time)
+    )
     receipt_result = session.execute(
         delete(ProviderEventReceipt).where(ProviderEventReceipt.received_at < provider_receipts_cutoff)
     )
@@ -61,6 +66,7 @@ def prune_operational_data(
         "call_events_deleted": call_events_result.rowcount or 0,
         "vapi_call_costs_deleted": vapi_cost_result.rowcount or 0,
         "vapi_call_slot_states_deleted": slot_state_result.rowcount or 0,
+        "vapi_search_executions_deleted": search_result.rowcount or 0,
         "vapi_webhook_receipts_deleted": webhook_receipt_result.rowcount or 0,
         "provider_event_receipts_deleted": receipt_result.rowcount or 0,
     }
