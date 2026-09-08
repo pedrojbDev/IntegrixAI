@@ -64,9 +64,9 @@ class ConversationFlowTests(unittest.IsolatedAsyncioTestCase):
         with self.sessions() as session:
             return session.get(VapiCallSlotState, {'tenant_id':tenant,'call_id':'same-call'})
 
-    def validate(self, city='Salvador', query='Cardiologia', tenant='tenant_a'):
+    def validate(self, city='Salvador', query='Cardiologia', tenant='tenant_a', cpf=CPF):
         validate_search_slot_provenance(settings=self.settings, tenant_id=tenant, call_id='same-call',
-            cpf=CPF, city=city, query=query, catalog=get_specialty_catalog(self.settings))
+            cpf=cpf, city=city, query=query, catalog=get_specialty_catalog(self.settings))
 
     def tool(self, id='tc1', city='Salvador', query='Cardiologia'):
         return {'id':id,'function':{'name':'search_providers','arguments':{'cpf':CPF,'city':city,'query':query}}}
@@ -211,7 +211,7 @@ class ConversationFlowTests(unittest.IsolatedAsyncioTestCase):
                 call_id='same-call', field='cpf', code='SLOT_UNCONFIRMED'))
 
     def test_invalid_keypad_correction_invalidates_previous_cpf(self):
-        ms = self.standard() + [{'role': 'user', 'message': "User's Keypad Entry: 123#", 'time': self.base+6000}]
+        ms = self.standard() + [{'role': 'user', 'message': "Corrigindo meu CPF: User's Keypad Entry: 123#", 'time': self.base+6000}]
         self.ingest(ms)
         with self.assertRaises(BusinessRuleError):
             self.validate()
@@ -282,3 +282,345 @@ class ConversationFlowTests(unittest.IsolatedAsyncioTestCase):
         result = (await self.dispatch(ms, [self.tool(city='Cidade inventada')]))['results'][0]['result']
         self.assertEqual(0, result['data']['attempt'])
         self.validate()
+
+    def test_incidental_keypad_keeps_cpf_and_preserves_city_speech(self):
+        ms = self.messages(
+            ('bot', 'Digite o CPF no teclado.'),
+            ('user', f"User's Keypad Entry: {CPF}#"),
+            ('bot', 'Pode me falar a cidade para atendimento?'),
+            ('user', "User's Keypad Entry: 7# moro em Salvador, Bahia."),
+            ('bot', 'Qual especialidade ou tipo de exame você procura?'),
+            ('user', 'Cardiologista'),
+        )
+        self.ingest(ms)
+        self.validate()
+
+    def test_explicit_cpf_correction_blocks_old_cpf_until_replacement_is_valid(self):
+        replacement = '98765432109'
+        ms = self.standard() + [
+            {'role': 'user', 'message': 'Preciso corrigir meu CPF.', 'time': self.base + 6000},
+            {'role': 'bot', 'message': 'Digite o CPF no teclado.', 'time': self.base + 7000},
+        ]
+        self.ingest(ms)
+        with self.assertRaises(BusinessRuleError):
+            self.validate()
+        ms.append({'role': 'user', 'message': f"User's Keypad Entry: {replacement}#", 'time': self.base + 8000})
+        self.ingest(ms, rev=2)
+        self.validate(cpf=replacement)
+        with self.assertRaises(BusinessRuleError):
+            self.validate()
+
+    def test_confirmation_for_known_city_cannot_authorize_it_as_specialty(self):
+        ms = self.messages(
+            ('bot', 'Digite o CPF no teclado.'),
+            ('user', f"User's Keypad Entry: {CPF}#"),
+            ('bot', 'Pode me falar a cidade para atendimento?'),
+            ('user', 'Salvador, Bahia.'),
+            ('bot', 'Qual especialidade ou tipo de exame você procura?'),
+            ('bot', 'Você quis dizer Salvador, certo?'),
+            ('user', 'Sim'),
+            ('user', 'Cardiologista'),
+        )
+        self.ingest(ms)
+        self.validate()
+        with self.assertRaises(BusinessRuleError):
+            self.validate(query='Salvador')
+
+    def test_cpf_error_statement_blocks_the_previous_cpf(self):
+        ms = self.standard() + [
+            {'role': 'user', 'message': 'Meu CPF está errado, digitei errado.', 'time': self.base + 6000},
+        ]
+        self.ingest(ms)
+        with self.assertRaises(BusinessRuleError):
+            self.validate()
+
+    def test_cpf_replacement_statement_blocks_the_previous_cpf(self):
+        ms = self.standard() + [
+            {'role': 'user', 'message': 'O CPF correto é outro.', 'time': self.base + 6000},
+        ]
+        self.ingest(ms)
+        with self.assertRaises(BusinessRuleError):
+            self.validate()
+
+    def test_negated_cpf_change_keeps_the_confirmed_cpf(self):
+        ms = self.standard() + [
+            {'role': 'user', 'message': 'Não quero mudar meu CPF.', 'time': self.base + 6000},
+        ]
+        self.ingest(ms)
+        self.validate()
+
+    def test_later_hearing_question_does_not_consume_city_readback_confirmation(self):
+        ms = self.messages(
+            ('bot', 'Digite o CPF no teclado.'),
+            ('user', f"User's Keypad Entry: {CPF}#"),
+            ('bot', 'Pode me falar a cidade para atendimento?'),
+            ('user', 'Feira de Santana'),
+            ('bot', 'Você quis dizer Feira, certo? Está me ouvindo?'),
+            ('user', 'Sim'),
+            ('bot', 'Qual especialidade ou tipo de exame você procura?'),
+            ('user', 'Cardiologista'),
+        )
+        self.ingest(ms)
+        self.validate(city='Feira de Santana')
+
+    def test_keypad_turn_with_cpf_mention_keeps_city_and_specialty_speech(self):
+        ms = self.messages(
+            ('bot', 'Digite o CPF no teclado.'),
+            ('user', f"User's Keypad Entry: {CPF}# Esse é meu CPF, moro em Salvador e preciso de cardiologista."),
+        )
+        self.ingest(ms)
+        self.validate()
+
+    def extended(self, *utterances):
+        messages = self.standard()
+        messages.extend({'role': role, 'message': text, 'time': self.base + (6+i)*1000}
+                        for i, (role, text) in enumerate(utterances))
+        return messages
+
+    def test_corrected_city_readback_can_replace_misheard_value(self):
+        ms = self.standard()
+        ms[3]['message'] = 'Tamafari'
+        ms[4:4] = [{'role': 'bot', 'message': 'A cidade é Camaçari, certo?', 'time': self.base+3100},
+                   {'role': 'user', 'message': 'Sim', 'time': self.base+3200}]
+        self.ingest(ms)
+        self.validate(city='Camaçari')
+        with self.assertRaises(BusinessRuleError): self.validate(city='Tamafari')
+
+    def test_negative_city_confirmation_revokes_only_city(self):
+        self.ingest(self.extended(('bot', 'A cidade é Salvador, certo?'), ('user', 'Não')))
+        state = self.state()
+        self.assertFalse(state.city_term_hmacs)
+        self.assertTrue(state.specialty_term_hmacs)
+        self.assertIsNotNone(state.cpf_hmac)
+        self.assertEqual(1, state.conversation_meta['failures']['cidade'])
+
+    def test_negated_specialty_replacement_removes_old_request(self):
+        self.ingest(self.extended(('user', 'Não quero cardiologista, quero urologista')))
+        self.validate(query='Urologia')
+        with self.assertRaises(BusinessRuleError): self.validate(query='Cardiologia')
+
+    def test_trailing_courtesy_preserves_city_confirmation(self):
+        ms = self.standard()
+        ms[3]['message'] = 'Tamafari'
+        ms[4:4] = [{'role': 'bot', 'message': 'A cidade é Camaçari, certo? Por favor.', 'time': self.base+3100},
+                   {'role': 'user', 'message': 'Sim', 'time': self.base+3200}]
+        self.ingest(ms)
+        self.validate(city='Camaçari')
+
+    def test_real_hearing_question_prevents_corrected_city_assent(self):
+        self.ingest(self.extended(('bot', 'A cidade é Camaçari, certo? Está me ouvindo?'), ('user', 'Sim')))
+        self.validate()
+        with self.assertRaises(BusinessRuleError): self.validate(city='Camaçari')
+
+    def test_removal_preserves_other_requests_and_their_order(self):
+        ms = self.extended(('user', 'Quero ginecologista e oftalmologista'),
+                           ('user', 'Retire cardiologista'))
+        self.ingest(ms)
+        for query in ['Ginecologia', 'Oftalmologia']: self.validate(query=query)
+        with self.assertRaises(BusinessRuleError): self.validate(query='Cardiologia')
+        requests = self.state().conversation_meta['active_requests']
+        self.assertEqual([keyed_hmac(self.settings.vapi_slot_state_hmac_secret, term)
+                          for term in ['ginecologia', 'oftalmologia']],
+                         [request['canonical'] for request in requests])
+
+    def test_ambiguous_multi_request_negation_suspends_all_requests(self):
+        self.ingest(self.extended(('user', 'Quero ginecologista e oftalmologista'),
+                                 ('user', 'Não quero esse')))
+        self.assertFalse(self.state().specialty_term_hmacs)
+        self.assertEqual('especialidade', self.state().phase)
+        self.assertIsNotNone(self.state().cpf_hmac)
+        self.assertTrue(self.state().city_term_hmacs)
+
+    def test_negative_readback_removes_only_the_named_specialty(self):
+        self.ingest(self.extended(('user', 'Quero ginecologista e oftalmologista'),
+                                 ('bot', 'Você quer cardiologista, certo?'), ('user', 'Não')))
+        for query in ['Ginecologia', 'Oftalmologia']: self.validate(query=query)
+        with self.assertRaises(BusinessRuleError): self.validate(query='Cardiologia')
+
+    def test_refresh_generation_tracks_explicit_user_turn_and_is_replay_stable(self):
+        self.ingest(self.standard())
+        self.assertIsNone(self.state().conversation_meta.get('refresh_turn'))
+        ms = self.extended(('user', 'Consulte novamente'))
+        self.ingest(ms, rev=2)
+        first = self.state().conversation_meta['refresh_turn']
+        self.assertEqual(self.state().conversation_meta['last_user'], first)
+        self.assertEqual(2, self.state().conversation_meta['schema_version'])
+        self.validate()
+        self.ingest(ms, rev=3)
+        self.assertEqual(first, self.state().conversation_meta['refresh_turn'])
+        ms.append({'role': 'user', 'message': 'Cardiologista', 'time': self.base+7000})
+        self.ingest(ms, rev=4)
+        self.assertEqual(first, self.state().conversation_meta['refresh_turn'])
+        for index, text in enumerate(['Atualize a busca', 'Pesquise de novo'], 8):
+            ms.append({'role': 'user', 'message': text, 'time': self.base+index*1000})
+            self.ingest(ms, rev=index)
+            new = self.state().conversation_meta['refresh_turn']
+            self.assertNotEqual(first, new)
+            first = new
+
+    def test_negated_refresh_does_not_request_new_search(self):
+        self.ingest(self.extended(('user', 'Não consulte novamente')))
+        self.assertIsNone(self.state().conversation_meta.get('refresh_turn'))
+        self.validate()
+
+    def test_negative_hearing_answer_does_not_revoke_specialty(self):
+        self.ingest(self.extended(('bot', 'Está me ouvindo?'), ('user', 'Não')))
+        self.validate()
+
+    def test_unknown_specialty_corrected_by_readback_replaces_prior_value(self):
+        ms = self.standard()
+        ms[5]['message'] = 'Uroista'
+        ms.extend([{'role': 'bot', 'message': 'Você quis dizer urologista, certo?', 'time': self.base+6000},
+                   {'role': 'user', 'message': 'Sim', 'time': self.base+7000}])
+        self.ingest(ms)
+        self.validate(query='Urologia')
+        with self.assertRaises(BusinessRuleError): self.validate(query='Uroista')
+
+    def test_schema_one_ledger_preserves_evidence_on_incremental_update(self):
+        self.ingest(self.standard())
+        with self.sessions() as session:
+            state = session.get(VapiCallSlotState, {'tenant_id': 'tenant_a', 'call_id': 'same-call'})
+            meta = copy.deepcopy(state.conversation_meta)
+            meta.pop('schema_version', None)
+            meta.pop('active_requests', None)
+            for entry in meta['turns'].values():
+                entry.pop('requests', None)
+                entry.pop('removed_requests', None)
+            state.conversation_meta = meta
+            session.commit()
+        self.ingest([{'role': 'user', 'message': 'Consulte novamente', 'time': self.base+6000}], rev=2)
+        self.validate()
+
+    def test_multi_request_negative_confirmation_suspends_ambiguous_set_once(self):
+        ms = self.extended(('user', 'Quero ginecologista e oftalmologista'),
+                           ('bot', 'Você quer cardiologista ou oftalmologista, certo?'), ('user', 'Não'))
+        self.ingest(ms)
+        self.assertFalse(self.state().specialty_term_hmacs)
+        self.ingest(ms, rev=2)
+        self.assertEqual(1, self.state().conversation_meta['failures']['especialidade'])
+
+    def test_city_confirmation_does_not_accept_unspoken_cross_slot_terms(self):
+        self.ingest(self.extended(('bot', 'A cidade é Camaçari, certo?'), ('user', 'Sim')))
+        self.validate(city='Camaçari')
+        with self.assertRaises(BusinessRuleError): self.validate(city='certo')
+        with self.assertRaises(BusinessRuleError): self.validate(city='Camaçari', query='Camaçari')
+
+    def test_explicit_swap_keeps_unrelated_active_request(self):
+        self.ingest(self.extended(('user', 'Quero ginecologista'),
+                                 ('user', 'Troque cardiologista por urologista')))
+        self.validate(query='Ginecologia')
+        self.validate(query='Urologia')
+        with self.assertRaises(BusinessRuleError): self.validate(query='Cardiologia')
+
+    def test_negative_identity_then_explicit_replacement_removes_old(self):
+        self.ingest(self.extended(('user', 'Não é cardiologista, quero urologista')))
+        self.validate(query='Urologia')
+        with self.assertRaises(BusinessRuleError): self.validate(query='Cardiologia')
+
+    def test_negative_named_city_revokes_city_and_preserves_requests(self):
+        self.ingest(self.extended(('user', 'Não é Salvador')))
+        self.assertFalse(self.state().city_term_hmacs)
+        self.assertTrue(self.state().specialty_term_hmacs)
+        self.assertIsNotNone(self.state().cpf_hmac)
+        self.assertEqual('cidade', self.state().phase)
+
+    def test_mixed_city_and_specialty_negation_requires_city_clarification(self):
+        self.ingest(self.extended(('user',
+            'Não quero cardiologista em Salvador, quero urologista em Camaçari')))
+        with self.assertRaises(BusinessRuleError) as error:
+            self.validate(query='Urologia')
+        self.assertEqual('cidade', error.exception.field)
+        self.assertFalse(self.state().city_term_hmacs)
+        self.assertIsNotNone(self.state().cpf_hmac)
+        # Clarifying the location must retain the independently requested swap.
+        messages = self.extended(('user',
+            'Não quero cardiologista em Salvador, quero urologista em Camaçari'),
+            ('bot', 'Qual cidade?'), ('user', 'Camaçari'))
+        self.ingest(messages, rev=2)
+        self.validate(city='Camaçari', query='Urologia')
+        with self.assertRaises(BusinessRuleError):
+            self.validate(city='Camaçari', query='Cardiologia')
+
+    def test_specialty_negation_does_not_negate_later_positive_city(self):
+        self.ingest(self.extended(('user',
+            'Não quero cardiologista, quero urologista em Camaçari')))
+        self.validate(city='Camaçari', query='Urologia')
+        with self.assertRaises(BusinessRuleError):
+            self.validate(query='Urologia')
+
+    def test_ambiguous_negative_city_answer_revokes_pending_city_only(self):
+        self.ingest(self.extended(('bot', 'Qual cidade?'), ('user', 'Não é essa')))
+        self.assertFalse(self.state().city_term_hmacs)
+        self.assertTrue(self.state().specialty_term_hmacs)
+
+    def test_explicit_city_confirmation_without_certo_accepts_corrected_value(self):
+        self.ingest(self.extended(('bot', 'Só para confirmar: a cidade é Camaçari?'), ('user', 'Sim')))
+        self.validate(city='Camaçari')
+        with self.assertRaises(BusinessRuleError): self.validate(city='Salvador')
+
+    def test_open_city_confirmation_question_does_not_invent_city(self):
+        self.ingest(self.extended(('bot', 'Qual cidade você quer confirmar?'), ('user', 'Sim')))
+        self.validate()
+        with self.assertRaises(BusinessRuleError): self.validate(city='você quer confirmar')
+
+    async def test_new_tool_ids_reuse_canonical_query_and_ignore_legacy_neighborhood(self):
+        first = (await self.dispatch(self.standard(), [self.tool()]))['results'][0]['result']
+        tool = self.tool(id='new-tool', query='cardiologista')
+        tool['function']['arguments']['neighborhood'] = 'Centro'
+        second = (await self.dispatch(self.standard(), [tool]))['results'][0]['result']
+        self.assertTrue(first['ok'])
+        self.assertTrue(second['ok'])
+        self.assertTrue(second['data']['reused_result'])
+        self.provider.search_providers.assert_called_once()
+
+    async def test_cached_result_does_not_bypass_negative_confirmation(self):
+        await self.dispatch(self.standard(), [self.tool()])
+        messages = self.extended(('bot', 'A cidade é Salvador, certo?'), ('user', 'Não'))
+        result = (await self.dispatch(messages, [self.tool(id='invalidated')], rev=2))['results'][0]['result']
+        self.assertFalse(result['ok'])
+        self.assertEqual('SLOT_UNCONFIRMED', result['data']['upstream_code'])
+        self.provider.search_providers.assert_called_once()
+
+    async def test_explicit_refresh_runs_once_but_repeated_request_reuses(self):
+        await self.dispatch(self.standard(), [self.tool()])
+        messages = self.extended(('user', 'Consulte novamente'))
+        refreshed = (await self.dispatch(messages, [self.tool(id='refresh')], rev=2))['results'][0]['result']
+        repeated = (await self.dispatch(messages, [self.tool(id='refresh-repeat')], rev=3))['results'][0]['result']
+        self.assertTrue(refreshed['ok'])
+        self.assertTrue(repeated['data']['reused_result'])
+        self.assertEqual(2, self.provider.search_providers.call_count)
+
+    async def test_service_type_change_is_a_new_query(self):
+        await self.dispatch(self.standard(), [self.tool()])
+        tool = self.tool(id='changed-type')
+        tool['function']['arguments']['tipo_atendimento'] = 'online'
+        result = (await self.dispatch(self.standard(), [tool]))['results'][0]['result']
+        self.assertTrue(result['ok'])
+        self.assertEqual(2, self.provider.search_providers.call_count)
+
+    async def test_late_business_error_does_not_reopen_terminal_state_after_completion(self):
+        from app.tenants.pbsaude.search_execution import execute_search
+        from app.tenants.pbsaude.workflows.search_providers import search_providers
+        self.ingest(self.standard())
+        self.provider.search_providers.side_effect = BusinessRuleError(
+            code='CIDADE_INVALIDA', field='cidade', message='Cidade invalida')
+        def finish_then_close(**kwargs):
+            try:
+                return execute_search(**kwargs)
+            except BusinessRuleError:
+                # Deterministically interleave a terminal event after the worker's
+                # completion transaction but before its async caller receives it.
+                with self.sessions() as session:
+                    state = session.get(VapiCallSlotState, ('tenant_a', 'same-call'))
+                    state.conversation_meta = {**state.conversation_meta, 'terminal': True,
+                                               'recovery_attempts': {}, 'recovery_field': None}
+                    state.phase = 'closed'
+                    session.commit()
+                raise
+        with patch('app.tenants.pbsaude.workflows.search_providers.execute_search', side_effect=finish_then_close):
+            with self.assertRaises(BusinessRuleError):
+                await search_providers(self.tool()['function']['arguments'], self.settings, 'same-call', 'tenant_a')
+        state = self.state()
+        self.assertEqual('closed', state.phase)
+        self.assertFalse(state.conversation_meta['recovery_attempts'])
+        self.assertIsNone(state.conversation_meta['recovery_field'])

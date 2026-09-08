@@ -191,10 +191,10 @@ jobs:
           DATABASE_URL=postgresql+psycopg://integrix:integrix-ci@localhost:5432/integrix_fresh alembic upgrade head
           DATABASE_URL=postgresql+psycopg://integrix:integrix-ci@localhost:5432/integrix_fresh alembic current
           DATABASE_URL=postgresql+psycopg://integrix:integrix-ci@localhost:5432/integrix_fresh alembic check
-      - name: Concurrent Vapi conversation ingestion
+      - name: Concurrent Vapi conversation ingestion and provider searches
         env:
           VAPI_TEST_DATABASE_URL: postgresql+psycopg://integrix:integrix-ci@localhost:5432/integrix_fresh
-        run: python -m unittest discover -v -s tests -p 'test_vapi_conversation_postgres.py'
+        run: python -m unittest discover -v -s tests -p 'test_vapi_*postgres.py'
 
   docker:
     name: Docker and deploy configuration

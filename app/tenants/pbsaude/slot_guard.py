@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from contextlib import nullcontext
+from sqlalchemy.orm import Session
 
 from ...config import Settings
 from ...db import SessionLocal
@@ -19,6 +21,7 @@ def validate_search_slot_provenance(
     city: str,
     query: str,
     catalog: SpecialtyCatalog,
+    session: Session | None = None,
 ) -> None:
     """Reject model-invented inputs before the customer API is called."""
     if not settings.vapi_slot_guard_enabled:
@@ -27,8 +30,7 @@ def validate_search_slot_provenance(
     if not secret:
         raise _unconfirmed("cpf")
 
-    session = SessionLocal()
-    try:
+    with (SessionLocal() if session is None else nullcontext(session)) as session:
         lock_call(session, tenant_id, call_id)
         state = session.get(VapiCallSlotState, {"tenant_id": tenant_id, "call_id": call_id})
         if state is None or _is_expired(state.expires_at):
@@ -48,8 +50,6 @@ def validate_search_slot_provenance(
         specialty_hashes = set(state.specialty_term_hmacs or [])
         if not any(keyed_hmac(secret, candidate) in specialty_hashes for candidate in specialty_candidates):
             raise _unconfirmed("especialidade")
-    finally:
-        session.close()
 
 
 def _specialty_candidates(query: str, catalog: SpecialtyCatalog) -> set[str]:
@@ -81,20 +81,20 @@ def reopen_slot_collection(
     tenant_id: str,
     call_id: str,
     field: str,
+    session: Session | None = None,
 ) -> None:
     """Allow the next observed user turn to replace exactly one invalid slot."""
     if not settings.vapi_slot_guard_enabled:
         return
-    session = SessionLocal()
-    try:
+    owns_session = session is None
+    with (SessionLocal() if owns_session else nullcontext(session)) as session:
         lock_call(session, tenant_id, call_id)
         state = session.get(VapiCallSlotState, {"tenant_id": tenant_id, "call_id": call_id})
         if state is None or _is_expired(state.expires_at):
             return
         _reopen(state, field)
-        session.commit()
-    finally:
-        session.close()
+        if owns_session:
+            session.commit()
 
 
 def _reopen(state: VapiCallSlotState, field: str) -> None:
@@ -106,11 +106,12 @@ def _reopen(state: VapiCallSlotState, field: str) -> None:
 
 
 def recovery_attempt(*, settings: Settings, tenant_id: str, call_id: str,
-                     field: str | None, code: str) -> int:
+                     field: str | None, code: str, session: Session | None = None) -> int:
     """Count failed user evidence once, independent of model retries or batches."""
     if not field:
         return 0
-    with SessionLocal() as session:
+    owns_session = session is None
+    with (SessionLocal() if owns_session else nullcontext(session)) as session:
         lock_call(session, tenant_id, call_id)
         state = session.get(VapiCallSlotState, {"tenant_id": tenant_id, "call_id": call_id})
         if state is None or _is_expired(state.expires_at):
@@ -130,17 +131,20 @@ def recovery_attempt(*, settings: Settings, tenant_id: str, call_id: str,
         meta["recovery_field"] = field
         state.conversation_meta = meta
         state.phase = field
-        session.commit()
+        if owns_session:
+            session.commit()
         return int(record.get("count", 0))
 
 
 def clear_recovery_attempts(*, settings: Settings, tenant_id: str, call_id: str,
-                            cpf: str, city: str, query: str, catalog: SpecialtyCatalog) -> None:
+                            cpf: str, city: str, query: str, catalog: SpecialtyCatalog,
+                            session: Session | None = None) -> None:
     """A successful search ends recovery for the evidence it actually used."""
     if not settings.vapi_slot_guard_enabled:
         return
     secret = settings.vapi_slot_state_hmac_secret
-    with SessionLocal() as session:
+    owns_session = session is None
+    with (SessionLocal() if owns_session else nullcontext(session)) as session:
         lock_call(session, tenant_id, call_id)
         state = session.get(VapiCallSlotState, {"tenant_id": tenant_id, "call_id": call_id})
         if state is None or _is_expired(state.expires_at):
@@ -155,7 +159,8 @@ def clear_recovery_attempts(*, settings: Settings, tenant_id: str, call_id: str,
         meta.pop("recovery_attempts", None)
         meta.pop("recovery_field", None)
         state.conversation_meta = meta
-        session.commit()
+        if owns_session:
+            session.commit()
 
 
 def _is_expired(value: datetime) -> bool:

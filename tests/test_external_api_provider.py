@@ -92,6 +92,46 @@ class ExternalApiProviderTests(unittest.TestCase):
         self.assertEqual(2, len(fake_client.calls))
         self.assertEqual("Clínica Alpha", providers[0].name)
 
+    def test_retries_http_500_then_returns_success(self) -> None:
+        fake_client = FakeClient([httpx.Response(500), success_response()])
+        provider = ExternalApiDataProvider(settings())
+
+        with patch(
+            "app.tenants.pbsaude.integration.http_client.get_external_api_client",
+            return_value=fake_client,
+        ):
+            providers = provider.search_providers(
+                "tenant_a",
+                "call_123",
+                "feira de santana",
+                "cardiologia",
+                "03457351538",
+                None,
+            )
+
+        self.assertEqual(2, len(fake_client.calls))
+        self.assertEqual("Clínica Alpha", providers[0].name)
+
+    def test_retries_malformed_json_success_response_then_returns_success(self) -> None:
+        fake_client = FakeClient([httpx.Response(200, content=b"not-json"), success_response()])
+        provider = ExternalApiDataProvider(settings())
+
+        with patch(
+            "app.tenants.pbsaude.integration.http_client.get_external_api_client",
+            return_value=fake_client,
+        ):
+            providers = provider.search_providers(
+                "tenant_a",
+                "call_123",
+                "feira de santana",
+                "cardiologia",
+                "03457351538",
+                None,
+            )
+
+        self.assertEqual(2, len(fake_client.calls))
+        self.assertEqual("Clínica Alpha", providers[0].name)
+
     def test_sends_search_payload_without_neighborhood(self) -> None:
         fake_client = FakeClient([success_response()])
         provider = ExternalApiDataProvider(settings())
@@ -215,6 +255,35 @@ class ExternalApiProviderTests(unittest.TestCase):
             )
 
         self.assertLessEqual(fake_client.calls[0]["kwargs"]["timeout"], 0.5)
+
+    def test_retry_attempt_uses_only_remaining_voice_deadline(self) -> None:
+        fake_client = FakeClient([httpx.Response(500), success_response()])
+        provider = ExternalApiDataProvider(
+            settings(external_api_timeout_seconds=3.0, external_api_total_deadline_seconds=4.0)
+        )
+
+        with (
+            patch(
+                "app.tenants.pbsaude.integration.http_client.get_external_api_client",
+                return_value=fake_client,
+            ),
+            patch(
+                "app.tenants.pbsaude.integration.http_client.time.monotonic",
+                side_effect=[100.0, 100.0, 100.0, 100.0, 103.75],
+            ),
+        ):
+            provider.search_providers(
+                "tenant_a",
+                "call_123",
+                "feira de santana",
+                "cardiologia",
+                "03457351538",
+                None,
+            )
+
+        self.assertEqual(2, len(fake_client.calls))
+        self.assertEqual(3.0, fake_client.calls[0]["kwargs"]["timeout"])
+        self.assertEqual(0.25, fake_client.calls[1]["kwargs"]["timeout"])
 
     def test_logs_attempt_without_full_cpf(self) -> None:
         fake_client = FakeClient([success_response()])

@@ -86,23 +86,6 @@ class SpecialtyCatalog:
             if options:
                 return _pick_best_option(options, prefer_pediatric)
 
-        for candidate in candidate_keys:
-            starts_with = [
-                option
-                for key, values in self.by_alias.items()
-                if key.startswith(candidate)
-                for option in values
-            ]
-            if starts_with:
-                return _pick_best_option(starts_with, prefer_pediatric)
-
-        fuzzy_keys = get_close_matches(
-            candidate_keys[0], self.by_alias.keys(), n=1, cutoff=0.86
-        )
-        if fuzzy_keys:
-            options = self.by_alias[fuzzy_keys[0]]
-            return _pick_best_option(options, prefer_pediatric)
-
         if self.passthrough_unknown:
             return " ".join(raw_value.strip().split()) or None
         return None
