@@ -169,7 +169,7 @@ async def recent_audit_events(
 
 @router.get("/audit/summary")
 async def audit_summary(
-    since_minutes: int | None = Query(default=None, ge=1, le=10080),
+    since_minutes: int | None = Query(default=None, ge=1, le=129600),
     tenant_id: str | None = Query(default=None),
     assistant_id: str | None = Query(default=None),
     settings: Settings = Depends(get_settings),
@@ -405,7 +405,7 @@ async def download_operational_report(
 
 @router.get("/dashboard/overview")
 async def dashboard_overview(
-    window: str = Query(default="24h", pattern="^(15m|1h|24h|7d)$"),
+    window: str = Query(default="24h", pattern="^(15m|1h|24h|7d|30d|60d|90d)$"),
     tenant_id: str | None = Query(default=None),
     assistant_id: str | None = Query(default=None),
     settings: Settings = Depends(get_settings),
@@ -422,7 +422,7 @@ async def dashboard_overview(
 
 @router.get("/dashboard/costs")
 async def dashboard_costs(
-    window: str = Query(default="24h", pattern="^(15m|1h|24h|7d)$"),
+    window: str = Query(default="24h", pattern="^(15m|1h|24h|7d|30d|60d|90d)$"),
     tenant_id: str | None = Query(default=None),
     assistant_id: str | None = Query(default=None),
     settings: Settings = Depends(get_settings),
@@ -459,7 +459,7 @@ async def dashboard_costs(
 
 @router.get("/dashboard/tools")
 async def dashboard_tools(
-    window: str = Query(default="24h", pattern="^(15m|1h|24h|7d)$"),
+    window: str = Query(default="24h", pattern="^(15m|1h|24h|7d|30d|60d|90d)$"),
     tenant_id: str | None = Query(default=None),
     assistant_id: str | None = Query(default=None),
     settings: Settings = Depends(get_settings),
@@ -476,7 +476,7 @@ async def dashboard_tools(
 
 @router.get("/dashboard/health")
 async def dashboard_health(
-    window: str = Query(default="24h", pattern="^(15m|1h|24h|7d)$"),
+    window: str = Query(default="24h", pattern="^(15m|1h|24h|7d|30d|60d|90d)$"),
     tenant_id: str | None = Query(default=None),
     assistant_id: str | None = Query(default=None),
     settings: Settings = Depends(get_settings),
@@ -493,7 +493,7 @@ async def dashboard_health(
 
 @router.get("/dashboard/resilience")
 async def dashboard_resilience(
-    window: str = Query(default="24h", pattern="^(15m|1h|24h|7d)$"),
+    window: str = Query(default="24h", pattern="^(15m|1h|24h|7d|30d|60d|90d)$"),
     tenant_id: str | None = Query(default=None),
     assistant_id: str | None = Query(default=None),
     settings: Settings = Depends(get_settings),

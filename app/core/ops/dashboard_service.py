@@ -19,6 +19,7 @@ WINDOW_TO_MINUTES = {
     "7d": 10080,
     "15d": 21600,
     "30d": 43200,
+    "60d": 86400,
     "90d": 129600,
 }
 WINDOW_BUCKET_MINUTES = {
@@ -28,6 +29,7 @@ WINDOW_BUCKET_MINUTES = {
     "7d": 360,
     "15d": 1440,
     "30d": 1440,
+    "60d": 1440,
     "90d": 1440,
 }
 SYNC_FRESH_SECONDS = 15 * 60

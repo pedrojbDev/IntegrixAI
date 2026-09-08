@@ -37,7 +37,7 @@ export const toolPerformanceSchema = z
 
 export const healthSchema = z
   .object({
-    window: z.enum(["15m", "1h", "24h", "7d"]).catch("24h"),
+    window: z.enum(["15m", "1h", "24h", "7d", "30d", "60d", "90d"]).catch("24h"),
     health_state: z.string().catch("no_data"),
     sync: z
       .object({
@@ -102,7 +102,7 @@ export const healthSchema = z
 
 export const overviewSchema = z
   .object({
-    window: z.enum(["15m", "1h", "24h", "7d"]).catch("24h"),
+    window: z.enum(["15m", "1h", "24h", "7d", "30d", "60d", "90d"]).catch("24h"),
     since: nullableString,
     kpis: z
       .object({

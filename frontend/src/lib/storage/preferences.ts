@@ -7,7 +7,7 @@ const STORAGE_KEY = "ops-dashboard:prefs:v1"
 const preferencesSchema = z.object({
   filters: z
     .object({
-      window: z.enum(["15m", "1h", "24h", "7d"]).catch("24h"),
+      window: z.enum(["15m", "1h", "24h", "7d", "30d", "60d", "90d"]).catch("24h"),
       tenantId: z.string().optional(),
       assistantId: z.string().optional(),
     })

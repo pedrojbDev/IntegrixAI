@@ -5,6 +5,9 @@ export const WINDOW_OPTIONS: Array<{ value: WindowKey; label: string }> = [
   { value: "1h", label: "1 hora" },
   { value: "24h", label: "24 horas" },
   { value: "7d", label: "7 dias" },
+  { value: "30d", label: "30 dias" },
+  { value: "60d", label: "60 dias" },
+  { value: "90d", label: "90 dias" },
 ]
 
 export const WINDOW_TO_MINUTES: Record<WindowKey, number> = {
@@ -12,6 +15,9 @@ export const WINDOW_TO_MINUTES: Record<WindowKey, number> = {
   "1h": 60,
   "24h": 1440,
   "7d": 10080,
+  "30d": 43200,
+  "60d": 86400,
+  "90d": 129600,
 }
 
 function clean(value: string | undefined) {

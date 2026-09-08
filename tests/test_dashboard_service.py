@@ -154,6 +154,50 @@ class DashboardServiceTests(unittest.TestCase):
         self.assertEqual("search_providers", resilience["top_failure_tools"][0]["tool_name"])
         self.assertEqual("search_providers", resilience["business_error_tools"][0]["tool_name"])
 
+    def test_sixty_day_cost_window_excludes_older_calls(self) -> None:
+        session_local = self._session_local()
+        now = datetime.now(timezone.utc)
+
+        with session_local() as session:
+            session.add_all(
+                [
+                    VapiCallCost(
+                        call_id="inside_60_days",
+                        tenant_id="tenant_a",
+                        started_at=now - timedelta(days=45),
+                        assistant_id="asst_1",
+                        status="ended",
+                        cost_total_usd=1.0,
+                        cost_breakdown_json={"total": 1.0},
+                        synced_at=now,
+                    ),
+                    VapiCallCost(
+                        call_id="outside_60_days",
+                        tenant_id="tenant_a",
+                        started_at=now - timedelta(days=61),
+                        assistant_id="asst_1",
+                        status="ended",
+                        cost_total_usd=2.0,
+                        cost_breakdown_json={"total": 2.0},
+                        synced_at=now,
+                    ),
+                ]
+            )
+            session.commit()
+
+            try:
+                costs = get_costs(
+                    session,
+                    window="60d",
+                    tenant_id="tenant_a",
+                    assistant_id="asst_1",
+                )
+            except ValueError as exc:
+                self.fail(f"60d deve ser uma janela valida: {exc}")
+
+        self.assertEqual(1, costs["summary"]["vapi_calls"])
+        self.assertEqual(1.0, costs["summary"]["total_cost_usd"])
+
     def test_v4_counts_normal_ends_as_automatic_resolutions(self) -> None:
         session_local = self._session_local()
         now = datetime.now(timezone.utc)

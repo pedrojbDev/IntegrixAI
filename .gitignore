@@ -35,6 +35,7 @@ htmlcov/
 # Tooling
 .tox/
 .nox/
+graphify-out/
 
 # Logs / runtime artifacts
 *.log

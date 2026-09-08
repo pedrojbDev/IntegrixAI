@@ -1,4 +1,4 @@
-export type WindowKey = "15m" | "1h" | "24h" | "7d"
+export type WindowKey = "15m" | "1h" | "24h" | "7d" | "30d" | "60d" | "90d"
 export type ReportPeriodDays = 7 | 15 | 30 | 90
 export type HealthState = "stable" | "warning" | "critical" | "no_data" | string
 export type OpsRole = "platform_admin" | "tenant_user"

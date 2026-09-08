@@ -267,6 +267,48 @@ class DashboardRouteTests(unittest.TestCase):
             allowed = client.get("/ops/dashboard/overview")
         self.assertEqual(200, allowed.status_code)
 
+    def test_dashboard_endpoints_accept_extended_windows(self) -> None:
+        for endpoint in ("overview", "costs", "tools", "health", "resilience"):
+            route = next(
+                route
+                for route in app.routes
+                if getattr(route, "path", None) == f"/ops/dashboard/{endpoint}"
+            )
+            window_param = next(
+                param for param in route.dependant.query_params if param.name == "window"
+            )
+            for window in ("30d", "60d", "90d"):
+                with self.subTest(endpoint=endpoint, window=window):
+                    value, errors = window_param.validate(
+                        window,
+                        {},
+                        loc=("query", "window"),
+                    )
+
+                    self.assertFalse(errors)
+                    self.assertEqual(window, value)
+
+    def test_audit_summary_accepts_extended_dashboard_windows(self) -> None:
+        route = next(
+            route
+            for route in app.routes
+            if getattr(route, "path", None) == "/ops/audit/summary"
+        )
+        since_minutes_param = next(
+            param for param in route.dependant.query_params if param.name == "since_minutes"
+        )
+
+        for since_minutes in (43200, 86400, 129600):
+            with self.subTest(since_minutes=since_minutes):
+                value, errors = since_minutes_param.validate(
+                    since_minutes,
+                    {},
+                    loc=("query", "since_minutes"),
+                )
+
+                self.assertFalse(errors)
+                self.assertEqual(since_minutes, value)
+
     def test_admin_crud_returns_temporary_password_once(self) -> None:
         client = self._client()
         self._bootstrap(client)
