@@ -9,7 +9,7 @@ import httpx
 from ....config import Settings
 from ....logging import get_logger
 
-TRANSIENT_STATUS_CODES = {502, 503, 504}
+TRANSIENT_STATUS_CODES = {500, 502, 503, 504}
 
 _client: httpx.Client | None = None
 _client_limits: tuple[int, int] | None = None
@@ -116,6 +116,8 @@ def post_json_with_retries(
 
         duration_ms = _elapsed_ms(started_at)
         transient_http = response.status_code in TRANSIENT_STATUS_CODES
+        malformed_json = _is_malformed_json_success_response(response)
+        retryable_response = transient_http or malformed_json
         _log_attempt(
             tenant_id=tenant_id,
             call_id=call_id,
@@ -123,10 +125,16 @@ def post_json_with_retries(
             attempt=attempt,
             attempts_total=attempts_total,
             duration_ms=duration_ms,
-            outcome="transient_http" if transient_http else "response",
+            outcome=(
+                "transient_http"
+                if transient_http
+                else "malformed_json"
+                if malformed_json
+                else "response"
+            ),
             status_code=response.status_code,
         )
-        if transient_http and attempt < attempts_total and _sleep_before_retry(settings, deadline):
+        if retryable_response and attempt < attempts_total and _sleep_before_retry(settings, deadline):
             continue
         return response
 
@@ -147,6 +155,16 @@ def _sleep_before_retry(settings: Settings, deadline: float) -> bool:
     return deadline > time.monotonic()
 
 
+def _is_malformed_json_success_response(response: httpx.Response) -> bool:
+    if not 200 <= response.status_code < 300:
+        return False
+    try:
+        response.json()
+    except ValueError:
+        return True
+    return False
+
+
 def _elapsed_ms(started_at: float) -> float:
     return (time.perf_counter() - started_at) * 1000
 
@@ -163,7 +181,11 @@ def _log_attempt(
     status_code: int | None = None,
     error_type: str | None = None,
 ) -> None:
-    method = log.warning if outcome in {"timeout", "request_error", "transient_http"} else log.info
+    method = (
+        log.warning
+        if outcome in {"timeout", "request_error", "transient_http", "malformed_json"}
+        else log.info
+    )
     method(
         "external_api_provider_search_attempt",
         event_type="external_api_upstream",

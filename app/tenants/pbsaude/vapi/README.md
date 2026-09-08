@@ -75,3 +75,48 @@ Após publicação autorizada, validar por telefone e conferir transcrição/too
 
 Testes determinísticos validam backend e preparação da configuração, não a
 qualidade de reconhecimento de fala ou a aderência probabilística do modelo.
+
+## Coordenação de buscas e correções
+
+A migração `0012_vapi_search_execution` acrescenta o registro temporário de
+execuções. Com o guard habilitado, buscas iguais na mesma chamada reutilizam o
+resultado bem-sucedido, inclusive lista vazia (`data.reused_result=true`). A
+assinatura HMAC considera tenant, chamada, CPF, cidade normalizada,
+especialidade canônica e tipo de atendimento; o bairro legado é ignorado.
+Uma solicitação explícita do paciente para consultar novamente cria uma nova
+geração; repetição da tool ou reentrega do mesmo turno não cria outra busca.
+
+Um advisory lock de sessão PostgreSQL limita a uma busca externa ativa por
+chamada, inclusive entre processos. O worker síncrono mantém esse lock até o
+HTTP terminar, mesmo após timeout/cancelamento do solicitante. A conexão é
+reutilizada em transações curtas de reserva e conclusão, sem transação aberta
+durante o HTTP. Validação, evidência e gravação usam também o lock do estado da
+conversa. Correção ou encerramento anterior à conclusão descarta a resposta.
+Falha ou execução indeterminada após queda do worker exige novos argumentos ou
+refresh explícito; não há retry automático do mesmo pedido.
+
+A retenção segue `VAPI_SLOT_STATE_RETENTION_HOURS` (24 horas por padrão) e a
+rotina de limpeza operacional remove execuções expiradas. As entradas da busca
+são armazenadas somente como HMAC; o resultado contém a rede retornada ao
+paciente, sem transcrição ou CPF. O cache é temporário e não substitui a
+idempotência por `tool_call_id`. SQLite usa lock local apenas para testes e
+desenvolvimento; a garantia entre processos exige PostgreSQL com afinidade de
+sessão (não usar pooling de transação para advisory locks de sessão).
+
+O estado de conversa versão 2 mantém pedidos ordenados, confirmações e negações
+por campo e um marcador de refresh. Confirmação de uma correção vale somente
+para o campo perguntado. Rejeição ambígua suspende a evidência correspondente.
+Um histórico legado sem agrupamento recuperável revoga conservadoramente o
+grupo inteiro quando um pedido desse grupo é negado; um snapshot completo novo
+reconstrói os grupos. `oculista` e `oculistas` resolvem para oftalmologia;
+`exame de vista` retorna `data.clarification_question` para distinguir consulta
+de exame específico.
+
+Validação de concorrência em banco descartável já migrado:
+
+```bash
+VAPI_TEST_DATABASE_URL=postgresql+psycopg://... python -m unittest discover -s tests -p 'test_vapi_*postgres.py'
+```
+
+Inclui processos independentes, queda do worker, pool de uma conexão,
+timeout/cancelamento, isolamento de tenant e invalidação de resultados.

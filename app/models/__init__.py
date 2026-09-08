@@ -12,6 +12,7 @@ from .tenant import TenantRecord
 from .tool_invocation import ToolBusinessErrorAttempt, ToolInvocationResult
 from .vapi_call_cost import VapiCallCost
 from .vapi_call_slot_state import VapiCallSlotState
+from .vapi_search_execution import VapiSearchExecution
 from .vapi_webhook_receipt import VapiWebhookReceipt
 from .voice_call import VoiceCall
 
@@ -31,6 +32,7 @@ __all__ = [
     "ToolInvocationResult",
     "VapiCallCost",
     "VapiCallSlotState",
+    "VapiSearchExecution",
     "VapiWebhookReceipt",
     "VoiceCall",
 ]
