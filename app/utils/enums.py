@@ -10,6 +10,7 @@ class AuthorizationStatus(str, Enum):
 
 
 class CallFinalState(str, Enum):
+    EM_ANDAMENTO = "EM_ANDAMENTO"
     RESOLVIDA_AUTOMATICO = "RESOLVIDA_AUTOMATICO"
     TRANSFERIDA_HUMANO = "TRANSFERIDA_HUMANO"
     ERRO_SISTEMA = "ERRO_SISTEMA"

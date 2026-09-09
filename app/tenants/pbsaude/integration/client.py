@@ -17,6 +17,10 @@ class AuthenticationError(Exception):
 class ServiceUnavailable(Exception):
     """Raised when upstream/unimplemented provider cannot serve the request."""
 
+    def __init__(self, message: str, upstream_code: str = "UPSTREAM_UNEXPECTED"):
+        super().__init__(message)
+        self.upstream_code = upstream_code
+
 
 class DataProvider(ABC):
     @abstractmethod

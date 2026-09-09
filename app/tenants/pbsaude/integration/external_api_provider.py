@@ -52,7 +52,14 @@ class ExternalApiDataProvider(DataProvider):
         try:
             maybe_introduce_chaos(self.settings)
         except HTTPException as exc:
-            raise ServiceUnavailable(str(exc.detail)) from exc
+            upstream_code = (
+                "UPSTREAM_AUTH"
+                if exc.status_code in {401, 403}
+                else "UPSTREAM_5XX"
+                if exc.status_code >= 500
+                else "UPSTREAM_UNEXPECTED"
+            )
+            raise ServiceUnavailable(str(exc.detail), upstream_code) from exc
 
         cpf_normalized = normalize_cpf(cpf or "")
         if not cpf_normalized:
@@ -90,12 +97,15 @@ class ExternalApiDataProvider(DataProvider):
         except httpx.TimeoutException as exc:
             raise TimeoutError("Timeout na consulta da API externa de rede") from exc
         except httpx.RequestError as exc:
-            raise ServiceUnavailable("Falha de comunicacao com API externa") from exc
+            raise ServiceUnavailable(
+                "Falha de comunicacao com API externa",
+                "UPSTREAM_NETWORK",
+            ) from exc
 
         if response.status_code in (401, 403):
-            raise ServiceUnavailable("Falha de autenticacao na API externa")
+            raise ServiceUnavailable("Falha de autenticacao na API externa", "UPSTREAM_AUTH")
         if response.status_code >= 500:
-            raise ServiceUnavailable("API externa indisponivel")
+            raise ServiceUnavailable("API externa indisponivel", "UPSTREAM_5XX")
         data = parse_external_api_json(response)
         if response.status_code >= 400:
             if is_business_error(data):
@@ -104,7 +114,10 @@ class ExternalApiDataProvider(DataProvider):
                     field=as_optional_string(data.get("field")),
                     message=as_string(data.get("message"), "Nao foi possivel concluir a busca da rede"),
                 )
-            raise ServiceUnavailable(f"API externa retornou HTTP {response.status_code}")
+            raise ServiceUnavailable(
+                f"API externa retornou HTTP {response.status_code}",
+                "UPSTREAM_UNEXPECTED",
+            )
 
         if is_success(data):
             return normalize_providers(
@@ -121,7 +134,7 @@ class ExternalApiDataProvider(DataProvider):
                 message=as_string(data.get("message"), "Nao foi possivel concluir a busca da rede"),
             )
 
-        raise ServiceUnavailable("Resposta inesperada da API externa")
+        raise ServiceUnavailable("Resposta inesperada da API externa", "UPSTREAM_UNEXPECTED")
 
     @staticmethod
     def _build_url(base_url: str, path: str) -> str:
