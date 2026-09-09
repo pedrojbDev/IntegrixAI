@@ -47,6 +47,20 @@ async def search_providers(args: dict, settings: Settings, call_id: str, tenant_
             error._search_event_recorded = True
             raise error from exc
     except BusinessRuleError as exc:
+        if (
+            settings.vapi_slot_guard_enabled
+            and not settings.pbsaude_vapi_recovery_gate_enabled
+            and not getattr(exc, "_vapi_recovery_applied", False)
+        ):
+            # Preserve the established guard behavior when the new authoritative
+            # recovery gate remains opt-in.
+            exc.attempt = recovery_attempt(
+                settings=settings,
+                tenant_id=tenant_id,
+                call_id=call_id,
+                field=exc.field,
+                code=exc.code,
+            )
         raise
 
 
@@ -307,10 +321,25 @@ def _search_providers_impl(
                                     **kwargs,
                                 ))
     else:
+        persist_search_event(
+            settings=settings,
+            tenant_id=tenant_id,
+            call_id=call_id,
+            event_type="provider_search_upstream_started",
+        )
         try:
             result = execute()
         except BusinessRuleError as exc:
             raise _apply_business_recovery(exc, settings=settings, tenant_id=tenant_id, call_id=call_id)
+        persist_search_event(
+            settings=settings,
+            tenant_id=tenant_id,
+            call_id=call_id,
+            event_type="provider_search_completed",
+            ok=True,
+            final_state=result[1],
+            payload={"provider_count": len((result[0] or {}).get("providers", []))},
+        )
     return result
 
 

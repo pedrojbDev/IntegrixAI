@@ -4,11 +4,13 @@ from contextlib import nullcontext
 
 from sqlalchemy.orm import Session
 
+from ...logging import get_logger
 from ...models.call_event import CallEvent
 from ...utils.enums import CallFinalState
 from . import slot_guard
 
 TOOL_NAME = "search_providers"
+log = get_logger()
 _SAFE_PAYLOAD_KEYS = frozenset(
     {"upstream_code", "recovery_action", "attempt", "provider_count", "reused_result"}
 )
@@ -51,4 +53,10 @@ def persist_search_event(
                 active_session.commit()
     except Exception:
         # Operational telemetry must never change the caller-visible outcome.
+        log.warning(
+            "provider_search_event_persistence_failed",
+            tenant_id=tenant_id,
+            call_id=call_id,
+            event_type=event_type,
+        )
         return

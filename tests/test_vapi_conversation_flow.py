@@ -4,7 +4,7 @@ import unittest
 from contextlib import ExitStack
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -821,3 +821,83 @@ class ConversationFlowTests(unittest.IsolatedAsyncioTestCase):
         serialized = json.dumps([event.payload_masked for event in events])
         for plaintext in (CPF, 'Salvador', 'Cardiologia', 'secret technical detail'):
             self.assertNotIn(plaintext, serialized)
+
+    async def test_recovery_gate_opt_out_keeps_legacy_turn_counting(self):
+        self.ingest(self.standard())
+        with patch(
+            'app.tenants.pbsaude.workflows.search_providers.asyncio.to_thread',
+            new=AsyncMock(side_effect=lambda function, *args: function(*args)),
+        ), patch(
+            'app.tenants.pbsaude.workflows.search_providers._search_providers',
+            side_effect=BusinessRuleError(
+                code='CIDADE_INVALIDA', field='cidade', message='Cidade invalida'),
+        ):
+            first = (await self.dispatch(self.standard(), [self.tool('legacy-first')]))['results'][0]['result']
+            second = (await self.dispatch(self.standard(), [self.tool('legacy-second')]))['results'][0]['result']
+
+        self.assertEqual('CIDADE_INVALIDA', first['data']['upstream_code'])
+        self.assertEqual(1, first['data']['attempt'])
+        self.assertEqual(1, second['data']['attempt'])
+        self.assertNotIn('recovery_anchor_user', self.state().conversation_meta)
+
+    def test_search_lifecycle_events_emit_without_slot_guard_or_duplication(self):
+        self.settings.vapi_slot_guard_enabled = False
+        self.direct_search()
+        with self.sessions() as session:
+            unguarded_events = session.scalars(
+                select(CallEvent).where(CallEvent.tool_name == 'search_providers')
+            ).all()
+        self.assertEqual(
+            ['provider_search_requested', 'provider_search_upstream_started', 'provider_search_completed'],
+            [event.event_type for event in unguarded_events],
+        )
+
+        self.settings.vapi_slot_guard_enabled = True
+        self.ingest(self.standard(), rev=2)
+        self.direct_search()
+        with self.sessions() as session:
+            guarded_events = session.scalars(
+                select(CallEvent).where(CallEvent.tool_name == 'search_providers')
+            ).all()
+        self.assertEqual(2, sum(event.event_type == 'provider_search_upstream_started' for event in guarded_events))
+        self.assertEqual(2, sum(event.event_type == 'provider_search_completed' for event in guarded_events))
+
+    async def test_async_dispatcher_blocks_recovery_replay_without_new_user_turn(self):
+        self.settings.pbsaude_vapi_recovery_gate_enabled = True
+        messages = self.standard()
+        messages[-1]['message'] = 'Exame de vista'
+        with patch(
+            'app.tenants.pbsaude.workflows.search_providers.asyncio.to_thread',
+            new=AsyncMock(side_effect=lambda function, *args: function(*args)),
+        ):
+            first = (await self.dispatch(messages, [self.tool('recovery-first', query='Exame de vista')]))['results'][0]['result']
+            replay = (await self.dispatch(messages, [self.tool('recovery-replay', query='Exame de vista')]))['results'][0]['result']
+
+        self.assertEqual('ESPECIALIDADE_INVALIDA', first['data']['upstream_code'])
+        self.assertFalse(replay['ok'])
+        self.assertEqual('USER_TURN_REQUIRED', replay['data']['upstream_code'])
+        self.assertEqual(0, replay['data']['attempt'])
+        self.assertEqual('collect_especialidade', replay['data']['recovery_action'])
+        self.assertEqual('EM_ANDAMENTO', replay['final_state'])
+        self.provider.search_providers.assert_not_called()
+
+    def test_search_event_persistence_failure_logs_safe_operational_signal(self):
+        from app.tenants.pbsaude.search_events import persist_search_event
+
+        with (
+            patch('app.tenants.pbsaude.search_events.slot_guard.SessionLocal', side_effect=RuntimeError('db unavailable')),
+            patch('app.tenants.pbsaude.search_events.log') as log,
+        ):
+            persist_search_event(
+                settings=self.settings,
+                tenant_id='tenant_a',
+                call_id='same-call',
+                event_type='provider_search_requested',
+            )
+
+        log.warning.assert_called_once_with(
+            'provider_search_event_persistence_failed',
+            tenant_id='tenant_a',
+            call_id='same-call',
+            event_type='provider_search_requested',
+        )
