@@ -379,6 +379,60 @@ class DashboardServiceTests(unittest.TestCase):
         self.assertEqual(1, sum(point["value"] for point in resilience["series"]["external_failures"]))
         self.assertNotIn("never-return-this", str(resilience))
 
+    def test_resilience_global_assistant_filter_keeps_tenant_call_identity(self) -> None:
+        """A shared call ID from another tenant must not enter an assistant-scoped funnel."""
+        session_local = self._session_local()
+        now = datetime.now(timezone.utc)
+
+        with session_local() as session:
+            session.add_all(
+                [
+                    CallEvent(
+                        tenant_id="tenant_a",
+                        call_id="shared_call",
+                        tool_call_id=None,
+                        tool_name="search_providers",
+                        event_type="provider_search_requested",
+                        final_state="EM_ANDAMENTO",
+                        ok=None,
+                        duration_ms=None,
+                        error_code=None,
+                        payload_masked={},
+                        created_at=now - timedelta(minutes=2),
+                    ),
+                    CallEvent(
+                        tenant_id="tenant_b",
+                        call_id="shared_call",
+                        tool_call_id=None,
+                        tool_name="search_providers",
+                        event_type="provider_search_requested",
+                        final_state="EM_ANDAMENTO",
+                        ok=None,
+                        duration_ms=None,
+                        error_code=None,
+                        payload_masked={},
+                        created_at=now - timedelta(minutes=2),
+                    ),
+                    VapiCallCost(
+                        call_id="shared_call",
+                        tenant_id="tenant_a",
+                        assistant_id="assistant_a",
+                        started_at=now - timedelta(minutes=2),
+                        synced_at=now,
+                    ),
+                ]
+            )
+            session.commit()
+
+            resilience = get_resilience(
+                session,
+                window="24h",
+                tenant_id=None,
+                assistant_id="assistant_a",
+            )
+
+        self.assertEqual(1, resilience["search_funnel"]["attempted_calls"])
+
     def test_operational_report_is_a_pdf_for_the_requested_tenant(self) -> None:
         session_local = self._session_local()
         now = datetime.now(timezone.utc)

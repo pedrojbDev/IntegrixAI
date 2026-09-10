@@ -4,7 +4,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import and_, case, func, select
+from sqlalchemy import and_, case, func, select, tuple_
 from sqlalchemy.orm import Session
 
 from ...models.call_event import CallEvent
@@ -95,10 +95,10 @@ def _search_event_rows(
     since: datetime,
     until: datetime,
     tenant_id: str | None,
-    call_ids_filter: set[str] | None,
+    call_keys_filter: set[tuple[str, str]] | None,
 ) -> list[tuple[str, str, str, str | None, dict | None, datetime]]:
     """Read the bounded, PII-free PB Saude search event stream for v5."""
-    if call_ids_filter is not None and not call_ids_filter:
+    if call_keys_filter is not None and not call_keys_filter:
         return []
     filters = [
         CallEvent.event_type.in_(SEARCH_EVENT_TYPES),
@@ -107,8 +107,14 @@ def _search_event_rows(
     ]
     if tenant_id:
         filters.append(CallEvent.tenant_id == tenant_id)
-    if call_ids_filter is not None:
-        filters.append(CallEvent.call_id.in_(call_ids_filter))
+    if not _apply_call_key_filter(
+        filters,
+        tenant_column=CallEvent.tenant_id,
+        call_column=CallEvent.call_id,
+        tenant_id=tenant_id,
+        call_keys_filter=call_keys_filter,
+    ):
+        return []
     return list(
         session.execute(
             select(
@@ -164,39 +170,66 @@ def _distinct_event_series(
     ]
 
 
-def _assistant_call_ids(
+def _apply_call_key_filter(
+    filters: list[Any],
+    *,
+    tenant_column: Any,
+    call_column: Any,
+    tenant_id: str | None,
+    call_keys_filter: set[tuple[str, str]] | None,
+) -> bool:
+    """Filter calls by their tenant-local identity without penalizing tenant reads."""
+    if call_keys_filter is None:
+        return True
+    if not call_keys_filter:
+        return False
+    if tenant_id:
+        scoped_call_ids = {call_id for key_tenant_id, call_id in call_keys_filter if key_tenant_id == tenant_id}
+        if not scoped_call_ids:
+            return False
+        filters.append(call_column.in_(scoped_call_ids))
+        return True
+    filters.append(tuple_(tenant_column, call_column).in_(call_keys_filter))
+    return True
+
+
+def _assistant_call_keys(
     session: Session,
     *,
     since: datetime,
     tenant_id: str | None,
     assistant_id: str | None,
-) -> set[str] | None:
+) -> set[tuple[str, str]] | None:
     if not assistant_id:
         return None
 
-    stmt = select(VapiCallCost.call_id).where(
+    stmt = select(VapiCallCost.tenant_id, VapiCallCost.call_id).where(
         VapiCallCost.started_at >= since,
         VapiCallCost.assistant_id == assistant_id,
     )
     if tenant_id:
         stmt = stmt.where(VapiCallCost.tenant_id == tenant_id)
-    rows = session.execute(stmt).scalars().all()
-    return {row for row in rows if row}
+    rows = session.execute(stmt).all()
+    return {(row.tenant_id, row.call_id) for row in rows if row.tenant_id and row.call_id}
 
 
 def _latest_tool_completed_subquery(
     *,
     since: datetime,
     tenant_id: str | None,
-    call_ids_filter: set[str] | None = None,
+    call_keys_filter: set[tuple[str, str]] | None = None,
 ):
     filters = [CallEvent.event_type == "tool_completed", CallEvent.created_at >= since]
     if tenant_id:
         filters.append(CallEvent.tenant_id == tenant_id)
-    if call_ids_filter is not None:
-        if not call_ids_filter:
-            return None
-        filters.append(CallEvent.call_id.in_(call_ids_filter))
+    if not _apply_call_key_filter(
+        filters,
+        tenant_column=CallEvent.tenant_id,
+        call_column=CallEvent.call_id,
+        tenant_id=tenant_id,
+        call_keys_filter=call_keys_filter,
+    ):
+        return None
 
     latest_per_call = (
         select(
@@ -233,7 +266,7 @@ def _tool_completed_filters(
     *,
     since: datetime,
     tenant_id: str | None,
-    call_ids_filter: set[str] | None,
+    call_keys_filter: set[tuple[str, str]] | None,
 ) -> list[Any]:
     filters: list[Any] = [
         CallEvent.event_type == "tool_completed",
@@ -241,10 +274,14 @@ def _tool_completed_filters(
     ]
     if tenant_id:
         filters.append(CallEvent.tenant_id == tenant_id)
-    if call_ids_filter is not None:
-        if not call_ids_filter:
-            return []
-        filters.append(CallEvent.call_id.in_(call_ids_filter))
+    if not _apply_call_key_filter(
+        filters,
+        tenant_column=CallEvent.tenant_id,
+        call_column=CallEvent.call_id,
+        tenant_id=tenant_id,
+        call_keys_filter=call_keys_filter,
+    ):
+        return []
     return filters
 
 
@@ -252,7 +289,7 @@ def _call_outcomes_subquery(
     *,
     since: datetime,
     tenant_id: str | None,
-    call_ids_filter: set[str] | None,
+    call_keys_filter: set[tuple[str, str]] | None,
 ):
     """Classify each call from all terminal tool and Vapi lifecycle events.
 
@@ -269,10 +306,14 @@ def _call_outcomes_subquery(
     ]
     if tenant_id:
         filters.append(CallEvent.tenant_id == tenant_id)
-    if call_ids_filter is not None:
-        if not call_ids_filter:
-            return None
-        filters.append(CallEvent.call_id.in_(call_ids_filter))
+    if not _apply_call_key_filter(
+        filters,
+        tenant_column=CallEvent.tenant_id,
+        call_column=CallEvent.call_id,
+        tenant_id=tenant_id,
+        call_keys_filter=call_keys_filter,
+    ):
+        return None
 
     successful_handoff = and_(
         CallEvent.ok.is_(True),
@@ -348,7 +389,7 @@ def _event_filters(
     *,
     since: datetime,
     tenant_id: str | None,
-    call_ids_filter: set[str] | None,
+    call_keys_filter: set[tuple[str, str]] | None,
     event_type: str | None = None,
     ok: bool | None = None,
 ) -> list[Any]:
@@ -359,10 +400,14 @@ def _event_filters(
         filters.append(CallEvent.event_type == event_type)
     if ok is not None:
         filters.append(CallEvent.ok == ok)
-    if call_ids_filter is not None:
-        if not call_ids_filter:
-            return []
-        filters.append(CallEvent.call_id.in_(call_ids_filter))
+    if not _apply_call_key_filter(
+        filters,
+        tenant_column=CallEvent.tenant_id,
+        call_column=CallEvent.call_id,
+        tenant_id=tenant_id,
+        call_keys_filter=call_keys_filter,
+    ):
+        return []
     return filters
 
 
@@ -392,7 +437,7 @@ def get_overview(
     assistant_id: str | None,
 ) -> dict[str, Any]:
     since, bucket_minutes = _resolve_window(window)
-    assistant_call_ids = _assistant_call_ids(
+    assistant_call_keys = _assistant_call_keys(
         session,
         since=since,
         tenant_id=tenant_id,
@@ -401,12 +446,12 @@ def get_overview(
     outcomes = _call_outcomes_subquery(
         since=since,
         tenant_id=tenant_id,
-        call_ids_filter=assistant_call_ids,
+        call_keys_filter=assistant_call_keys,
     )
     tool_filters = _tool_completed_filters(
         since=since,
         tenant_id=tenant_id,
-        call_ids_filter=assistant_call_ids,
+        call_keys_filter=assistant_call_keys,
     )
 
     if outcomes is None:
@@ -762,7 +807,7 @@ def get_tools(
     assistant_id: str | None,
 ) -> dict[str, Any]:
     since, _ = _resolve_window(window)
-    assistant_call_ids = _assistant_call_ids(
+    assistant_call_keys = _assistant_call_keys(
         session,
         since=since,
         tenant_id=tenant_id,
@@ -772,7 +817,7 @@ def get_tools(
     filters = _tool_completed_filters(
         since=since,
         tenant_id=tenant_id,
-        call_ids_filter=assistant_call_ids,
+        call_keys_filter=assistant_call_keys,
     )
     if not filters:
         return {
@@ -882,7 +927,7 @@ def get_health(
     assistant_id: str | None,
 ) -> dict[str, Any]:
     since, _ = _resolve_window(window)
-    assistant_call_ids = _assistant_call_ids(
+    assistant_call_keys = _assistant_call_keys(
         session,
         since=since,
         tenant_id=tenant_id,
@@ -896,11 +941,17 @@ def get_health(
     repeated_filters = [ToolBusinessErrorAttempt.updated_at >= since]
     if tenant_id:
         repeated_filters.append(ToolBusinessErrorAttempt.tenant_id == tenant_id)
-    if assistant_call_ids is not None:
-        if not assistant_call_ids:
+    if assistant_call_keys is not None:
+        if not assistant_call_keys:
             repeated_business_errors = 0
         else:
-            repeated_filters.append(ToolBusinessErrorAttempt.call_id.in_(assistant_call_ids))
+            _apply_call_key_filter(
+                repeated_filters,
+                tenant_column=ToolBusinessErrorAttempt.tenant_id,
+                call_column=ToolBusinessErrorAttempt.call_id,
+                tenant_id=tenant_id,
+                call_keys_filter=assistant_call_keys,
+            )
             repeated_business_errors = int(
                 session.execute(
                     select(func.sum(ToolBusinessErrorAttempt.attempts - 1)).where(
@@ -922,7 +973,7 @@ def get_health(
     idempotency_filters = _event_filters(
         since=since,
         tenant_id=tenant_id,
-        call_ids_filter=assistant_call_ids,
+        call_keys_filter=assistant_call_keys,
         event_type="idempotency_hit",
     )
     idempotency_hits = (
@@ -1006,7 +1057,7 @@ def get_resilience(
 ) -> dict[str, Any]:
     since, bucket_minutes = _resolve_window(window)
     until = datetime.now(timezone.utc)
-    assistant_call_ids = _assistant_call_ids(
+    assistant_call_keys = _assistant_call_keys(
         session,
         since=since,
         tenant_id=tenant_id,
@@ -1021,7 +1072,7 @@ def get_resilience(
         since=since,
         until=until,
         tenant_id=tenant_id,
-        call_ids_filter=assistant_call_ids,
+        call_keys_filter=assistant_call_keys,
     )
     search_funnel = {
         "attempted_calls": len(_event_call_keys(search_rows, event_types={SEARCH_ATTEMPT_EVENT_TYPE})),
@@ -1085,7 +1136,7 @@ def get_resilience(
     failed_filters = _event_filters(
         since=since,
         tenant_id=tenant_id,
-        call_ids_filter=assistant_call_ids,
+        call_keys_filter=assistant_call_keys,
         event_type="tool_completed",
         ok=False,
     )
@@ -1097,7 +1148,7 @@ def get_resilience(
     technical_failure_filters = _tool_completed_filters(
         since=since,
         tenant_id=tenant_id,
-        call_ids_filter=assistant_call_ids,
+        call_keys_filter=assistant_call_keys,
     )
     technical_failure_rows = (
         [
@@ -1115,7 +1166,7 @@ def get_resilience(
     idempotency_filters = _event_filters(
         since=since,
         tenant_id=tenant_id,
-        call_ids_filter=assistant_call_ids,
+        call_keys_filter=assistant_call_keys,
         event_type="idempotency_hit",
     )
     idempotency_rows = (
@@ -1127,12 +1178,18 @@ def get_resilience(
     attempt_filters = [ToolBusinessErrorAttempt.updated_at >= since]
     if tenant_id:
         attempt_filters.append(ToolBusinessErrorAttempt.tenant_id == tenant_id)
-    if assistant_call_ids is not None:
-        if not assistant_call_ids:
+    if assistant_call_keys is not None:
+        if not assistant_call_keys:
             business_series_rows: list[tuple[datetime | None, int]] = []
             business_distribution_rows: list[tuple[str | None, int, int]] = []
         else:
-            attempt_filters.append(ToolBusinessErrorAttempt.call_id.in_(assistant_call_ids))
+            _apply_call_key_filter(
+                attempt_filters,
+                tenant_column=ToolBusinessErrorAttempt.tenant_id,
+                call_column=ToolBusinessErrorAttempt.call_id,
+                tenant_id=tenant_id,
+                call_keys_filter=assistant_call_keys,
+            )
             business_series_rows = session.execute(
                 select(
                     ToolBusinessErrorAttempt.updated_at,
