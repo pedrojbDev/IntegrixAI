@@ -266,14 +266,51 @@ export const resilienceSchema = z
         repeated_business_errors: 0,
         idempotency_hits: 0,
       }),
+    search_funnel: z
+      .object({
+        attempted_calls: numeric,
+        blocked_calls: numeric,
+        upstream_started_calls: numeric,
+        completed_calls: numeric,
+        provider_result_calls: numeric,
+        reused_result_calls: numeric,
+      })
+      .catch({
+        attempted_calls: 0,
+        blocked_calls: 0,
+        upstream_started_calls: 0,
+        completed_calls: 0,
+        provider_result_calls: 0,
+        reused_result_calls: 0,
+      }),
+    slot_blocks: z
+      .object({ cpf: numeric, city: numeric, specialty: numeric, waiting_for_new_turn: numeric })
+      .catch({ cpf: 0, city: 0, specialty: 0, waiting_for_new_turn: 0 }),
+    upstream_failures: z
+      .object({ auth: numeric, timeout: numeric, network: numeric, five_xx: numeric, unexpected: numeric })
+      .catch({ auth: 0, timeout: 0, network: 0, five_xx: 0, unexpected: 0 }),
+    handoff_flow: z
+      .object({ recommendations: numeric, native_transfers: numeric })
+      .catch({ recommendations: 0, native_transfers: 0 }),
     series: z
       .object({
         failed_calls: z.array(z.object({ timestamp: z.string(), value: numeric })).catch([]),
         technical_failure_events: z.array(z.object({ timestamp: z.string(), value: numeric })).catch([]),
         idempotency_hits: z.array(z.object({ timestamp: z.string(), value: numeric })).catch([]),
         repeated_business_errors: z.array(z.object({ timestamp: z.string(), value: numeric })).catch([]),
+        blocks: z.array(z.object({ timestamp: z.string(), value: numeric })).catch([]),
+        successes: z.array(z.object({ timestamp: z.string(), value: numeric })).catch([]),
+        external_failures: z.array(z.object({ timestamp: z.string(), value: numeric })).catch([]),
       })
-      .catch({ failed_calls: [], technical_failure_events: [], idempotency_hits: [], repeated_business_errors: [] }),
+      .catch({
+        failed_calls: [],
+        technical_failure_events: [],
+        idempotency_hits: [],
+        repeated_business_errors: [],
+        blocks: [],
+        successes: [],
+        external_failures: [],
+      }),
     top_failure_tools: z.array(toolPerformanceSchema).catch([]),
     top_handoff_tools: z.array(toolPerformanceSchema).catch([]),
     business_error_tools: z

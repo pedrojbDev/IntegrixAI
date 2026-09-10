@@ -164,11 +164,39 @@ export type Resilience = {
     repeatedBusinessErrors: number
     idempotencyHits: number
   }
+  searchFunnel: {
+    attemptedCalls: number
+    blockedCalls: number
+    upstreamStartedCalls: number
+    completedCalls: number
+    providerResultCalls: number
+    reusedResultCalls: number
+  }
+  slotBlocks: {
+    cpf: number
+    city: number
+    specialty: number
+    waitingForNewTurn: number
+  }
+  upstreamFailures: {
+    auth: number
+    timeout: number
+    network: number
+    fiveXx: number
+    unexpected: number
+  }
+  handoffFlow: {
+    recommendations: number
+    nativeTransfers: number
+  }
   series: {
     failedCalls: ResiliencePoint[]
     technicalFailureEvents: ResiliencePoint[]
     idempotencyHits: ResiliencePoint[]
     repeatedBusinessErrors: ResiliencePoint[]
+    blocks: ResiliencePoint[]
+    successes: ResiliencePoint[]
+    externalFailures: ResiliencePoint[]
   }
   topFailureTools: ToolPerformance[]
   topHandoffTools: ToolPerformance[]

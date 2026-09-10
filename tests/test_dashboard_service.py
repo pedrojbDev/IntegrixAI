@@ -198,7 +198,7 @@ class DashboardServiceTests(unittest.TestCase):
         self.assertEqual(1, costs["summary"]["vapi_calls"])
         self.assertEqual(1.0, costs["summary"]["total_cost_usd"])
 
-    def test_v4_counts_normal_ends_as_automatic_resolutions(self) -> None:
+    def test_v5_counts_normal_ends_as_automatic_resolutions(self) -> None:
         session_local = self._session_local()
         now = datetime.now(timezone.utc)
 
@@ -261,7 +261,7 @@ class DashboardServiceTests(unittest.TestCase):
             tools = get_tools(session, window="24h", tenant_id="tenant_a", assistant_id=None)
             resilience = get_resilience(session, window="24h", tenant_id="tenant_a", assistant_id=None)
 
-        self.assertEqual("v4", overview["metric_version"])
+        self.assertEqual("v5", overview["metric_version"])
         self.assertEqual(6, overview["kpis"]["total_calls"])
         self.assertEqual(3, overview["kpis"]["automated_resolution_calls"])
         self.assertEqual(2, overview["kpis"]["successful_handoff_calls"])
@@ -284,6 +284,100 @@ class DashboardServiceTests(unittest.TestCase):
         self.assertEqual(0, tools_by_name["handoff_human"]["technical_failure_events"])
         self.assertEqual(1, resilience["summary"]["technical_failure_events"])
         self.assertTrue(resilience["series"]["technical_failure_events"])
+
+    def test_resilience_v5_search_funnel_uses_distinct_event_time_scoped_calls(self) -> None:
+        """A duplicate or late search event must not inflate the v5 call funnel."""
+        session_local = self._session_local()
+        now = datetime.now(timezone.utc)
+
+        def event(
+            call_id: str,
+            event_type: str,
+            *,
+            tenant_id: str = "tenant_a",
+            error_code: str | None = None,
+            payload: dict | None = None,
+            minutes_ago: int = 1,
+        ) -> CallEvent:
+            return CallEvent(
+                tenant_id=tenant_id,
+                call_id=call_id,
+                tool_call_id=None,
+                tool_name="search_providers",
+                event_type=event_type,
+                final_state="EM_ANDAMENTO",
+                ok=event_type in {"provider_search_completed", "provider_search_result_reused"},
+                duration_ms=None,
+                error_code=error_code,
+                payload_masked=payload or {},
+                created_at=now - timedelta(minutes=minutes_ago),
+            )
+
+        with session_local() as session:
+            session.add_all(
+                [
+                    event("search_a", "provider_search_requested", minutes_ago=9),
+                    event("search_a", "provider_search_requested", minutes_ago=8),
+                    event("search_a", "provider_search_blocked", error_code="SLOT_UNCONFIRMED", payload={"recovery_action": "collect_cpf"}, minutes_ago=7),
+                    event("search_a", "provider_search_blocked", error_code="SLOT_UNCONFIRMED", payload={"recovery_action": "collect_cidade"}, minutes_ago=7),
+                    event("search_a", "provider_search_blocked", error_code="SLOT_UNCONFIRMED", payload={"recovery_action": "collect_especialidade"}, minutes_ago=7),
+                    event("search_a", "provider_search_blocked", error_code="USER_TURN_REQUIRED", payload={"recovery_action": "collect_cpf"}, minutes_ago=7),
+                    event("search_a", "provider_search_upstream_started", minutes_ago=6),
+                    event("search_a", "provider_search_completed", payload={"provider_count": 2, "cpf": "never-return-this"}, minutes_ago=5),
+                    event("search_a", "provider_search_result_reused", payload={"reused_result": True, "provider_count": 2}, minutes_ago=4),
+                    event("search_a", "provider_search_failed", error_code="UPSTREAM_AUTH", minutes_ago=3),
+                    event("search_a", "provider_search_failed", error_code="UPSTREAM_AUTH", minutes_ago=2),
+                    event("search_a", "provider_search_failed", error_code="UPSTREAM_TIMEOUT", minutes_ago=2),
+                    event("search_a", "provider_search_failed", error_code="UPSTREAM_NETWORK", minutes_ago=2),
+                    event("search_a", "provider_search_failed", error_code="UPSTREAM_5XX", minutes_ago=2),
+                    event("search_a", "provider_search_failed", error_code="UPSTREAM_UNEXPECTED", minutes_ago=2),
+                    event("search_a", "provider_handoff_recommended", error_code="UPSTREAM_AUTH", minutes_ago=2),
+                    event("search_a", "vapi_native_transfer_completed", minutes_ago=1),
+                    event("search_other", "provider_search_requested", minutes_ago=2),
+                    event("search_late", "provider_search_requested", minutes_ago=24 * 60 + 1),
+                    event("search_future", "provider_search_requested", minutes_ago=-5),
+                    event("search_b", "provider_search_requested", tenant_id="tenant_b", minutes_ago=2),
+                    VapiCallCost(call_id="search_a", tenant_id="tenant_a", assistant_id="assistant_a", started_at=now - timedelta(minutes=9), synced_at=now),
+                    VapiCallCost(call_id="search_other", tenant_id="tenant_a", assistant_id="assistant_b", started_at=now - timedelta(minutes=2), synced_at=now),
+                ]
+            )
+            session.commit()
+
+            resilience = get_resilience(
+                session,
+                window="24h",
+                tenant_id="tenant_a",
+                assistant_id="assistant_a",
+            )
+
+        self.assertEqual("v5", resilience["metric_version"])
+        self.assertEqual(
+            {
+                "attempted_calls": 1,
+                "blocked_calls": 1,
+                "upstream_started_calls": 1,
+                "completed_calls": 1,
+                "provider_result_calls": 1,
+                "reused_result_calls": 1,
+            },
+            resilience["search_funnel"],
+        )
+        self.assertEqual(
+            {"cpf": 1, "city": 1, "specialty": 1, "waiting_for_new_turn": 1},
+            resilience["slot_blocks"],
+        )
+        self.assertEqual(
+            {"auth": 1, "timeout": 1, "network": 1, "five_xx": 1, "unexpected": 1},
+            resilience["upstream_failures"],
+        )
+        self.assertEqual(
+            {"recommendations": 1, "native_transfers": 1},
+            resilience["handoff_flow"],
+        )
+        self.assertEqual(1, sum(point["value"] for point in resilience["series"]["blocks"]))
+        self.assertEqual(1, sum(point["value"] for point in resilience["series"]["successes"]))
+        self.assertEqual(1, sum(point["value"] for point in resilience["series"]["external_failures"]))
+        self.assertNotIn("never-return-this", str(resilience))
 
     def test_operational_report_is_a_pdf_for_the_requested_tenant(self) -> None:
         session_local = self._session_local()

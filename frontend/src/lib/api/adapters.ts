@@ -192,6 +192,31 @@ export function mapResilience(raw: RawResilience): Resilience {
       repeatedBusinessErrors: raw.summary.repeated_business_errors,
       idempotencyHits: raw.summary.idempotency_hits,
     },
+    searchFunnel: {
+      attemptedCalls: raw.search_funnel.attempted_calls,
+      blockedCalls: raw.search_funnel.blocked_calls,
+      upstreamStartedCalls: raw.search_funnel.upstream_started_calls,
+      completedCalls: raw.search_funnel.completed_calls,
+      providerResultCalls: raw.search_funnel.provider_result_calls,
+      reusedResultCalls: raw.search_funnel.reused_result_calls,
+    },
+    slotBlocks: {
+      cpf: raw.slot_blocks.cpf,
+      city: raw.slot_blocks.city,
+      specialty: raw.slot_blocks.specialty,
+      waitingForNewTurn: raw.slot_blocks.waiting_for_new_turn,
+    },
+    upstreamFailures: {
+      auth: raw.upstream_failures.auth,
+      timeout: raw.upstream_failures.timeout,
+      network: raw.upstream_failures.network,
+      fiveXx: raw.upstream_failures.five_xx,
+      unexpected: raw.upstream_failures.unexpected,
+    },
+    handoffFlow: {
+      recommendations: raw.handoff_flow.recommendations,
+      nativeTransfers: raw.handoff_flow.native_transfers,
+    },
     series: {
       failedCalls: raw.series.failed_calls.map((point) => ({
         timestamp: point.timestamp,
@@ -206,6 +231,18 @@ export function mapResilience(raw: RawResilience): Resilience {
         value: point.value || 0,
       })),
       repeatedBusinessErrors: raw.series.repeated_business_errors.map((point) => ({
+        timestamp: point.timestamp,
+        value: point.value || 0,
+      })),
+      blocks: raw.series.blocks.map((point) => ({
+        timestamp: point.timestamp,
+        value: point.value || 0,
+      })),
+      successes: raw.series.successes.map((point) => ({
+        timestamp: point.timestamp,
+        value: point.value || 0,
+      })),
+      externalFailures: raw.series.external_failures.map((point) => ({
         timestamp: point.timestamp,
         value: point.value || 0,
       })),

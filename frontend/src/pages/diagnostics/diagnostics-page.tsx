@@ -60,6 +60,11 @@ export function DiagnosticsPage() {
           Último erro do sync: {health.sync.lastError}
         </div>
       ) : null}
+      {resilience.upstreamFailures.auth > 0 ? (
+        <div className="rounded-md border border-destructive/60 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          Alerta crítico: {formatNumberBR(resilience.upstreamFailures.auth)} ocorrência(s) de autenticação no upstream.
+        </div>
+      ) : null}
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <StatCard icon={ShieldCheck} label="Saúde" tone={health.healthState === "critical" ? "danger" : health.healthState === "warning" ? "warning" : "success"} value={healthLabel(health.healthState)} />
         <StatCard detail={`${syncLabel(health.sync.freshnessState)} · ${formatDateTimeBR(health.sync.lastSyncedAt)}`} icon={Repeat} label="Lag do sync" value={health.sync.freshnessSeconds == null ? "Sem histórico" : `${Math.round(health.sync.freshnessSeconds / 60)} min`} />
@@ -162,6 +167,44 @@ export function DiagnosticsPage() {
       <section className="grid gap-4 xl:grid-cols-2">
         <Card>
           <CardHeader>
+            <SectionHeader description="Chamadas distintas por etapa, sem recontar eventos repetidos." title="Funil de busca de rede" />
+          </CardHeader>
+          <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {[
+              ["Tentativas", resilience.searchFunnel.attemptedCalls],
+              ["Bloqueadas", resilience.searchFunnel.blockedCalls],
+              ["Upstream acessado", resilience.searchFunnel.upstreamStartedCalls],
+              ["Concluídas", resilience.searchFunnel.completedCalls],
+              ["Com prestadores", resilience.searchFunnel.providerResultCalls],
+              ["Resultado reutilizado", resilience.searchFunnel.reusedResultCalls],
+            ].map(([label, value]) => (
+              <div className="rounded-md border border-border p-3" key={String(label)}>
+                <p className="text-xs text-muted-foreground">{label}</p>
+                <p className="mt-2 font-mono text-xl">{formatNumberBR(Number(value))}</p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <SectionHeader description="Bloqueios e falhas externas por período." title="Recuperação de busca" />
+          </CardHeader>
+          <CardContent>
+            <ResponsiveLineChart
+              data={mergeSearchSeries(resilience.series.blocks, resilience.series.successes, resilience.series.externalFailures)}
+              series={[
+                { key: "blocks", label: "Bloqueios", color: "hsl(var(--warning))" },
+                { key: "successes", label: "Sucessos", color: "hsl(var(--success))", area: true },
+                { key: "externalFailures", label: "Falhas externas", color: "hsl(var(--destructive))" },
+              ]}
+            />
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-2">
+        <Card>
+          <CardHeader>
             <SectionHeader description="Tools ordenadas por timeout ou indisponibilidade de upstream." title="Piores falhas técnicas" />
           </CardHeader>
           <CardContent>
@@ -196,6 +239,21 @@ function mergeResilienceSeries(
       idempotency: existing?.idempotency || 0,
       businessErrors: item.value,
     })
+  }
+  return [...points.values()].sort((left, right) => left.timestamp.localeCompare(right.timestamp))
+}
+
+function mergeSearchSeries(
+  blocks: Array<{ timestamp: string; value: number }>,
+  successes: Array<{ timestamp: string; value: number }>,
+  externalFailures: Array<{ timestamp: string; value: number }>,
+) {
+  const points = new Map<string, { timestamp: string; blocks: number; successes: number; externalFailures: number }>()
+  for (const [items, key] of [[blocks, "blocks"], [successes, "successes"], [externalFailures, "externalFailures"]] as const) {
+    for (const item of items) {
+      const existing = points.get(item.timestamp) || { timestamp: item.timestamp, blocks: 0, successes: 0, externalFailures: 0 }
+      points.set(item.timestamp, { ...existing, [key]: item.value })
+    }
   }
   return [...points.values()].sort((left, right) => left.timestamp.localeCompare(right.timestamp))
 }

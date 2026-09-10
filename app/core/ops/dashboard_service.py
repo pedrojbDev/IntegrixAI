@@ -34,11 +34,37 @@ WINDOW_BUCKET_MINUTES = {
 }
 SYNC_FRESH_SECONDS = 15 * 60
 SYNC_DELAY_SECONDS = 60 * 60
-METRIC_VERSION = "v4"
+METRIC_VERSION = "v5"
 HANDOFF_TOOL_NAME = "handoff_human"
 NATIVE_HANDOFF_EVENT_TYPE = "vapi_native_transfer_completed"
 NORMAL_COMPLETION_EVENT_TYPE = "vapi_normal_call_completed"
 TECHNICAL_ERROR_CODES = frozenset({"TIMEOUT", "UPSTREAM_503"})
+SEARCH_ATTEMPT_EVENT_TYPE = "provider_search_requested"
+SEARCH_BLOCKED_EVENT_TYPE = "provider_search_blocked"
+SEARCH_UPSTREAM_STARTED_EVENT_TYPE = "provider_search_upstream_started"
+SEARCH_COMPLETED_EVENT_TYPE = "provider_search_completed"
+SEARCH_RESULT_REUSED_EVENT_TYPE = "provider_search_result_reused"
+SEARCH_FAILED_EVENT_TYPE = "provider_search_failed"
+SEARCH_HANDOFF_RECOMMENDED_EVENT_TYPE = "provider_handoff_recommended"
+SEARCH_EVENT_TYPES = frozenset(
+    {
+        SEARCH_ATTEMPT_EVENT_TYPE,
+        SEARCH_BLOCKED_EVENT_TYPE,
+        SEARCH_UPSTREAM_STARTED_EVENT_TYPE,
+        SEARCH_COMPLETED_EVENT_TYPE,
+        SEARCH_RESULT_REUSED_EVENT_TYPE,
+        SEARCH_FAILED_EVENT_TYPE,
+        SEARCH_HANDOFF_RECOMMENDED_EVENT_TYPE,
+        NATIVE_HANDOFF_EVENT_TYPE,
+    }
+)
+UPSTREAM_FAILURE_KEYS = {
+    "UPSTREAM_AUTH": "auth",
+    "UPSTREAM_TIMEOUT": "timeout",
+    "UPSTREAM_NETWORK": "network",
+    "UPSTREAM_5XX": "five_xx",
+    "UPSTREAM_UNEXPECTED": "unexpected",
+}
 
 
 def _ensure_utc(dt: datetime | None) -> datetime | None:
@@ -61,6 +87,81 @@ def _resolve_window(window: str) -> tuple[datetime, int]:
     minutes = WINDOW_TO_MINUTES[window]
     since = datetime.now(timezone.utc) - timedelta(minutes=minutes)
     return since, WINDOW_BUCKET_MINUTES[window]
+
+
+def _search_event_rows(
+    session: Session,
+    *,
+    since: datetime,
+    until: datetime,
+    tenant_id: str | None,
+    call_ids_filter: set[str] | None,
+) -> list[tuple[str, str, str, str | None, dict | None, datetime]]:
+    """Read the bounded, PII-free PB Saude search event stream for v5."""
+    if call_ids_filter is not None and not call_ids_filter:
+        return []
+    filters = [
+        CallEvent.event_type.in_(SEARCH_EVENT_TYPES),
+        CallEvent.created_at >= since,
+        CallEvent.created_at < until,
+    ]
+    if tenant_id:
+        filters.append(CallEvent.tenant_id == tenant_id)
+    if call_ids_filter is not None:
+        filters.append(CallEvent.call_id.in_(call_ids_filter))
+    return list(
+        session.execute(
+            select(
+                CallEvent.tenant_id,
+                CallEvent.call_id,
+                CallEvent.event_type,
+                CallEvent.error_code,
+                CallEvent.payload_masked,
+                CallEvent.created_at,
+            ).where(*filters)
+        ).all()
+    )
+
+
+def _event_call_keys(
+    rows: list[tuple[str, str, str, str | None, dict | None, datetime]],
+    *,
+    event_types: set[str] | frozenset[str],
+    predicate=None,
+) -> set[tuple[str, str]]:
+    return {
+        (tenant, call_id)
+        for tenant, call_id, event_type, error_code, payload, _created_at in rows
+        if event_type in event_types
+        and (predicate is None or predicate(error_code, payload if isinstance(payload, dict) else {}))
+    }
+
+
+def _distinct_event_series(
+    rows: list[tuple[str, str, str, str | None, dict | None, datetime]],
+    *,
+    bucket_minutes: int,
+    event_types: set[str] | frozenset[str],
+    predicate=None,
+) -> list[dict[str, Any]]:
+    first_event_at: dict[tuple[str, str], datetime] = {}
+    for tenant, call_id, event_type, error_code, payload, created_at in rows:
+        if event_type not in event_types:
+            continue
+        safe_payload = payload if isinstance(payload, dict) else {}
+        if predicate is not None and not predicate(error_code, safe_payload):
+            continue
+        call_key = (tenant, call_id)
+        previous = first_event_at.get(call_key)
+        if previous is None or created_at < previous:
+            first_event_at[call_key] = created_at
+    buckets: dict[datetime, int] = defaultdict(int)
+    for created_at in first_event_at.values():
+        buckets[_floor_bucket(created_at, bucket_minutes)] += 1
+    return [
+        {"timestamp": bucket.isoformat(), "value": count}
+        for bucket, count in sorted(buckets.items())
+    ]
 
 
 def _assistant_call_ids(
@@ -904,6 +1005,7 @@ def get_resilience(
     assistant_id: str | None,
 ) -> dict[str, Any]:
     since, bucket_minutes = _resolve_window(window)
+    until = datetime.now(timezone.utc)
     assistant_call_ids = _assistant_call_ids(
         session,
         since=since,
@@ -913,6 +1015,72 @@ def get_resilience(
     overview = get_overview(session, window=window, tenant_id=tenant_id, assistant_id=assistant_id)
     tools = get_tools(session, window=window, tenant_id=tenant_id, assistant_id=assistant_id)
     health = get_health(session, window=window, tenant_id=tenant_id, assistant_id=assistant_id)
+
+    search_rows = _search_event_rows(
+        session,
+        since=since,
+        until=until,
+        tenant_id=tenant_id,
+        call_ids_filter=assistant_call_ids,
+    )
+    search_funnel = {
+        "attempted_calls": len(_event_call_keys(search_rows, event_types={SEARCH_ATTEMPT_EVENT_TYPE})),
+        "blocked_calls": len(_event_call_keys(search_rows, event_types={SEARCH_BLOCKED_EVENT_TYPE})),
+        "upstream_started_calls": len(
+            _event_call_keys(search_rows, event_types={SEARCH_UPSTREAM_STARTED_EVENT_TYPE})
+        ),
+        "completed_calls": len(_event_call_keys(search_rows, event_types={SEARCH_COMPLETED_EVENT_TYPE})),
+        "provider_result_calls": len(
+            _event_call_keys(
+                search_rows,
+                event_types={SEARCH_COMPLETED_EVENT_TYPE, SEARCH_RESULT_REUSED_EVENT_TYPE},
+                predicate=lambda _error_code, payload: isinstance(payload.get("provider_count"), (int, float))
+                and not isinstance(payload.get("provider_count"), bool)
+                and payload["provider_count"] > 0,
+            )
+        ),
+        "reused_result_calls": len(_event_call_keys(search_rows, event_types={SEARCH_RESULT_REUSED_EVENT_TYPE})),
+    }
+
+    def block_category(error_code: str | None, payload: dict) -> str | None:
+        if error_code == "USER_TURN_REQUIRED":
+            return "waiting_for_new_turn"
+        return {
+            "collect_cpf": "cpf",
+            "collect_cidade": "city",
+            "collect_especialidade": "specialty",
+            "wait_current_search": "waiting_for_new_turn",
+        }.get(payload.get("recovery_action"))
+
+    slot_blocks = {
+        category: len(
+            _event_call_keys(
+                search_rows,
+                event_types={SEARCH_BLOCKED_EVENT_TYPE},
+                predicate=lambda error_code, payload, category=category: block_category(error_code, payload)
+                == category,
+            )
+        )
+        for category in ("cpf", "city", "specialty", "waiting_for_new_turn")
+    }
+    upstream_failures = {
+        category: len(
+            _event_call_keys(
+                search_rows,
+                event_types={SEARCH_FAILED_EVENT_TYPE},
+                predicate=lambda error_code, _payload, code=code: error_code == code,
+            )
+        )
+        for code, category in UPSTREAM_FAILURE_KEYS.items()
+    }
+    handoff_flow = {
+        "recommendations": len(
+            _event_call_keys(search_rows, event_types={SEARCH_HANDOFF_RECOMMENDED_EVENT_TYPE})
+        ),
+        "native_transfers": len(
+            _event_call_keys(search_rows, event_types={NATIVE_HANDOFF_EVENT_TYPE})
+        ),
+    }
 
     failed_filters = _event_filters(
         since=since,
@@ -1042,6 +1210,10 @@ def get_resilience(
             "repeated_business_errors": int(health["counters"]["repeated_business_errors"]),
             "idempotency_hits": int(health["counters"]["idempotency_hits"]),
         },
+        "search_funnel": search_funnel,
+        "slot_blocks": slot_blocks,
+        "upstream_failures": upstream_failures,
+        "handoff_flow": handoff_flow,
         "series": {
             "failed_calls": _bucket_series_from_rows(failed_rows, bucket_minutes=bucket_minutes),
             "technical_failure_events": _bucket_series_from_rows(
@@ -1052,6 +1224,22 @@ def get_resilience(
             "repeated_business_errors": _bucket_series_from_rows(
                 [(updated_at, max(int(attempts or 0) - 1, 0)) for updated_at, attempts in business_series_rows],
                 bucket_minutes=bucket_minutes,
+            ),
+            "blocks": _distinct_event_series(
+                search_rows,
+                bucket_minutes=bucket_minutes,
+                event_types={SEARCH_BLOCKED_EVENT_TYPE},
+            ),
+            "successes": _distinct_event_series(
+                search_rows,
+                bucket_minutes=bucket_minutes,
+                event_types={SEARCH_COMPLETED_EVENT_TYPE, SEARCH_RESULT_REUSED_EVENT_TYPE},
+            ),
+            "external_failures": _distinct_event_series(
+                search_rows,
+                bucket_minutes=bucket_minutes,
+                event_types={SEARCH_FAILED_EVENT_TYPE},
+                predicate=lambda error_code, _payload: error_code in UPSTREAM_FAILURE_KEYS,
             ),
         },
         "top_failure_tools": top_failure_tools,

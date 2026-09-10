@@ -288,6 +288,30 @@ class DashboardRouteTests(unittest.TestCase):
                     self.assertFalse(errors)
                     self.assertEqual(window, value)
 
+    def test_resilience_route_returns_v5_search_diagnostics_for_authorized_scope(self) -> None:
+        client = self._client()
+        self._bootstrap(client)
+        payload = {
+            "metric_version": "v5",
+            "tenant_id": "tenant_a",
+            "assistant_id": "assistant_a",
+            "search_funnel": {"attempted_calls": 4, "blocked_calls": 1, "upstream_started_calls": 3, "completed_calls": 2, "provider_result_calls": 2, "reused_result_calls": 1},
+            "slot_blocks": {"cpf": 1, "city": 0, "specialty": 0, "waiting_for_new_turn": 0},
+            "upstream_failures": {"auth": 1, "timeout": 0, "network": 0, "five_xx": 0, "unexpected": 0},
+            "handoff_flow": {"recommendations": 1, "native_transfers": 1},
+            "series": {"blocks": [], "successes": [], "external_failures": []},
+        }
+
+        with patch("app.api.routes.ops.get_resilience", return_value=payload) as service:
+            response = client.get("/ops/dashboard/resilience?tenant_id=tenant_a&assistant_id=assistant_a")
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("v5", response.json()["metric_version"])
+        self.assertEqual(4, response.json()["search_funnel"]["attempted_calls"])
+        self.assertEqual(1, response.json()["upstream_failures"]["auth"])
+        self.assertEqual("tenant_a", service.call_args.kwargs["tenant_id"])
+        self.assertEqual("assistant_a", service.call_args.kwargs["assistant_id"])
+
     def test_audit_summary_accepts_extended_dashboard_windows(self) -> None:
         route = next(
             route
