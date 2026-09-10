@@ -11,6 +11,24 @@ npm run dev
 
 A landing fica em `http://localhost:5173`.
 
+## Estrutura
+
+- `src/App.tsx`: pagina publica, demonstracao ilustrativa, navegacao e FAQ.
+- `src/ImpactCalculator.tsx`: simulador com controles deslizantes, entrada numerica
+  e comparacao de custos.
+- `src/estimate.ts`: premissas e calculo financeiro, com diferenca mensal
+  arredondada em centavos para distinguir economia, equilibrio e custo maior.
+- `src/index.css`: identidade visual, layout responsivo e movimento reduzido.
+- `public/favicon.svg`: simbolo da marca para a aba do navegador.
+
+A identidade combina azul-petroleo e cobre, com abertura escura, paineis claros
+e resumo financeiro em contraste. A demonstracao anima as etapas uma unica vez;
+com movimento reduzido, todo o fluxo aparece imediatamente.
+
+A calculadora usa US$ 0,16/min como referencia de consumo, nao como preco
+contratado. Impostos, telefonia, implantacao e integracoes ficam fora dessa
+estimativa. O detalhamento das premissas esta disponivel na propria pagina.
+
 ## Variaveis
 
 ```env
@@ -40,3 +58,9 @@ npm run typecheck
 npm run lint
 npm run build
 ```
+
+Os testes renderizam a pagina e verificam os destinos de navegacao, os controles
+do simulador e os cenarios financeiros, incluindo equilibrio e consumo superior
+ao custo repetitivo. Para conferir a experiencia no navegador, verifique tambem
+entrada numerica, sliders, restauracao de valores, menu movel e FAQ em larguras
+de 320 px a desktop.
