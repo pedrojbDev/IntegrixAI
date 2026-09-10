@@ -185,31 +185,49 @@ class VapiCostSyncService:
         start: datetime,
         end: datetime,
     ) -> dict[str, int | str]:
-        """Import quality metrics for exactly one tenant and the [start, end) window.
+        """Import quality metrics for one tenant and the [start, end) createdAt window.
 
         This deliberately shares parsing and upsert behavior with routine cost sync,
         so the Vapi artifact is sanitized before any data is persisted.
         """
-        if not tenant_id.strip():
+        tenant_id = tenant_id.strip()
+        if not tenant_id:
             raise ValueError("tenant_id is required")
         start = _as_utc(start)
         end = _as_utc(end)
         if end <= start:
             raise ValueError("end must be after start")
+        provider_selectors = self._provider_selectors_for_tenant(tenant_id)
+        if not provider_selectors:
+            raise ValueError("tenant has no safe provider selector")
         if not self.settings.vapi_api_key:
             raise RuntimeError("VAPI_API_KEY not configured")
 
-        raw_calls = self._fetch_complete_range(start, end, "createdAt")
+        raw_by_id: dict[str, dict[str, Any]] = {}
+        for provider_selector in provider_selectors:
+            for raw in self._fetch_complete_range(
+                start,
+                end,
+                "createdAt",
+                provider_selector=provider_selector,
+            ):
+                call_id = self._as_optional_string(raw.get("id") or raw.get("callId"))
+                if call_id:
+                    raw_by_id[call_id] = raw
         parsed_batch: list[ParsedCallCost] = []
         skipped = 0
-        for raw in raw_calls:
+        for raw in raw_by_id.values():
             parsed = self._parse_call(raw)
             if (
                 parsed is None
                 or parsed.tenant_id != tenant_id
-                or parsed.started_at is None
-                or not start <= _as_utc(parsed.started_at) < end
+                or parsed.vapi_created_at is None
+                or not start <= _as_utc(parsed.vapi_created_at) < end
             ):
+                skipped += 1
+                continue
+            existing = session.get(VapiCallCost, parsed.call_id)
+            if existing is not None and existing.tenant_id not in (None, tenant_id):
                 skipped += 1
                 continue
             parsed_batch.append(parsed)
@@ -231,31 +249,70 @@ class VapiCostSyncService:
             "skipped": skipped,
         }
 
+    def _provider_selectors_for_tenant(self, tenant_id: str) -> list[tuple[str, str]]:
+        selectors: list[tuple[str, str]] = []
+        for assistant_id, mapped_tenant in self.settings.tenant_assistant_map.items():
+            if str(mapped_tenant).strip() == tenant_id and str(assistant_id).strip():
+                selectors.append(("assistantId", str(assistant_id).strip()))
+        for phone_number_id, mapped_tenant in self.settings.tenant_phone_number_map.items():
+            if str(mapped_tenant).strip() == tenant_id and str(phone_number_id).strip():
+                selectors.append(("phoneNumberId", str(phone_number_id).strip()))
+        return list(dict.fromkeys(selectors))
+
     def _fetch_complete_range(
         self,
         start: datetime,
         end: datetime,
         field_name: str,
+        provider_selector: tuple[str, str] | None = None,
     ) -> list[dict[str, Any]]:
-        payload = self._fetch_calls(start, end, field_name)
+        if provider_selector is None:
+            payload = self._fetch_calls(start, end, field_name)
+        else:
+            payload = self._fetch_calls(
+                start,
+                end,
+                field_name,
+                provider_selector=provider_selector,
+            )
         calls, _, _ = self._extract_calls(payload)
         if len(calls) < self.settings.ops_cost_sync_page_size:
             return calls
         if (end - start).total_seconds() <= MINIMUM_SLICE_SECONDS:
             raise RuntimeError("Vapi sync range saturated; cursor not advanced")
         midpoint = start + (end - start) / 2
-        left = self._fetch_complete_range(start, midpoint, field_name)
-        right = self._fetch_complete_range(midpoint, end, field_name)
+        left = self._fetch_complete_range(
+            start,
+            midpoint,
+            field_name,
+            provider_selector=provider_selector,
+        )
+        right = self._fetch_complete_range(
+            midpoint,
+            end,
+            field_name,
+            provider_selector=provider_selector,
+        )
         deduplicated = {str(item.get("id") or item.get("callId")): item for item in left + right}
         deduplicated.pop("None", None)
         return list(deduplicated.values())
 
-    def _fetch_calls(self, start: datetime, end: datetime, field_name: str) -> Any:
+    def _fetch_calls(
+        self,
+        start: datetime,
+        end: datetime,
+        field_name: str,
+        *,
+        provider_selector: tuple[str, str] | None = None,
+    ) -> Any:
         params = {
             "limit": self.settings.ops_cost_sync_page_size,
             f"{field_name}Ge": start.isoformat(),
             f"{field_name}Lt": end.isoformat(),
         }
+        if provider_selector is not None:
+            selector_key, selector_value = provider_selector
+            params[selector_key] = selector_value
         headers = {"Authorization": f"Bearer {self.settings.vapi_api_key}"}
         url = f"{self.base_url}/{self.path.lstrip('/')}"
         try:

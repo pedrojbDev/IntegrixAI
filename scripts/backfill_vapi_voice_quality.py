@@ -1,6 +1,7 @@
 """Backfill privacy-preserving Vapi voice-quality metrics for one tenant.
 
-Seven-day rollout example (replace the tenant placeholder; no global fallback):
+Seven-day rollout example using createdAt event time (replace the tenant
+placeholder; no global fallback):
 python scripts/backfill_vapi_voice_quality.py --tenant-id <tenant-id> \\
   --start 2026-09-02T00:00:00+00:00 --end 2026-09-09T00:00:00+00:00
 """
@@ -34,8 +35,18 @@ def _utc_datetime(value: str) -> datetime:
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tenant-id", required=True)
-    parser.add_argument("--start", required=True, type=_utc_datetime, help="Inclusive ISO-8601 UTC bound")
-    parser.add_argument("--end", required=True, type=_utc_datetime, help="Exclusive ISO-8601 UTC bound")
+    parser.add_argument(
+        "--start",
+        required=True,
+        type=_utc_datetime,
+        help="Inclusive ISO-8601 UTC createdAt event-time bound",
+    )
+    parser.add_argument(
+        "--end",
+        required=True,
+        type=_utc_datetime,
+        help="Exclusive ISO-8601 UTC createdAt event-time bound",
+    )
     args = parser.parse_args(argv)
     if not args.tenant_id.strip():
         parser.error("--tenant-id must not be empty")

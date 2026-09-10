@@ -251,8 +251,8 @@ class VapiCostSyncTests(unittest.TestCase):
         self.assertIsNone(legacy.turn_latency_average_ms)
         self.assertIsNone(legacy.assistant_interruptions)
 
-    def test_voice_quality_backfill_is_tenant_and_half_open_window_scoped(self) -> None:
-        """Removing either scope would import another tenant or the end boundary."""
+    def test_voice_quality_backfill_is_tenant_and_created_at_half_open_scoped(self) -> None:
+        """Removing either provider scope or createdAt boundary would over-import calls."""
         session_local = self._session_local()
         start = datetime(2026, 9, 1, tzinfo=timezone.utc)
         end = start + timedelta(days=7)
@@ -260,33 +260,43 @@ class VapiCostSyncTests(unittest.TestCase):
             Settings(
                 _env_file=None,
                 vapi_api_key="vapi-key",
-                tenant_map={"+5511999999999": "tenant_a", "+5511888888888": "tenant_b"},
+                tenant_assistant_map={"assistant_a": "tenant_a", "assistant_b": "tenant_b"},
+                tenant_phone_number_map={"phone_a": "tenant_a", "phone_b": "tenant_b"},
             )
         )
         calls = [
             {
                 "id": "tenant-a-in-window",
-                "to": "+5511999999999",
+                "assistantId": "assistant_a",
+                "createdAt": (start + timedelta(minutes=1)).isoformat(),
                 "startedAt": (start + timedelta(minutes=1)).isoformat(),
                 "artifact": {"performanceMetrics": {"turnLatencyAverage": 200, "numAssistantInterrupted": 1}},
             },
             {
                 "id": "tenant-b-in-window",
-                "to": "+5511888888888",
+                "assistantId": "assistant_b",
+                "createdAt": (start + timedelta(minutes=1)).isoformat(),
                 "startedAt": (start + timedelta(minutes=1)).isoformat(),
                 "artifact": {"performanceMetrics": {"turnLatencyAverage": 300, "numAssistantInterrupted": 2}},
             },
             {
                 "id": "tenant-a-end-boundary",
-                "to": "+5511999999999",
+                "assistantId": "assistant_a",
+                "createdAt": end.isoformat(),
                 "startedAt": end.isoformat(),
                 "artifact": {"performanceMetrics": {"turnLatencyAverage": 400, "numAssistantInterrupted": 3}},
             },
         ]
 
         with session_local() as session:
+            fetched_selectors: list[tuple[str, str] | None] = []
+
+            def fetch(_start, _end, _field, provider_selector=None):
+                fetched_selectors.append(provider_selector)
+                return calls
+
             with (
-                patch.object(service, "_fetch_complete_range", return_value=calls) as fetch,
+                patch.object(service, "_fetch_calls", side_effect=fetch),
                 patch.object(service.ptax, "ensure_rates", return_value=0),
                 patch.object(service.ptax, "rate_for_call", return_value=(None, None, False)),
             ):
@@ -299,9 +309,76 @@ class VapiCostSyncTests(unittest.TestCase):
             session.commit()
             rows = session.execute(select(VapiCallCost).order_by(VapiCallCost.call_id)).scalars().all()
 
-        fetch.assert_called_once_with(start, end, "createdAt")
+        self.assertEqual({("assistantId", "assistant_a"), ("phoneNumberId", "phone_a")}, set(fetched_selectors))
+        self.assertTrue(all(selector is not None for selector in fetched_selectors))
         self.assertEqual({"tenant_id": "tenant_a", "processed": 1, "created": 1, "updated": 0, "skipped": 2}, result)
         self.assertEqual(["tenant-a-in-window"], [row.call_id for row in rows])
+
+    def test_voice_quality_backfill_unknown_tenant_fails_before_provider_request(self) -> None:
+        service = VapiCostSyncService(Settings(_env_file=None, vapi_api_key="vapi-key"))
+        start = datetime(2026, 9, 1, tzinfo=timezone.utc)
+        with self._session_local()() as session:
+            with patch.object(service, "_fetch_calls") as fetch:
+                with self.assertRaisesRegex(ValueError, "provider selector"):
+                    service.backfill_voice_quality(
+                        session,
+                        tenant_id="unknown",
+                        start=start,
+                        end=start + timedelta(days=1),
+                    )
+                fetch.assert_not_called()
+
+    def test_voice_quality_backfill_does_not_rewrite_foreign_existing_call(self) -> None:
+        session_local = self._session_local()
+        start = datetime(2026, 9, 1, tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        service = VapiCostSyncService(
+            Settings(_env_file=None, vapi_api_key="vapi-key", tenant_assistant_map={"assistant_a": "tenant_a"})
+        )
+        with session_local() as session:
+            foreign = VapiCallCost(
+                call_id="shared-call",
+                tenant_id="tenant_b",
+                assistant_id="assistant_b",
+                cost_total_usd=Decimal("9.00"),
+                started_at=start + timedelta(minutes=1),
+                synced_at=now,
+            )
+            session.add(foreign)
+            session.commit()
+            with (
+                patch.object(
+                    service,
+                    "_fetch_calls",
+                    return_value=[
+                        {
+                            "id": "shared-call",
+                            "assistantId": "assistant_a",
+                            "createdAt": (start + timedelta(minutes=1)).isoformat(),
+                            "startedAt": (start + timedelta(minutes=1)).isoformat(),
+                            "cost": 1.0,
+                            "artifact": {"performanceMetrics": {"turnLatencyAverage": 100, "numAssistantInterrupted": 1}},
+                        }
+                    ],
+                ),
+                patch.object(service.ptax, "ensure_rates", return_value=0),
+                patch.object(service.ptax, "rate_for_call", return_value=(None, None, False)),
+            ):
+                result = service.backfill_voice_quality(
+                    session,
+                    tenant_id="tenant_a",
+                    start=start,
+                    end=start + timedelta(days=1),
+                )
+            session.commit()
+            unchanged = session.get(VapiCallCost, "shared-call")
+
+        self.assertEqual(0, result["processed"])
+        self.assertEqual(1, result["skipped"])
+        self.assertEqual("tenant_b", unchanged.tenant_id)
+        self.assertEqual(Decimal("9.00000000"), unchanged.cost_total_usd)
+        self.assertIsNone(unchanged.turn_latency_average_ms)
+        self.assertIsNone(unchanged.assistant_interruptions)
 
     def test_saturated_windows_are_recursively_subdivided(self) -> None:
         service = VapiCostSyncService(
