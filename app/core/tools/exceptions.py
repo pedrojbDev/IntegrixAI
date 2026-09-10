@@ -23,3 +23,11 @@ class BusinessRuleError(Exception):
         self.handoff_after_retry = handoff_after_retry
         # Tenant policies may count real user turns instead of tool invocations.
         self.attempt = attempt
+
+
+class UpstreamToolError(RuntimeError):
+    """A classified external dependency failure safe for tool responses."""
+
+    def __init__(self, message: str, upstream_code: str):
+        super().__init__(message)
+        self.upstream_code = upstream_code

@@ -171,7 +171,7 @@ class ExternalApiProviderTests(unittest.TestCase):
             "app.tenants.pbsaude.integration.http_client.get_external_api_client",
             return_value=fake_client,
         ):
-            with self.assertRaises(ServiceUnavailable):
+            with self.assertRaises(ServiceUnavailable) as error:
                 provider.search_providers(
                     "tenant_a",
                     "call_123",
@@ -182,6 +182,7 @@ class ExternalApiProviderTests(unittest.TestCase):
                 )
 
         self.assertEqual(2, len(fake_client.calls))
+        self.assertEqual("UPSTREAM_NETWORK", error.exception.upstream_code)
 
     def test_business_error_does_not_retry(self) -> None:
         fake_client = FakeClient(
@@ -223,7 +224,7 @@ class ExternalApiProviderTests(unittest.TestCase):
             "app.tenants.pbsaude.integration.http_client.get_external_api_client",
             return_value=fake_client,
         ):
-            with self.assertRaises(ServiceUnavailable):
+            with self.assertRaises(ServiceUnavailable) as error:
                 provider.search_providers(
                     "tenant_a",
                     "call_123",
@@ -234,6 +235,31 @@ class ExternalApiProviderTests(unittest.TestCase):
                 )
 
         self.assertEqual(1, len(fake_client.calls))
+        self.assertEqual("UPSTREAM_AUTH", error.exception.upstream_code)
+
+    def test_exhausted_5xx_and_unexpected_response_have_distinct_codes(self) -> None:
+        cases = (
+            (httpx.Response(503), "UPSTREAM_5XX"),
+            (httpx.Response(200, json={"unexpected": True}), "UPSTREAM_UNEXPECTED"),
+        )
+        for response, expected in cases:
+            with self.subTest(expected=expected):
+                fake_client = FakeClient([response])
+                provider = ExternalApiDataProvider(settings(external_api_max_retries=0))
+                with patch(
+                    "app.tenants.pbsaude.integration.http_client.get_external_api_client",
+                    return_value=fake_client,
+                ):
+                    with self.assertRaises(ServiceUnavailable) as error:
+                        provider.search_providers(
+                            "tenant_a",
+                            "call_123",
+                            "feira de santana",
+                            "cardiologia",
+                            "03457351538",
+                            None,
+                        )
+                self.assertEqual(expected, error.exception.upstream_code)
 
     def test_caps_each_attempt_by_the_total_voice_deadline(self) -> None:
         fake_client = FakeClient([success_response()])

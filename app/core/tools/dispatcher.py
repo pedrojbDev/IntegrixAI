@@ -20,7 +20,7 @@ from ..security.webhook import is_webhook_authorized
 from ..tenant.models import TenantResolution
 from ..tenant.resolver import resolve_tenant_details, should_reject_tenant_resolution
 from .contracts import ToolError, ToolResponse
-from .exceptions import BusinessRuleError
+from .exceptions import BusinessRuleError, UpstreamToolError
 from .idempotency import (
     get_cached_tool_result,
     record_business_error_attempt,
@@ -98,7 +98,7 @@ class ToolDispatcher:
                     tenant_id=tenant_id,
                     call_id=parsed_request.call_id,
                     tool_name=first_tool_name,
-                    final_state=CallFinalState.TRANSFERIDA_HUMANO,
+                    final_state=CallFinalState.EM_ANDAMENTO,
                     implementation_key=implementation_key,
                 )
                 return self._record_request_event(
@@ -107,7 +107,7 @@ class ToolDispatcher:
                     call_id=parsed_request.call_id,
                     tool_name=first_tool_name,
                     ok=False,
-                    final_state=CallFinalState.TRANSFERIDA_HUMANO,
+                    final_state=CallFinalState.EM_ANDAMENTO,
                     event_type="webhook_unauthorized",
                     error_code="UNAUTHORIZED",
                 )
@@ -133,7 +133,7 @@ class ToolDispatcher:
                     tenant_id=tenant_id,
                     call_id=parsed_request.call_id,
                     tool_name=first_tool_name,
-                    final_state=CallFinalState.TRANSFERIDA_HUMANO,
+                    final_state=CallFinalState.EM_ANDAMENTO,
                     implementation_key=implementation_key,
                 )
                 return self._record_request_event(
@@ -142,7 +142,7 @@ class ToolDispatcher:
                     call_id=parsed_request.call_id,
                     tool_name=first_tool_name,
                     ok=False,
-                    final_state=CallFinalState.TRANSFERIDA_HUMANO,
+                    final_state=CallFinalState.EM_ANDAMENTO,
                     event_type="event_ignored",
                     error_code="IGNORED",
                 )
@@ -157,10 +157,11 @@ class ToolDispatcher:
                 return {"results": [self._finalize_invocation(
                     item, ToolResponse(ok=False, tool_name=item.tool_name,
                         error=ToolError(code="UPSTREAM_503", message="Nao foi possivel confirmar os dados"),
-                        data={"retryable": False, "recovery_action": "offer_handoff"},
-                        final_state=CallFinalState.TRANSFERIDA_HUMANO),
+                        data={"retryable": False, "recovery_action": "offer_handoff",
+                              "upstream_code": "UPSTREAM_UNEXPECTED"},
+                        final_state=CallFinalState.EM_ANDAMENTO),
                     call_id=parsed_request.call_id, tenant_id=tenant_id, started_at=time.perf_counter(),
-                    event_type="request_preparation_failed", error_code="UPSTREAM_503",
+                    event_type="request_preparation_failed", error_code="UPSTREAM_UNEXPECTED",
                     save_idempotency=False) for item in parsed_request.invocations]}
 
             results = []
@@ -224,7 +225,13 @@ class ToolDispatcher:
                 final_state=str(cached.get("final_state")),
                 ok=bool(cached.get("ok")),
                 duration_ms=0.0,
-                error_code=(cached.get("error") or {}).get("code") if isinstance(cached.get("error"), dict) else None,
+                error_code=(
+                    (cached.get("data") or {}).get("upstream_code")
+                    if isinstance(cached.get("data"), dict) and (cached.get("data") or {}).get("upstream_code")
+                    else (cached.get("error") or {}).get("code")
+                    if isinstance(cached.get("error"), dict)
+                    else None
+                ),
                 payload={"toolCallId": parsed.tool_call_id, "result": cached},
             )
             return {"toolCallId": parsed.tool_call_id, "result": cached}
@@ -240,7 +247,7 @@ class ToolDispatcher:
                 call_id=call_id,
                 tool_call_id=parsed.tool_call_id,
                 tool_name=parsed.tool_name,
-                final_state=CallFinalState.TRANSFERIDA_HUMANO,
+                final_state=CallFinalState.EM_ANDAMENTO,
                 message=parsed.arguments_error,
                 implementation_key=implementation_key,
             )
@@ -248,7 +255,7 @@ class ToolDispatcher:
                 ok=False,
                 tool_name=parsed.tool_name,
                 error=error,
-                final_state=CallFinalState.TRANSFERIDA_HUMANO,
+                final_state=CallFinalState.EM_ANDAMENTO,
             )
             return self._finalize_invocation(
                 parsed,
@@ -268,14 +275,14 @@ class ToolDispatcher:
                 call_id=call_id,
                 tool_call_id=parsed.tool_call_id,
                 tool_name=parsed.tool_name,
-                final_state=CallFinalState.TRANSFERIDA_HUMANO,
+                final_state=CallFinalState.EM_ANDAMENTO,
                 implementation_key=implementation_key,
             )
             response = ToolResponse(
                 ok=False,
                 tool_name=parsed.tool_name,
                 error=ToolError(code="VALIDATION", message="tool call invalido"),
-                final_state=CallFinalState.TRANSFERIDA_HUMANO,
+                final_state=CallFinalState.EM_ANDAMENTO,
             )
             return self._finalize_invocation(
                 parsed,
@@ -296,7 +303,7 @@ class ToolDispatcher:
                 call_id=call_id,
                 tool_call_id=parsed.tool_call_id,
                 tool_name=parsed.tool_name,
-                final_state=CallFinalState.TRANSFERIDA_HUMANO,
+                final_state=CallFinalState.EM_ANDAMENTO,
                 implementation_key=implementation_key,
             )
             error = ToolError(code="VALIDATION", message="tool_name invalido")
@@ -304,7 +311,7 @@ class ToolDispatcher:
                 ok=False,
                 tool_name=parsed.tool_name,
                 error=error,
-                final_state=CallFinalState.TRANSFERIDA_HUMANO,
+                final_state=CallFinalState.EM_ANDAMENTO,
             )
             return self._finalize_invocation(
                 parsed,
@@ -322,7 +329,7 @@ class ToolDispatcher:
                     error=ToolError(code="VALIDATION", message="Apresente a busca atual antes da proxima"),
                     data={"retryable": True, "attempt": 0, "recovery_action": "wait_current_search",
                           "upstream_code": "BATCH_DEFERRED"},
-                    final_state=CallFinalState.RESOLVIDA_AUTOMATICO),
+                    final_state=CallFinalState.EM_ANDAMENTO),
                 call_id=call_id, tenant_id=tenant_id, started_at=started_at,
                 event_type="tool_deferred", error_code="VALIDATION")
 
@@ -344,7 +351,13 @@ class ToolDispatcher:
             tool_call_id=parsed.tool_call_id,
             implementation_key=implementation_key,
         )
-        error_code = response.error.code if response.error else None
+        error_code = (
+            response.data.get("upstream_code")
+            if response.data and response.data.get("upstream_code")
+            else response.error.code
+            if response.error
+            else None
+        )
         return self._finalize_invocation(
             parsed,
             response,
@@ -374,7 +387,7 @@ class ToolDispatcher:
             to_number=resolution.to_number,
             tenant_identifier=resolution.identifier,
             resolution_source=resolution.source,
-            final_state=CallFinalState.TRANSFERIDA_HUMANO,
+            final_state=CallFinalState.EM_ANDAMENTO,
             implementation_key=implementation_key,
         )
         error = ToolError(code="VALIDATION", message="tenant nao resolvido")
@@ -382,7 +395,7 @@ class ToolDispatcher:
             ok=False,
             tool_name=parsed.tool_name,
             error=error,
-            final_state=CallFinalState.TRANSFERIDA_HUMANO,
+            final_state=CallFinalState.EM_ANDAMENTO,
         )
         return self._finalize_invocation(
             parsed,
@@ -425,7 +438,7 @@ class ToolDispatcher:
                 call_id=call_id,
                 tool_call_id=parsed.tool_call_id,
                 tool_name=parsed.tool_name,
-                final_state=CallFinalState.TRANSFERIDA_HUMANO,
+                final_state=CallFinalState.EM_ANDAMENTO,
                 message=str(exc),
                 implementation_key=implementation_key,
             )
@@ -433,7 +446,7 @@ class ToolDispatcher:
                 ok=False,
                 error=ToolError(code="VALIDATION", message="argumentos invalidos"),
                 tool_name=parsed.tool_name,
-                final_state=CallFinalState.TRANSFERIDA_HUMANO,
+                final_state=CallFinalState.EM_ANDAMENTO,
             )
         except BusinessRuleError as exc:
             attempt = exc.attempt if exc.attempt is not None else record_business_error_attempt(
@@ -447,11 +460,7 @@ class ToolDispatcher:
             retryable = exc.retryable and (
                 not exc.handoff_after_retry or attempt < BUSINESS_ERROR_MAX_ATTEMPTS
             )
-            final_state = (
-                CallFinalState.RESOLVIDA_AUTOMATICO
-                if retryable
-                else CallFinalState.TRANSFERIDA_HUMANO
-            )
+            final_state = CallFinalState.EM_ANDAMENTO
             self.log.warning(
                 "tool_business_validation",
                 event_type="business_error",
@@ -490,19 +499,45 @@ class ToolDispatcher:
                 call_id=call_id,
                 tool_call_id=parsed.tool_call_id,
                 tool_name=parsed.tool_name,
-                final_state=CallFinalState.TRANSFERIDA_HUMANO,
-                message=str(exc),
+                final_state=CallFinalState.EM_ANDAMENTO,
+                error_type=exc.__class__.__name__,
                 implementation_key=implementation_key,
             )
-            return ToolResponse(
-                ok=False,
-                error=ToolError(code="TIMEOUT", message=str(exc)),
-                data={"retryable": False},
+            return self._upstream_failure(parsed.tool_name, "UPSTREAM_TIMEOUT")
+        except UpstreamToolError as exc:
+            self.log.error(
+                "tool_upstream_failure",
+                event_type="error",
+                tenant_id=tenant_id,
+                call_id=call_id,
+                tool_call_id=parsed.tool_call_id,
                 tool_name=parsed.tool_name,
-                final_state=CallFinalState.TRANSFERIDA_HUMANO,
+                final_state=CallFinalState.EM_ANDAMENTO,
+                upstream_code=exc.upstream_code,
+                implementation_key=implementation_key,
             )
+            return self._upstream_failure(parsed.tool_name, exc.upstream_code)
+        except ConnectionError as exc:
+            self.log.error(
+                "tool_network_error",
+                event_type="error",
+                tenant_id=tenant_id,
+                call_id=call_id,
+                tool_call_id=parsed.tool_call_id,
+                tool_name=parsed.tool_name,
+                final_state=CallFinalState.EM_ANDAMENTO,
+                error_type=exc.__class__.__name__,
+                implementation_key=implementation_key,
+            )
+            return self._upstream_failure(parsed.tool_name, "UPSTREAM_NETWORK")
         except HTTPException as exc:
-            error_code = "UPSTREAM_503" if exc.status_code >= 500 else "VALIDATION"
+            upstream_code = (
+                "UPSTREAM_AUTH"
+                if exc.status_code in {401, 403}
+                else "UPSTREAM_5XX"
+                if exc.status_code >= 500
+                else "UPSTREAM_UNEXPECTED"
+            )
             self.log.error(
                 "tool_http_exception",
                 event_type="error",
@@ -510,18 +545,11 @@ class ToolDispatcher:
                 call_id=call_id,
                 tool_call_id=parsed.tool_call_id,
                 tool_name=parsed.tool_name,
-                final_state=CallFinalState.TRANSFERIDA_HUMANO,
+                final_state=CallFinalState.EM_ANDAMENTO,
                 status_code=exc.status_code,
-                message=str(exc.detail),
                 implementation_key=implementation_key,
             )
-            return ToolResponse(
-                ok=False,
-                error=ToolError(code=error_code, message=str(exc.detail)),
-                data={"retryable": False},
-                tool_name=parsed.tool_name,
-                final_state=CallFinalState.TRANSFERIDA_HUMANO,
-            )
+            return self._upstream_failure(parsed.tool_name, upstream_code)
         except ValueError as exc:
             self.log.warning(
                 "tool_validation",
@@ -530,7 +558,7 @@ class ToolDispatcher:
                 call_id=call_id,
                 tool_call_id=parsed.tool_call_id,
                 tool_name=parsed.tool_name,
-                final_state=CallFinalState.TRANSFERIDA_HUMANO,
+                final_state=CallFinalState.EM_ANDAMENTO,
                 message=str(exc),
                 implementation_key=implementation_key,
             )
@@ -538,27 +566,38 @@ class ToolDispatcher:
                 ok=False,
                 error=ToolError(code="VALIDATION", message=str(exc)),
                 tool_name=parsed.tool_name,
-                final_state=CallFinalState.TRANSFERIDA_HUMANO,
+                final_state=CallFinalState.EM_ANDAMENTO,
             )
-        except RuntimeError as exc:
+        except Exception as exc:
             self.log.error(
-                "tool_upstream_503",
+                "tool_upstream_unexpected",
                 event_type="error",
                 tenant_id=tenant_id,
                 call_id=call_id,
                 tool_call_id=parsed.tool_call_id,
                 tool_name=parsed.tool_name,
-                final_state=CallFinalState.TRANSFERIDA_HUMANO,
-                message=str(exc),
+                final_state=CallFinalState.EM_ANDAMENTO,
+                error_type=exc.__class__.__name__,
                 implementation_key=implementation_key,
             )
-            return ToolResponse(
-                ok=False,
-                error=ToolError(code="UPSTREAM_503", message=str(exc)),
-                data={"retryable": False},
-                tool_name=parsed.tool_name,
-                final_state=CallFinalState.TRANSFERIDA_HUMANO,
-            )
+            return self._upstream_failure(parsed.tool_name, "UPSTREAM_UNEXPECTED")
+
+    @staticmethod
+    def _upstream_failure(tool_name: str, upstream_code: str) -> ToolResponse:
+        return ToolResponse(
+            ok=False,
+            error=ToolError(
+                code="UPSTREAM_503",
+                message="Nao foi possivel concluir a consulta agora",
+            ),
+            data={
+                "retryable": False,
+                "recovery_action": "offer_handoff",
+                "upstream_code": upstream_code,
+            },
+            tool_name=tool_name,
+            final_state=CallFinalState.EM_ANDAMENTO,
+        )
 
     def _log_tenant_fallback(
         self,

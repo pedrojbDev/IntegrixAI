@@ -4,7 +4,7 @@ import unittest
 from contextlib import ExitStack
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -14,6 +14,7 @@ from app.config import Settings
 from app.core.tools.dispatcher import ToolDispatcher
 from app.core.tools.registry import TenantToolRegistry
 from app.db import Base
+from app.models.call_event import CallEvent
 from app.models.vapi_call_slot_state import VapiCallSlotState
 from app.models.tool_invocation import ToolBusinessErrorAttempt
 from app.platform.services.vapi_event_ingestion import VapiEventIngestionService
@@ -70,6 +71,15 @@ class ConversationFlowTests(unittest.IsolatedAsyncioTestCase):
 
     def tool(self, id='tc1', city='Salvador', query='Cardiologia'):
         return {'id':id,'function':{'name':'search_providers','arguments':{'cpf':CPF,'city':city,'query':query}}}
+
+    def direct_search(self, city='Salvador', query='Cardiologia', tenant='tenant_a'):
+        from app.tenants.pbsaude.workflows.search_providers import _search_providers
+        return _search_providers(
+            self.tool(city=city, query=query)['function']['arguments'],
+            self.settings,
+            'same-call',
+            tenant,
+        )
 
     async def dispatch(self, messages, tools, rev=1, authorized=True):
         request=SimpleNamespace(headers={'x-webhook-secret':'test'} if authorized else {})
@@ -624,3 +634,343 @@ class ConversationFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual('closed', state.phase)
         self.assertFalse(state.conversation_meta['recovery_attempts'])
         self.assertIsNone(state.conversation_meta['recovery_field'])
+
+    def test_recovery_gate_requires_new_field_evidence_before_catalog_or_provider(self):
+        self.settings.pbsaude_vapi_recovery_gate_enabled = True
+        messages = self.standard()
+        messages[-1]['message'] = 'Exame de vista'
+        self.ingest(messages)
+        with self.assertRaises(BusinessRuleError) as rejected:
+            self.direct_search(query='Exame de vista')
+        self.assertEqual('ESPECIALIDADE_INVALIDA', rejected.exception.code)
+
+        state = self.state()
+        meta = state.conversation_meta
+        self.assertEqual('especialidade', meta['recovery_field'])
+        self.assertEqual(meta['last_user'], meta['recovery_anchor_user'])
+        self.assertEqual('ESPECIALIDADE_INVALIDA', meta['recovery_code'])
+        self.assertEqual(64, len(meta['rejected_attempt_hmac']))
+        self.assertNotIn('Exame de vista', json.dumps(meta))
+
+        with (
+            patch('app.tenants.pbsaude.workflows.search_providers.get_specialty_catalog',
+                  side_effect=AssertionError('catalog accessed while recovery is pinned')),
+            patch('app.tenants.pbsaude.workflows.search_providers.get_data_provider',
+                  side_effect=AssertionError('provider accessed while recovery is pinned')),
+        ):
+            with self.assertRaises(BusinessRuleError) as blocked:
+                self.direct_search(query='Exame de vista')
+        self.assertEqual('USER_TURN_REQUIRED', blocked.exception.code)
+        self.assertEqual('collect_especialidade', blocked.exception.details['recovery_action'])
+        self.assertEqual(0, blocked.exception.attempt)
+        self.provider.search_providers.assert_not_called()
+
+    def test_missing_recoverable_argument_pins_backend_field(self):
+        self.settings.pbsaude_vapi_recovery_gate_enabled = True
+        self.ingest(self.standard())
+        from app.tenants.pbsaude.workflows.search_providers import _search_providers
+        with self.assertRaises(BusinessRuleError) as error:
+            _search_providers(
+                {'cpf': CPF, 'city': 'Salvador'},
+                self.settings,
+                'same-call',
+                'tenant_a',
+            )
+        self.assertEqual('ESPECIALIDADE_INVALIDA', error.exception.code)
+        self.assertEqual('especialidade', self.state().conversation_meta['recovery_field'])
+        self.provider.search_providers.assert_not_called()
+
+    def test_recovery_city_binding_survives_success_and_newer_history_replay(self):
+        self.settings.pbsaude_vapi_recovery_gate_enabled = True
+        self.ingest(self.standard())
+        with self.assertRaises(BusinessRuleError):
+            self.direct_search(city='Manaus')
+        messages = self.extended(('bot', 'Qual especialidade?'), ('user', 'Camaçari'))
+        self.ingest(messages, rev=2)
+        self.direct_search(city='Camaçari')
+        self.assertNotIn('recovery_field', self.state().conversation_meta)
+
+        self.ingest(messages, rev=3)
+        self.assertIn(keyed_hmac(self.settings.vapi_slot_state_hmac_secret, 'camacari'),
+                      self.state().city_term_hmacs)
+        self.validate(city='Camaçari')
+        result, _ = self.direct_search(city='Camaçari')
+        self.assertTrue(result['reused_result'])
+        self.provider.search_providers.assert_called_once()
+        serialized = json.dumps(self.state().conversation_meta)
+        for plaintext in (CPF, 'camacari', 'Camaçari', 'Cardiologista'):
+            self.assertNotIn(plaintext, serialized)
+
+    def test_recovery_pinned_before_search_transaction_blocks_provider(self):
+        from app.tenants.pbsaude.search_execution import execute_search
+
+        self.settings.pbsaude_vapi_recovery_gate_enabled = True
+        self.ingest(self.standard())
+
+        def pin_then_execute(**kwargs):
+            with self.assertRaises(BusinessRuleError) as second:
+                self.direct_search(city='Manaus')
+            self.assertEqual('SLOT_UNCONFIRMED', second.exception.code)
+            return execute_search(**kwargs)
+
+        with patch('app.tenants.pbsaude.workflows.search_providers.execute_search', pin_then_execute):
+            with self.assertRaises(BusinessRuleError) as first:
+                self.direct_search()
+        self.assertEqual('USER_TURN_REQUIRED', first.exception.code)
+        self.assertEqual('cidade', self.state().conversation_meta['recovery_field'])
+        self.provider.search_providers.assert_not_called()
+
+    def test_recovery_pinned_during_provider_call_is_not_cleared_on_completion(self):
+        self.settings.pbsaude_vapi_recovery_gate_enabled = True
+        self.ingest(self.standard())
+
+        def pin_during_provider(*args, **kwargs):
+            with self.assertRaises(BusinessRuleError) as second:
+                self.direct_search(city='Manaus')
+            self.assertEqual('SLOT_UNCONFIRMED', second.exception.code)
+            return []
+
+        self.provider.search_providers.side_effect = pin_during_provider
+        with self.assertRaises(BusinessRuleError) as first:
+            self.direct_search()
+        self.assertEqual('USER_TURN_REQUIRED', first.exception.code)
+        self.assertEqual('cidade', self.state().conversation_meta['recovery_field'])
+        self.provider.search_providers.assert_called_once()
+
+    def test_existing_recovery_precedes_malformed_new_arguments(self):
+        from app.tenants.pbsaude.workflows.search_providers import _search_providers
+
+        self.settings.pbsaude_vapi_recovery_gate_enabled = True
+        self.ingest(self.standard())
+        with self.assertRaises(BusinessRuleError):
+            self.direct_search(query='Especialidade inventada')
+        with self.assertRaises(BusinessRuleError) as blocked:
+            _search_providers({'cpf': CPF, 'query': 'Cardiologia'},
+                              self.settings, 'same-call', 'tenant_a')
+        self.assertEqual('USER_TURN_REQUIRED', blocked.exception.code)
+        self.assertEqual('collect_especialidade', blocked.exception.details['recovery_action'])
+        self.assertEqual(0, blocked.exception.attempt)
+        self.assertEqual('especialidade', self.state().conversation_meta['recovery_field'])
+        self.provider.search_providers.assert_not_called()
+
+    def test_recovery_attempts_count_distinct_eligible_user_turns(self):
+        self.settings.pbsaude_vapi_recovery_gate_enabled = True
+        messages = self.standard()
+        messages[-1]['message'] = 'Exame de vista'
+        self.ingest(messages)
+        with self.assertRaises(BusinessRuleError) as first:
+            self.direct_search(query='Exame de vista')
+        self.assertEqual(1, first.exception.attempt)
+
+        messages.extend([
+            {'role': 'bot', 'message': 'Qual especialidade?', 'time': self.base + 6000},
+            {'role': 'user', 'message': 'Exame de vista', 'time': self.base + 7000},
+        ])
+        self.ingest(messages, rev=2)
+        with self.assertRaises(BusinessRuleError) as second:
+            self.direct_search(query='Exame de vista')
+        self.assertEqual(2, second.exception.attempt)
+        with self.assertRaises(BusinessRuleError) as replay:
+            self.direct_search(query='Exame de vista')
+        self.assertEqual('USER_TURN_REQUIRED', replay.exception.code)
+        self.assertEqual(0, replay.exception.attempt)
+
+    def test_recovery_gate_ignores_noise_agent_silence_and_incidental_dtmf(self):
+        self.settings.pbsaude_vapi_recovery_gate_enabled = True
+        messages = self.standard()
+        self.ingest(messages)
+        with self.assertRaises(BusinessRuleError) as first:
+            self.direct_search(city='Manaus')
+        self.assertEqual('SLOT_UNCONFIRMED', first.exception.code)
+
+        additions = (
+            ('user', 'Alô?'),
+            ('bot', 'Só um momento.'),
+            ('user', ''),
+            ('user', "User's Keypad Entry: 7#"),
+            ('user', 'Oi'),
+        )
+        for index, (role, text) in enumerate(additions, 1):
+            messages.append({'role': role, 'message': text, 'time': self.base + (6 + index) * 1000})
+            self.ingest(messages, rev=index + 1)
+            with self.assertRaises(BusinessRuleError) as result:
+                self.direct_search(city='Salvador')
+            self.assertEqual('USER_TURN_REQUIRED', result.exception.code)
+            self.assertEqual(0, result.exception.attempt)
+        self.provider.search_providers.assert_not_called()
+
+    def test_recovery_binds_free_speech_and_confirmation_to_pinned_field(self):
+        self.settings.pbsaude_vapi_recovery_gate_enabled = True
+        messages = self.standard()
+        messages[-1]['message'] = 'Exame de vista'
+        self.ingest(messages)
+        with self.assertRaises(BusinessRuleError):
+            self.direct_search(query='Exame de vista')
+
+        messages.extend([
+            {'role': 'bot', 'message': 'A cidade é Camaçari, certo?', 'time': self.base + 6000},
+            {'role': 'user', 'message': 'Sim', 'time': self.base + 7000},
+        ])
+        self.ingest(messages, rev=2)
+        with self.assertRaises(BusinessRuleError) as wrong_confirmation:
+            self.direct_search(city='Salvador', query='Urologia')
+        self.assertEqual('USER_TURN_REQUIRED', wrong_confirmation.exception.code)
+        self.assertEqual('especialidade', self.state().conversation_meta['recovery_field'])
+
+        messages.append({
+            'role': 'user',
+            'message': 'Corrigindo a cidade: Camaçari',
+            'time': self.base + 8000,
+        })
+        self.ingest(messages, rev=3)
+        with self.assertRaises(BusinessRuleError) as other_field_correction:
+            self.direct_search(city='Camaçari', query='Urologia')
+        self.assertEqual('USER_TURN_REQUIRED', other_field_correction.exception.code)
+        self.assertEqual('especialidade', self.state().conversation_meta['recovery_field'])
+
+        messages.extend([
+            {'role': 'bot', 'message': 'Você quis dizer urologista, certo?', 'time': self.base + 9000},
+            {'role': 'user', 'message': 'Sim', 'time': self.base + 10000},
+        ])
+        self.ingest(messages, rev=4)
+        confirmed = self.direct_search(city='Camaçari', query='Urologia')
+        self.assertEqual([], confirmed[0]['providers'])
+        self.assertNotIn('recovery_field', self.state().conversation_meta)
+        self.provider.search_providers.assert_called_once()
+
+        # A fresh recovery accepts ordinary speech as the backend-pinned city,
+        # even if the model asks an unrelated question in between.
+        self.provider.search_providers.reset_mock()
+        self.provider.search_providers.side_effect = BusinessRuleError(
+            code='CIDADE_INVALIDA', field='cidade', message='Cidade invalida')
+        messages.extend([
+            {'role': 'user', 'message': 'Consulte novamente', 'time': self.base + 11000},
+        ])
+        self.ingest(messages, rev=5)
+        with self.assertRaises(BusinessRuleError) as failed:
+            self.direct_search(city='Camaçari', query='Urologia')
+        self.assertEqual('CIDADE_INVALIDA', failed.exception.code)
+        self.provider.search_providers.side_effect = None
+        messages.extend([
+            {'role': 'bot', 'message': 'Qual especialidade?', 'time': self.base + 12000},
+            {'role': 'user', 'message': 'Salvador', 'time': self.base + 13000},
+        ])
+        self.ingest(messages, rev=6)
+        recovered = self.direct_search(city='Salvador', query='Urologia')
+        self.assertEqual([], recovered[0]['providers'])
+
+    def test_provider_search_events_are_persisted_without_plaintext_inputs(self):
+        self.settings.pbsaude_vapi_recovery_gate_enabled = True
+        self.ingest(self.standard())
+        self.direct_search()
+        self.direct_search()
+
+        messages = self.extended(('user', 'Consulte novamente'))
+        self.ingest(messages, rev=3)
+        self.provider.search_providers.side_effect = TimeoutError('secret technical detail')
+        with self.assertRaises(TimeoutError):
+            self.direct_search()
+        self.provider.search_providers.side_effect = None
+        with self.assertRaises(BusinessRuleError):
+            self.direct_search(city='Manaus')
+        with self.assertRaises(BusinessRuleError) as blocked:
+            self.direct_search(city='Salvador')
+        self.assertEqual('USER_TURN_REQUIRED', blocked.exception.code)
+
+        with self.sessions() as session:
+            events = session.scalars(
+                select(CallEvent).where(CallEvent.tool_name == 'search_providers')
+            ).all()
+        event_types = {event.event_type for event in events}
+        self.assertTrue({
+            'provider_search_requested',
+            'provider_search_blocked',
+            'provider_search_upstream_started',
+            'provider_search_completed',
+            'provider_search_result_reused',
+            'provider_search_failed',
+            'provider_handoff_recommended',
+        }.issubset(event_types))
+        serialized = json.dumps([event.payload_masked for event in events])
+        for plaintext in (CPF, 'Salvador', 'Cardiologia', 'secret technical detail'):
+            self.assertNotIn(plaintext, serialized)
+
+    async def test_recovery_gate_opt_out_keeps_legacy_turn_counting(self):
+        self.ingest(self.standard())
+        with patch(
+            'app.tenants.pbsaude.workflows.search_providers.asyncio.to_thread',
+            new=AsyncMock(side_effect=lambda function, *args: function(*args)),
+        ), patch(
+            'app.tenants.pbsaude.workflows.search_providers._search_providers',
+            side_effect=BusinessRuleError(
+                code='CIDADE_INVALIDA', field='cidade', message='Cidade invalida'),
+        ):
+            first = (await self.dispatch(self.standard(), [self.tool('legacy-first')]))['results'][0]['result']
+            second = (await self.dispatch(self.standard(), [self.tool('legacy-second')]))['results'][0]['result']
+
+        self.assertEqual('CIDADE_INVALIDA', first['data']['upstream_code'])
+        self.assertEqual(1, first['data']['attempt'])
+        self.assertEqual(1, second['data']['attempt'])
+        self.assertNotIn('recovery_anchor_user', self.state().conversation_meta)
+
+    def test_search_lifecycle_events_emit_without_slot_guard_or_duplication(self):
+        self.settings.vapi_slot_guard_enabled = False
+        self.direct_search()
+        with self.sessions() as session:
+            unguarded_events = session.scalars(
+                select(CallEvent).where(CallEvent.tool_name == 'search_providers')
+            ).all()
+        self.assertEqual(
+            ['provider_search_requested', 'provider_search_upstream_started', 'provider_search_completed'],
+            [event.event_type for event in unguarded_events],
+        )
+
+        self.settings.vapi_slot_guard_enabled = True
+        self.ingest(self.standard(), rev=2)
+        self.direct_search()
+        with self.sessions() as session:
+            guarded_events = session.scalars(
+                select(CallEvent).where(CallEvent.tool_name == 'search_providers')
+            ).all()
+        self.assertEqual(2, sum(event.event_type == 'provider_search_upstream_started' for event in guarded_events))
+        self.assertEqual(2, sum(event.event_type == 'provider_search_completed' for event in guarded_events))
+
+    async def test_async_dispatcher_blocks_recovery_replay_without_new_user_turn(self):
+        self.settings.pbsaude_vapi_recovery_gate_enabled = True
+        messages = self.standard()
+        messages[-1]['message'] = 'Exame de vista'
+        with patch(
+            'app.tenants.pbsaude.workflows.search_providers.asyncio.to_thread',
+            new=AsyncMock(side_effect=lambda function, *args: function(*args)),
+        ):
+            first = (await self.dispatch(messages, [self.tool('recovery-first', query='Exame de vista')]))['results'][0]['result']
+            replay = (await self.dispatch(messages, [self.tool('recovery-replay', query='Exame de vista')]))['results'][0]['result']
+
+        self.assertEqual('ESPECIALIDADE_INVALIDA', first['data']['upstream_code'])
+        self.assertFalse(replay['ok'])
+        self.assertEqual('USER_TURN_REQUIRED', replay['data']['upstream_code'])
+        self.assertEqual(0, replay['data']['attempt'])
+        self.assertEqual('collect_especialidade', replay['data']['recovery_action'])
+        self.assertEqual('EM_ANDAMENTO', replay['final_state'])
+        self.provider.search_providers.assert_not_called()
+
+    def test_search_event_persistence_failure_logs_safe_operational_signal(self):
+        from app.tenants.pbsaude.search_events import persist_search_event
+
+        with (
+            patch('app.tenants.pbsaude.search_events.slot_guard.SessionLocal', side_effect=RuntimeError('db unavailable')),
+            patch('app.tenants.pbsaude.search_events.log') as log,
+        ):
+            persist_search_event(
+                settings=self.settings,
+                tenant_id='tenant_a',
+                call_id='same-call',
+                event_type='provider_search_requested',
+            )
+
+        log.warning.assert_called_once_with(
+            'provider_search_event_persistence_failed',
+            tenant_id='tenant_a',
+            call_id='same-call',
+            event_type='provider_search_requested',
+        )

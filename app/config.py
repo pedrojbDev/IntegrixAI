@@ -69,6 +69,7 @@ class Settings(BaseSettings):
     provider_max_results: int = 3
     pbsaude_provider_policy_enabled: bool = False
     pbsaude_provider_policy_business_override_enabled: bool = False
+    pbsaude_vapi_recovery_gate_enabled: bool = False
     external_api_tenant_configs: dict[str, dict[str, str | float | bool | None]] = Field(
         default_factory=dict
     )

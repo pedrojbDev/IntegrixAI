@@ -2,6 +2,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 
+from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -324,7 +325,7 @@ class ToolDispatcherTests(unittest.IsolatedAsyncioTestCase):
         search.assert_awaited_once()
         self.assertEqual(["tc_handoff", "tc_search"], [item["toolCallId"] for item in result["results"]])
 
-    async def test_business_error_retries_once_then_handoffs(self) -> None:
+    async def test_business_error_retries_without_claiming_handoff(self) -> None:
         session_local = self._session_local()
         settings = Settings(
             _env_file=None,
@@ -367,12 +368,160 @@ class ToolDispatcherTests(unittest.IsolatedAsyncioTestCase):
 
         first_result = first["results"][0]["result"]
         second_result = second["results"][0]["result"]
-        self.assertEqual(CallFinalState.RESOLVIDA_AUTOMATICO, first_result["final_state"])
+        self.assertEqual(CallFinalState.EM_ANDAMENTO, first_result["final_state"])
         self.assertTrue(first_result["data"]["retryable"])
         self.assertEqual(1, first_result["data"]["attempt"])
-        self.assertEqual(CallFinalState.TRANSFERIDA_HUMANO, second_result["final_state"])
+        self.assertEqual(CallFinalState.EM_ANDAMENTO, second_result["final_state"])
         self.assertFalse(second_result["data"]["retryable"])
         self.assertEqual(2, second_result["data"]["attempt"])
+
+    async def test_failures_offer_handoff_without_reporting_transfer(self) -> None:
+        cases = (
+            (TimeoutError("slow upstream"), "UPSTREAM_TIMEOUT"),
+            (ConnectionError("connection refused"), "UPSTREAM_NETWORK"),
+            (HTTPException(status_code=401, detail="unauthorized"), "UPSTREAM_AUTH"),
+            (HTTPException(status_code=503, detail="unavailable"), "UPSTREAM_5XX"),
+            (Exception("broken response"), "UPSTREAM_UNEXPECTED"),
+        )
+        for index, (failure, upstream_code) in enumerate(cases):
+            with self.subTest(upstream_code=upstream_code):
+                settings = Settings(
+                    _env_file=None,
+                    tenant_map={"+5511999999999": "tenant_a"},
+                )
+                registry = TenantToolRegistry()
+                registry.register(
+                    "pbsaude",
+                    "search_providers",
+                    AsyncMock(side_effect=failure),
+                )
+                dispatcher = ToolDispatcher(settings, registry=registry)
+                payload = {
+                    "message": {
+                        "call": {"id": f"call_{index}", "to": "+5511999999999"},
+                        "toolCallList": [{
+                            "id": f"tc_{index}",
+                            "name": "search_providers",
+                            "arguments": {"cpf": "12345678901", "city": "Salvador", "query": "Cardiologia"},
+                        }],
+                    }
+                }
+                with (
+                    patch("app.core.tools.dispatcher.record_call_event") as audit,
+                    patch("app.core.tools.dispatcher.metrics_store.record"),
+                ):
+                    result = await dispatcher.dispatch(SimpleNamespace(headers={}), payload)
+
+                response = result["results"][0]["result"]
+                self.assertFalse(response["ok"])
+                self.assertEqual("UPSTREAM_503", response["error"]["code"])
+                self.assertEqual(upstream_code, response["data"]["upstream_code"])
+                self.assertEqual("offer_handoff", response["data"]["recovery_action"])
+                self.assertFalse(response["data"]["retryable"])
+                self.assertEqual("EM_ANDAMENTO", response["final_state"])
+                self.assertEqual(upstream_code, audit.call_args.kwargs["error_code"])
+
+    async def test_dispatcher_audited_upstream_failures_reach_dashboard_metrics(self) -> None:
+        from datetime import datetime, timedelta, timezone
+
+        from app.core.ops.dashboard_service import get_health, get_overview, get_resilience, get_tools
+        from app.models.ops_sync_state import OpsSyncState
+        from app.models.vapi_call_cost import VapiCallCost
+
+        failures = (
+            HTTPException(status_code=401, detail='unauthorized'),
+            TimeoutError('slow'),
+            ConnectionError('disconnected'),
+            HTTPException(status_code=503, detail='unavailable'),
+            RuntimeError('invalid response'),
+        )
+        for failure in failures:
+            with self.subTest(failure=type(failure).__name__, status=getattr(failure, 'status_code', None)):
+                sessions = self._session_local()
+                now = datetime.now(timezone.utc)
+                with sessions() as session:
+                    session.add(VapiCallCost(
+                        call_id='audited-call', tenant_id='tenant_a', assistant_id='assistant_a',
+                        started_at=now - timedelta(minutes=1), cost_total_usd=1,
+                        cost_total_brl=5, synced_at=now,
+                    ))
+                    session.add(OpsSyncState(provider='vapi_costs', last_synced_at=now, updated_at=now))
+                    session.commit()
+                settings = Settings(_env_file=None, db_enabled=True, audit_write_mode='sync',
+                                    tenant_map={'+5511999999999': 'tenant_a'})
+                registry = TenantToolRegistry()
+                registry.register('pbsaude', 'search_providers', AsyncMock(side_effect=failure))
+                registry.register('pbsaude', 'validate_cpf', AsyncMock(return_value=({}, CallFinalState.EM_ANDAMENTO)))
+                payload = {'message': {
+                    'call': {'id': 'audited-call', 'to': '+5511999999999'},
+                    'toolCallList': [
+                        {'id': 'failed-search', 'name': 'search_providers',
+                         'arguments': {'cpf': '12345678901', 'city': 'Salvador', 'query': 'Cardiologia'}},
+                        {'id': 'valid-cpf', 'name': 'validate_cpf', 'arguments': {'cpf': '12345678901'}},
+                    ],
+                }}
+                with (
+                    patch('app.core.audit.service.SessionLocal', sessions),
+                    patch('app.core.tools.idempotency.SessionLocal', sessions),
+                    patch('app.core.tools.dispatcher.metrics_store.record'),
+                ):
+                    await ToolDispatcher(settings, registry).dispatch(SimpleNamespace(headers={}), payload)
+
+                scope = {'window': '24h', 'tenant_id': 'tenant_a', 'assistant_id': 'assistant_a'}
+                with sessions() as session:
+                    overview = get_overview(session, **scope)
+                    health = get_health(session, **scope)
+                    resilience = get_resilience(session, **scope)
+                    tools = get_tools(session, **scope)
+                    other = get_overview(session, **{**scope, 'tenant_id': 'tenant_b'})
+                for counters in (overview['kpis'], health['counters'], resilience['summary']):
+                    self.assertEqual(1, counters['technical_failure_events'])
+                    self.assertEqual(50.0, counters['technical_failure_rate_pct'])
+                self.assertEqual('critical', health['health_state'])
+                self.assertEqual('fresh', health['sync']['freshness_state'])
+                self.assertEqual('search_providers', resilience['top_failure_tools'][0]['tool_name'])
+                search = next(item for item in tools['items'] if item['tool_name'] == 'search_providers')
+                self.assertEqual(1, search['technical_failure_events'])
+                self.assertEqual(100.0, search['technical_failure_rate_pct'])
+                self.assertEqual(1, sum(point['value'] for point in resilience['series']['technical_failure_events']))
+                self.assertEqual(0, other['kpis']['technical_failure_events'])
+
+    async def test_validation_and_recoverable_business_errors_remain_in_progress(self) -> None:
+        settings = Settings(_env_file=None, tenant_map={"+5511999999999": "tenant_a"})
+        registry = TenantToolRegistry()
+        registry.register(
+            "pbsaude",
+            "search_providers",
+            AsyncMock(side_effect=BusinessRuleError(
+                code="CIDADE_SEM_COBERTURA",
+                message="sem cobertura",
+                retryable=False,
+                handoff_after_retry=False,
+                details={"recovery_action": "offer_handoff"},
+            )),
+        )
+        dispatcher = ToolDispatcher(settings, registry=registry)
+
+        def payload(arguments):
+            return {
+                "message": {
+                    "call": {"id": "call_progress", "to": "+5511999999999"},
+                    "toolCallList": [{"id": str(arguments), "name": "search_providers", "arguments": arguments}],
+                }
+            }
+
+        with (
+            patch("app.core.tools.dispatcher.record_call_event"),
+            patch("app.core.tools.dispatcher.metrics_store.record"),
+        ):
+            business = await dispatcher.dispatch(
+                SimpleNamespace(headers={}),
+                payload({"cpf": "12345678901", "city": "Salvador", "query": "Cardiologia"}),
+            )
+            invalid = await dispatcher.dispatch(SimpleNamespace(headers={}), payload("not-json"))
+
+        self.assertEqual("EM_ANDAMENTO", business["results"][0]["result"]["final_state"])
+        self.assertEqual("EM_ANDAMENTO", invalid["results"][0]["result"]["final_state"])
 
 
 if __name__ == "__main__":

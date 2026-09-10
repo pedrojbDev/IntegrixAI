@@ -2,11 +2,15 @@ import asyncio
 import json
 from typing import NoReturn
 
+from pydantic import ValidationError
+
 from ....config import Settings
 from ....logging import get_logger
+from ....core.tools.exceptions import UpstreamToolError
 from ....utils.enums import CallFinalState
 from ..catalog import get_specialty_catalog
 from ..search_execution import execute_search
+from ..search_events import persist_search_event
 from ....platform.services.vapi_conversation import normalize_text
 from ..contracts import SearchProvidersRequest, SearchProvidersResponse
 from ..integration.client import BusinessRuleError, ServiceUnavailable, get_data_provider
@@ -17,7 +21,13 @@ from ..provider_policy import (
     apply_provider_policy,
     apply_provider_policy_business_override,
 )
-from ..slot_guard import reopen_slot_collection, validate_search_slot_provenance, recovery_attempt, clear_recovery_attempts
+from ..slot_guard import (
+    clear_recovery_attempts,
+    enforce_recovery_gate,
+    recovery_attempt,
+    reopen_slot_collection,
+    validate_search_slot_provenance,
+)
 
 log = get_logger()
 
@@ -32,11 +42,25 @@ async def search_providers(args: dict, settings: Settings, call_id: str, tenant_
             return await asyncio.wait_for(asyncio.shield(worker), timeout=min(
                 settings.provider_timeout_seconds, settings.external_api_total_deadline_seconds))
         except asyncio.TimeoutError as exc:
-            raise TimeoutError("Timeout na busca de rede") from exc
+            error = TimeoutError("Timeout na busca de rede")
+            _persist_failure_events(settings, tenant_id, call_id, error)
+            error._search_event_recorded = True
+            raise error from exc
     except BusinessRuleError as exc:
-        if settings.vapi_slot_guard_enabled and not getattr(exc, "_vapi_recovery_applied", False):
-            exc.attempt = recovery_attempt(settings=settings, tenant_id=tenant_id, call_id=call_id,
-                                           field=exc.field, code=exc.code)
+        if (
+            settings.vapi_slot_guard_enabled
+            and not settings.pbsaude_vapi_recovery_gate_enabled
+            and not getattr(exc, "_vapi_recovery_applied", False)
+        ):
+            # Preserve the established guard behavior when the new authoritative
+            # recovery gate remains opt-in.
+            exc.attempt = recovery_attempt(
+                settings=settings,
+                tenant_id=tenant_id,
+                call_id=call_id,
+                field=exc.field,
+                code=exc.code,
+            )
         raise
 
 
@@ -45,14 +69,173 @@ def _consume_worker_exception(worker):
         worker.exception()
 
 
+def _rejected_value(args: dict, field: str | None) -> str | None:
+    if field == "cpf":
+        value = args.get("cpf")
+    elif field == "cidade":
+        value = args.get("city", args.get("cidade"))
+    elif field == "especialidade":
+        value = args.get("query", args.get("especialidade"))
+    else:
+        value = None
+    return str(value) if value is not None else None
+
+
+def _technical_upstream_code(exc: BaseException) -> str:
+    if isinstance(exc, TimeoutError):
+        return "UPSTREAM_TIMEOUT"
+    if isinstance(exc, UpstreamToolError):
+        return exc.upstream_code
+    if isinstance(exc, ConnectionError):
+        return "UPSTREAM_NETWORK"
+    return "UPSTREAM_UNEXPECTED"
+
+
+def _persist_failure_events(settings: Settings, tenant_id: str, call_id: str, exc: BaseException) -> None:
+    upstream_code = _technical_upstream_code(exc)
+    persist_search_event(
+        settings=settings,
+        tenant_id=tenant_id,
+        call_id=call_id,
+        event_type="provider_search_failed",
+        ok=False,
+        final_state=CallFinalState.EM_ANDAMENTO,
+        error_code=upstream_code,
+        payload={
+            "upstream_code": upstream_code,
+            "recovery_action": "offer_handoff",
+        },
+    )
+    _persist_handoff_recommended(settings, tenant_id, call_id, upstream_code)
+
+
+def _persist_handoff_recommended(settings: Settings, tenant_id: str, call_id: str,
+                                 upstream_code: str) -> None:
+    persist_search_event(
+        settings=settings,
+        tenant_id=tenant_id,
+        call_id=call_id,
+        event_type="provider_handoff_recommended",
+        ok=False,
+        final_state=CallFinalState.EM_ANDAMENTO,
+        error_code=upstream_code,
+        payload={
+            "upstream_code": upstream_code,
+            "recovery_action": "offer_handoff",
+        },
+    )
+
+
+def _validated_payload(args: dict, call_id: str) -> SearchProvidersRequest:
+    try:
+        return SearchProvidersRequest(**args, call_id=call_id, to_number=None)
+    except ValidationError as exc:
+        locations = {str(item) for error in exc.errors() for item in error.get("loc", ())}
+        if locations & {"query", "especialidade"}:
+            raise BusinessRuleError(
+                code="ESPECIALIDADE_INVALIDA",
+                field="especialidade",
+                message="Especialidade obrigatoria para busca de rede",
+                details={"recovery_action": "collect_especialidade"},
+            ) from exc
+        if locations & {"city", "cidade"}:
+            raise BusinessRuleError(
+                code="CIDADE_INVALIDA",
+                field="cidade",
+                message="Cidade obrigatoria para busca de rede",
+                details={"recovery_action": "collect_cidade"},
+            ) from exc
+        raise
+
+
 def _search_providers(
     args: dict,
     settings: Settings,
     call_id: str,
     tenant_id: str,
 ) -> tuple[dict, CallFinalState]:
+    persist_search_event(
+        settings=settings,
+        tenant_id=tenant_id,
+        call_id=call_id,
+        event_type="provider_search_requested",
+    )
+    try:
+        return _search_providers_impl(args, settings, call_id, tenant_id)
+    except BusinessRuleError as exc:
+        error = exc
+        if (
+            settings.pbsaude_vapi_recovery_gate_enabled
+            and error.field in {"cpf", "cidade", "especialidade"}
+            and error.code != "USER_TURN_REQUIRED"
+            and not getattr(error, "_vapi_recovery_applied", False)
+        ):
+            if error.code != "SLOT_UNCONFIRMED":
+                error = _apply_business_recovery(
+                    error,
+                    settings=settings,
+                    tenant_id=tenant_id,
+                    call_id=call_id,
+                )
+            error.attempt = recovery_attempt(
+                settings=settings,
+                tenant_id=tenant_id,
+                call_id=call_id,
+                field=error.field,
+                code=error.code,
+                rejected_value=_rejected_value(args, error.field),
+            )
+            error._vapi_recovery_applied = True
+        action = (error.details or {}).get("recovery_action")
+        event_type = "provider_search_failed" if action == "offer_handoff" else "provider_search_blocked"
+        persist_search_event(
+            settings=settings,
+            tenant_id=tenant_id,
+            call_id=call_id,
+            event_type=event_type,
+            ok=False,
+            final_state=CallFinalState.EM_ANDAMENTO,
+            error_code=error.code,
+            payload={
+                "upstream_code": error.code,
+                "recovery_action": action,
+                "attempt": error.attempt,
+            },
+        )
+        if action == "offer_handoff" or (
+            error.handoff_after_retry and (error.attempt or 0) >= 2
+        ):
+            _persist_handoff_recommended(settings, tenant_id, call_id, error.code)
+        if error is exc:
+            raise
+        raise error from exc
+    except BaseException as exc:
+        if not getattr(exc, "_search_event_recorded", False):
+            _persist_failure_events(settings, tenant_id, call_id, exc)
+            try:
+                exc._search_event_recorded = True
+            except (AttributeError, TypeError):
+                pass
+        raise
+
+
+def _search_providers_impl(
+    args: dict,
+    settings: Settings,
+    call_id: str,
+    tenant_id: str,
+) -> tuple[dict, CallFinalState]:
+    # A pending backend field takes priority over malformed model arguments.
+    enforce_recovery_gate(
+        settings=settings,
+        tenant_id=tenant_id,
+        call_id=call_id,
+        cpf=_rejected_value(args, "cpf"),
+        city=_rejected_value(args, "cidade") or "",
+        query=_rejected_value(args, "especialidade") or "",
+    )
+    payload = _validated_payload(args, call_id)
     provider = get_data_provider(settings)
-    payload = SearchProvidersRequest(**args, call_id=call_id, to_number=None)
     catalog = get_specialty_catalog(settings)
     validate_search_slot_provenance(
         settings=settings,
@@ -101,6 +284,10 @@ def _search_providers(
         canonical_specialty = payload.query
 
     def validate(session):
+        # Repeat under the call-state lock both before external access and at
+        # completion: another request may have pinned recovery since preflight.
+        enforce_recovery_gate(settings=settings, tenant_id=tenant_id, call_id=call_id,
+            cpf=payload.cpf, city=payload.city, query=payload.query, session=session)
         validate_search_slot_provenance(settings=settings, tenant_id=tenant_id, call_id=call_id,
             cpf=payload.cpf, city=payload.city, query=payload.query, catalog=catalog, session=session)
 
@@ -118,7 +305,8 @@ def _search_providers(
             error = _apply_business_recovery(error, settings=settings, tenant_id=tenant_id,
                                              call_id=call_id, session=session)
             error.attempt = recovery_attempt(settings=settings, tenant_id=tenant_id, call_id=call_id,
-                                            field=error.field, code=error.code, session=session)
+                                            field=error.field, code=error.code,
+                                            rejected_value=_rejected_value(args, error.field), session=session)
         # The async caller must not count this error again against a newer turn.
         error._vapi_recovery_applied = True
         return error
@@ -128,12 +316,35 @@ def _search_providers(
                                 normalize_text(canonical_specialty), payload.tipo_atendimento], ensure_ascii=True)
         result = execute_search(settings=settings, tenant_id=tenant_id, call_id=call_id,
                                 signature=signature, validate=validate, execute=execute,
-                                complete=complete, recover=recover)
+                                complete=complete, recover=recover,
+                                emit=lambda session, event_type, **kwargs: persist_search_event(
+                                    settings=settings,
+                                    tenant_id=tenant_id,
+                                    call_id=call_id,
+                                    event_type=event_type,
+                                    session=session,
+                                    **kwargs,
+                                ))
     else:
+        persist_search_event(
+            settings=settings,
+            tenant_id=tenant_id,
+            call_id=call_id,
+            event_type="provider_search_upstream_started",
+        )
         try:
             result = execute()
         except BusinessRuleError as exc:
             raise _apply_business_recovery(exc, settings=settings, tenant_id=tenant_id, call_id=call_id)
+        persist_search_event(
+            settings=settings,
+            tenant_id=tenant_id,
+            call_id=call_id,
+            event_type="provider_search_completed",
+            ok=True,
+            final_state=result[1],
+            payload={"provider_count": len((result[0] or {}).get("providers", []))},
+        )
     return result
 
 
@@ -157,7 +368,7 @@ def _execute_provider_search(payload, settings, call_id, tenant_id, provider, ca
         providers = policy_application.providers
         business_override_code = exc.code
     except ServiceUnavailable as exc:
-        raise RuntimeError(str(exc)) from exc
+        raise UpstreamToolError(str(exc), exc.upstream_code) from exc
     else:
         try:
             policy_application = apply_provider_policy(

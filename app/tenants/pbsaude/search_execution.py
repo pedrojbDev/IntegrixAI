@@ -86,7 +86,8 @@ def _evidence(session, tenant_id, call_id):
                       sort_keys=True), meta.get('refresh_turn') or ''
 
 
-def execute_search(*, settings, tenant_id, call_id, signature, validate, execute, complete=None, recover=None):
+def execute_search(*, settings, tenant_id, call_id, signature, validate, execute,
+                   complete=None, recover=None, emit=None):
     sessions = slot_guard.SessionLocal
     # Use the lock-owning connection for every short transaction: workers must
     # never need a second pooled connection to release their first one.
@@ -106,6 +107,11 @@ def execute_search(*, settings, tenant_id, call_id, signature, validate, execute
                 if row.status == 'succeeded' and not slot_guard._is_expired(row.expires_at):
                     if complete:
                         complete(session)
+                    if emit:
+                        emit(session, 'provider_search_result_reused', ok=True,
+                             final_state=row.final_state,
+                             payload={'reused_result': True,
+                                      'provider_count': len((row.result_payload or {}).get('providers', []))})
                     log.info('provider_search_result_reused', tenant_id=tenant_id, call_id=call_id)
                     return {**row.result_payload, 'reused_result': True}, row.final_state
                 # A running row whose session lock is gone is indeterminate.
@@ -114,6 +120,8 @@ def execute_search(*, settings, tenant_id, call_id, signature, validate, execute
             session.add(VapiSearchExecution(tenant_id=key[0], call_id=key[1], query_hmac=key[2],
                 refresh_hmac=key[3], status='running',
                 expires_at=datetime.now(timezone.utc) + timedelta(hours=settings.vapi_slot_state_retention_hours)))
+            if emit:
+                emit(session, 'provider_search_upstream_started')
         failure = None
         try:
             result, final_state = execute()
@@ -143,6 +151,10 @@ def execute_search(*, settings, tenant_id, call_id, signature, validate, execute
                 row.status = 'succeeded'
                 row.result_payload = result
                 row.final_state = final_state
+                if emit:
+                    emit(session, 'provider_search_completed', ok=True,
+                         final_state=final_state,
+                         payload={'provider_count': len((result or {}).get('providers', []))})
         if failure is not None:
             log.info('provider_search_result_discarded' if discarded else 'provider_search_failed',
                      tenant_id=tenant_id, call_id=call_id)

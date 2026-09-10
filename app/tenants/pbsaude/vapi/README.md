@@ -34,6 +34,11 @@ Eventos antigos não revivem estado expirado. Overflow do histórico bloqueia
 busca conservadoramente. Locks transacionais PostgreSQL isolam tenant/chamada,
 inclusive na criação de estado e na deduplicação de eventos simultâneos.
 
+`PBSAUDE_VAPI_RECOVERY_GATE_ENABLED=true` habilita separadamente a trava de
+recuperação autoritativa. A implantação começa em `false`: após uma rejeição, a
+busca seguinte exige evidência HMAC de um novo turno válido para o mesmo campo.
+Ruído, mensagens da assistente e DTMF incidental não liberam a trava.
+
 Uma busca por lote é admitida; as adicionais recebem `wait_current_search` com
 tentativa zero. A idempotência por tool-call ID continua válida. Isso não é uma
 fila persistente de buscas: o assistente mantém os pedidos e os retoma um por

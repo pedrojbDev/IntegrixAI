@@ -217,18 +217,40 @@ def _update_requests(result: dict, additions: list[dict], removals: tuple | list
     result["especialidade"] = sorted({term for request in current.values() for term in request["terms"]})
 
 
-def _reduce(turns: list[dict]) -> dict:
+def _reduce(
+    turns: list[dict],
+    *,
+    recovery_field: str | None = None,
+    recovery_anchor_user: str | None = None,
+) -> dict:
     result = {"cpf": None, "cidade": [], "especialidade": [], "pending": "cpf",
               "last_user": None, "last_order": -1, "failures": {}, "field_turns": {},
               "active_requests": [], "refresh_turn": None}
     confirmation = None
     assistant_seen = False
     unrelated_question = False
+    anchor_entry = next((entry for entry in turns if entry.get("key") == recovery_anchor_user), None)
+    anchor_order = anchor_entry.get("order") if anchor_entry else None
     for entry in turns:
+        recovery_active = (
+            recovery_field in {"cpf", "cidade", "especialidade"}
+            and anchor_order is not None
+            and entry["order"] > anchor_order
+        )
+        # Keep the backend's interpretation with the hashed turn itself. It
+        # must survive clearing active recovery and replaying newer snapshots.
+        if recovery_active and not entry.get("bound_recovery_field"):
+            entry["bound_recovery_field"] = recovery_field
+        bound_field = entry.get("bound_recovery_field")
         if entry["role"] == "assistant":
             assistant_seen = True
             unrelated_question = entry.get("unrelated_question", False)
-            if entry.get("question"):
+            if bound_field:
+                # Agent turns cannot redirect a backend-pinned recovery field.
+                # A same-field read-back can still provide an explicit proposal
+                # for a subsequent short confirmation.
+                result["pending"] = bound_field
+            elif entry.get("question"):
                 result["pending"] = entry["question"]
             confirmation = (
                 _confirmation_for_pending(entry, result)
@@ -237,7 +259,7 @@ def _reduce(turns: list[dict]) -> dict:
             continue
         result["last_user"] = entry["key"]
         result["last_order"] = entry["order"]
-        field = result["pending"]
+        field = bound_field or result["pending"]
         if entry.get("refresh"):
             result["refresh_turn"] = entry["key"]
         if entry.get("cpf_correction"):
@@ -348,6 +370,8 @@ def _reduce(turns: list[dict]) -> dict:
         # available to associate a question, so use only still-missing slots.
         if not assistant_seen and result["cpf"] and result["cidade"]:
             result["pending"] = "especialidade"
+    if recovery_field in {"cpf", "cidade", "especialidade"}:
+        result["pending"] = recovery_field
     return result
 
 
@@ -386,6 +410,8 @@ def capture_pbsaude_conversation(session, settings, tenant_id: str, call_id: str
         old = ledger.get(key)
         if old and old["revision"] >= revision:
             continue
+        if old and old.get("digest") == encoded["digest"] and old.get("bound_recovery_field"):
+            encoded["bound_recovery_field"] = old["bound_recovery_field"]
         ledger[key] = encoded
         changed = True
     if not changed:
@@ -394,7 +420,15 @@ def capture_pbsaude_conversation(session, settings, tenant_id: str, call_id: str
         # Fail closed, rather than silently dropping the turns proving a value.
         meta["overflow"] = True
         ledger = dict(sorted(ledger.items(), key=lambda p: p[1]["order"])[-MAX_TURNS:])
-    result = _reduce(sorted(ledger.values(), key=lambda e: (e["order"], e["key"])))
+    result = _reduce(
+        sorted(ledger.values(), key=lambda e: (e["order"], e["key"])),
+        recovery_field=meta.get("recovery_field") if settings.pbsaude_vapi_recovery_gate_enabled else None,
+        recovery_anchor_user=(
+            meta.get("recovery_anchor_user")
+            if settings.pbsaude_vapi_recovery_gate_enabled
+            else None
+        ),
+    )
     meta.update(turns=ledger, last_user=result["last_user"], last_order=result["last_order"],
                 field_turns=result["field_turns"], pending=result["pending"],
                 active_requests=result["active_requests"], refresh_turn=result["refresh_turn"], schema_version=2,
