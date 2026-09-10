@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 import subprocess
+import sys
 import unittest
 
 from scripts import backfill_vapi_voice_quality
@@ -11,7 +12,7 @@ class VoiceQualityBackfillCliTests(unittest.TestCase):
         repository = Path(__file__).resolve().parents[1]
         environment = {key: value for key, value in os.environ.items() if key != 'PYTHONPATH'}
         result = subprocess.run(
-            ['.venv/bin/python', '-B', 'scripts/backfill_vapi_voice_quality.py', '--help'],
+            [sys.executable, '-B', 'scripts/backfill_vapi_voice_quality.py', '--help'],
             cwd=repository, env=environment, capture_output=True, text=True, timeout=15,
         )
         self.assertEqual(0, result.returncode, result.stderr)
