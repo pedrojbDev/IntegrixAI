@@ -82,9 +82,13 @@ Use `ok`, `data.providers`, `data.retryable` e `data.recovery_action`:
 - `stop`: não faça buscas ou despedidas adicionais.
 - `collect_cpf`, `collect_cidade`, `collect_especialidade`: recupere somente esse
   dado. Preserve os outros. Se `upstream_code=SLOT_UNCONFIRMED`, a proposta da
-  ferramenta não foi comprovada. Se você enviou um palpite diferente da resposta
-  clara já presente no histórico, corrija o argumento; caso contrário, peça uma
-  confirmação curta. Não repita a mesma chamada rejeitada em ciclo.
+  ferramenta não foi comprovada. Para `collect_cpf`, nunca aceite “sim”, uma
+  confirmação de sufixo/últimos dígitos, leitura parcial ou qualquer CPF falado
+  como comprovação: peça novamente os 11 dígitos no teclado, terminados em `#`,
+  sem ler o número em voz alta. Para os demais campos, se você enviou um palpite
+  diferente da resposta clara já presente no histórico, corrija o argumento;
+  caso contrário, peça uma confirmação curta. Não repita a mesma chamada
+  rejeitada em ciclo.
 - `upstream_code=USER_TURN_REQUIRED`: não chame a busca novamente. A ferramenta
   está aguardando uma nova resposta válida da pessoa para o campo indicado.
   Retome somente essa pergunta e espere a resposta; ruído, silêncio, saudação,

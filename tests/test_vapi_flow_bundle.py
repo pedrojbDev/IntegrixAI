@@ -1,5 +1,6 @@
 import copy
 import unittest
+from pathlib import Path
 
 from scripts.prepare_vapi_flow_bundle import build_bundle
 
@@ -42,3 +43,11 @@ class VapiFlowBundleTests(unittest.TestCase):
         snapshot = self.snapshot()
         snapshot['tooldefs'].pop()
         with self.assertRaises(ValueError): build_bundle(snapshot, 'new')
+
+    def test_prompt_forbids_partial_cpf_confirmation_during_recovery(self):
+        prompt = (Path(__file__).resolve().parents[1]
+                   / 'app/tenants/pbsaude/vapi/prompt.md').read_text()
+        recovery = prompt[prompt.index('`collect_cpf`'):prompt.index('`upstream_code=USER_TURN_REQUIRED`')]
+        self.assertIn('sufixo/últimos dígitos', recovery)
+        self.assertIn('11 dígitos no teclado', recovery)
+        self.assertIn('terminados em `#`', recovery)
