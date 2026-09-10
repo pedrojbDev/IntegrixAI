@@ -225,15 +225,16 @@ def _search_providers_impl(
     call_id: str,
     tenant_id: str,
 ) -> tuple[dict, CallFinalState]:
-    payload = _validated_payload(args, call_id)
+    # A pending backend field takes priority over malformed model arguments.
     enforce_recovery_gate(
         settings=settings,
         tenant_id=tenant_id,
         call_id=call_id,
-        cpf=payload.cpf,
-        city=payload.city,
-        query=payload.query,
+        cpf=_rejected_value(args, "cpf"),
+        city=_rejected_value(args, "cidade") or "",
+        query=_rejected_value(args, "especialidade") or "",
     )
+    payload = _validated_payload(args, call_id)
     provider = get_data_provider(settings)
     catalog = get_specialty_catalog(settings)
     validate_search_slot_provenance(
@@ -283,6 +284,10 @@ def _search_providers_impl(
         canonical_specialty = payload.query
 
     def validate(session):
+        # Repeat under the call-state lock both before external access and at
+        # completion: another request may have pinned recovery since preflight.
+        enforce_recovery_gate(settings=settings, tenant_id=tenant_id, call_id=call_id,
+            cpf=payload.cpf, city=payload.city, query=payload.query, session=session)
         validate_search_slot_provenance(settings=settings, tenant_id=tenant_id, call_id=call_id,
             cpf=payload.cpf, city=payload.city, query=payload.query, catalog=catalog, session=session)
 

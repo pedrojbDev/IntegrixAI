@@ -1,9 +1,23 @@
+import os
+from pathlib import Path
+import subprocess
 import unittest
 
 from scripts import backfill_vapi_voice_quality
 
 
 class VoiceQualityBackfillCliTests(unittest.TestCase):
+    def test_documented_direct_command_runs_from_repository_root(self) -> None:
+        repository = Path(__file__).resolve().parents[1]
+        environment = {key: value for key, value in os.environ.items() if key != 'PYTHONPATH'}
+        result = subprocess.run(
+            ['.venv/bin/python', '-B', 'scripts/backfill_vapi_voice_quality.py', '--help'],
+            cwd=repository, env=environment, capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        for argument in ('--tenant-id', '--start', '--end'):
+            self.assertIn(argument, result.stdout)
+
     def test_parse_args_requires_explicit_tenant_and_half_open_window_bounds(self) -> None:
         """Dropping a required bound would permit a cross-tenant or unbounded import."""
         for args in (

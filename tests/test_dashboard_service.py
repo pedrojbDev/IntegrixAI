@@ -154,6 +154,20 @@ class DashboardServiceTests(unittest.TestCase):
         self.assertEqual("search_providers", resilience["top_failure_tools"][0]["tool_name"])
         self.assertEqual("search_providers", resilience["business_error_tools"][0]["tool_name"])
 
+    def test_inflight_search_block_is_not_a_wait_for_user_turn(self) -> None:
+        sessions = self._session_local()
+        with sessions() as session:
+            session.add(CallEvent(
+                tenant_id='tenant_a', call_id='inflight-call', tool_name='search_providers',
+                event_type='provider_search_blocked', error_code='BATCH_DEFERRED',
+                payload_masked={'recovery_action': 'wait_current_search'},
+                created_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+            ))
+            session.commit()
+            result = get_resilience(session, window='24h', tenant_id='tenant_a', assistant_id=None)
+        self.assertEqual(1, result['search_funnel']['blocked_calls'])
+        self.assertEqual(0, result['slot_blocks']['waiting_for_new_turn'])
+
     def test_sixty_day_cost_window_excludes_older_calls(self) -> None:
         session_local = self._session_local()
         now = datetime.now(timezone.utc)

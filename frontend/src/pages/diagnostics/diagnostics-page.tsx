@@ -11,6 +11,7 @@ import { useDashboardPreferences } from "@/features/shared-dashboard/dashboard-p
 import { useDiagnosticsQueries } from "@/hooks/use-dashboard-queries"
 import { useRefreshEvent } from "@/hooks/use-refresh-event"
 import { formatDateTimeBR, formatDurationMs, formatNumberBR, formatPercent } from "@/lib/format"
+import { mergeVoiceQualitySeries } from "./voice-quality-series"
 
 function healthLabel(value: string) {
   if (value === "stable") return "Estável"
@@ -52,6 +53,11 @@ export function DiagnosticsPage() {
   if (!health || !resilience) {
     return <EmptyState description="A API não retornou sinais de diagnóstico para a janela atual." title="Sem diagnóstico" />
   }
+
+  const voiceQualitySeries = mergeVoiceQualitySeries(
+    resilience.series.turnLatencyAverageMs,
+    resilience.series.assistantInterruptions,
+  )
 
   return (
     <div className="space-y-4">
@@ -225,17 +231,28 @@ export function DiagnosticsPage() {
           <CardHeader>
             <SectionHeader description="Latência média e interrupções por período da janela atual." title="Tendência de qualidade" />
           </CardHeader>
-          <CardContent>
-            {resilience.series.turnLatencyAverageMs.length || resilience.series.assistantInterruptions.length ? (
+          <CardContent className="space-y-4">
+            <p className="text-xs text-muted-foreground">Latência média por turno (ms)</p>
+            {resilience.series.turnLatencyAverageMs.length ? (
               <ResponsiveLineChart
-                data={mergeVoiceQualitySeries(resilience.series.turnLatencyAverageMs, resilience.series.assistantInterruptions)}
+                data={voiceQualitySeries}
                 series={[
                   { key: "latency", label: "Latência média (ms)", color: "hsl(var(--primary))", area: true },
+                ]}
+              />
+            ) : (
+              <EmptyState description="Nenhuma latência foi reportada na janela." title="Sem dados de latência" />
+            )}
+            <p className="text-xs text-muted-foreground">Interrupções do assistente</p>
+            {resilience.series.assistantInterruptions.length ? (
+              <ResponsiveLineChart
+                data={voiceQualitySeries}
+                series={[
                   { key: "interruptions", label: "Interrupções", color: "hsl(var(--warning))" },
                 ]}
               />
             ) : (
-              <EmptyState description="Nenhuma métrica de qualidade foi reportada na janela." title="Sem métricas de voz" />
+              <EmptyState description="Nenhuma contagem de interrupções foi reportada na janela." title="Sem dados de interrupções" />
             )}
           </CardContent>
         </Card>
@@ -291,20 +308,6 @@ function mergeSearchSeries(
   for (const [items, key] of [[blocks, "blocks"], [successes, "successes"], [externalFailures, "externalFailures"]] as const) {
     for (const item of items) {
       const existing = points.get(item.timestamp) || { timestamp: item.timestamp, blocks: 0, successes: 0, externalFailures: 0 }
-      points.set(item.timestamp, { ...existing, [key]: item.value })
-    }
-  }
-  return [...points.values()].sort((left, right) => left.timestamp.localeCompare(right.timestamp))
-}
-
-function mergeVoiceQualitySeries(
-  latency: Array<{ timestamp: string; value: number }>,
-  interruptions: Array<{ timestamp: string; value: number }>,
-) {
-  const points = new Map<string, { timestamp: string; latency: number; interruptions: number }>()
-  for (const [items, key] of [[latency, "latency"], [interruptions, "interruptions"]] as const) {
-    for (const item of items) {
-      const existing = points.get(item.timestamp) || { timestamp: item.timestamp, latency: 0, interruptions: 0 }
       points.set(item.timestamp, { ...existing, [key]: item.value })
     }
   }

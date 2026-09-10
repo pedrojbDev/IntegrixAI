@@ -38,7 +38,10 @@ METRIC_VERSION = "v5"
 HANDOFF_TOOL_NAME = "handoff_human"
 NATIVE_HANDOFF_EVENT_TYPE = "vapi_native_transfer_completed"
 NORMAL_COMPLETION_EVENT_TYPE = "vapi_normal_call_completed"
-TECHNICAL_ERROR_CODES = frozenset({"TIMEOUT", "UPSTREAM_503"})
+TECHNICAL_ERROR_CODES = frozenset({
+    "TIMEOUT", "UPSTREAM_503", "UPSTREAM_AUTH", "UPSTREAM_TIMEOUT",
+    "UPSTREAM_NETWORK", "UPSTREAM_5XX", "UPSTREAM_UNEXPECTED",
+})
 SEARCH_ATTEMPT_EVENT_TYPE = "provider_search_requested"
 SEARCH_BLOCKED_EVENT_TYPE = "provider_search_blocked"
 SEARCH_UPSTREAM_STARTED_EVENT_TYPE = "provider_search_upstream_started"
@@ -1152,7 +1155,6 @@ def get_resilience(
             "collect_cpf": "cpf",
             "collect_cidade": "city",
             "collect_especialidade": "specialty",
-            "wait_current_search": "waiting_for_new_turn",
         }.get(payload.get("recovery_action"))
 
     slot_blocks = {

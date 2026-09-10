@@ -237,14 +237,19 @@ def _reduce(
             and anchor_order is not None
             and entry["order"] > anchor_order
         )
+        # Keep the backend's interpretation with the hashed turn itself. It
+        # must survive clearing active recovery and replaying newer snapshots.
+        if recovery_active and not entry.get("bound_recovery_field"):
+            entry["bound_recovery_field"] = recovery_field
+        bound_field = entry.get("bound_recovery_field")
         if entry["role"] == "assistant":
             assistant_seen = True
             unrelated_question = entry.get("unrelated_question", False)
-            if recovery_active:
+            if bound_field:
                 # Agent turns cannot redirect a backend-pinned recovery field.
                 # A same-field read-back can still provide an explicit proposal
                 # for a subsequent short confirmation.
-                result["pending"] = recovery_field
+                result["pending"] = bound_field
             elif entry.get("question"):
                 result["pending"] = entry["question"]
             confirmation = (
@@ -254,7 +259,7 @@ def _reduce(
             continue
         result["last_user"] = entry["key"]
         result["last_order"] = entry["order"]
-        field = recovery_field if recovery_active else result["pending"]
+        field = bound_field or result["pending"]
         if entry.get("refresh"):
             result["refresh_turn"] = entry["key"]
         if entry.get("cpf_correction"):
@@ -405,6 +410,8 @@ def capture_pbsaude_conversation(session, settings, tenant_id: str, call_id: str
         old = ledger.get(key)
         if old and old["revision"] >= revision:
             continue
+        if old and old.get("digest") == encoded["digest"] and old.get("bound_recovery_field"):
+            encoded["bound_recovery_field"] = old["bound_recovery_field"]
         ledger[key] = encoded
         changed = True
     if not changed:

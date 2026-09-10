@@ -2,7 +2,7 @@
 
 Seven-day rollout example using createdAt event time (replace the tenant
 placeholder; no global fallback):
-python scripts/backfill_vapi_voice_quality.py --tenant-id <tenant-id> \\
+.venv/bin/python -B scripts/backfill_vapi_voice_quality.py --tenant-id <tenant-id> \\
   --start 2026-09-02T00:00:00+00:00 --end 2026-09-09T00:00:00+00:00
 """
 
@@ -12,7 +12,12 @@ import argparse
 import json
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Sequence
+
+# Direct execution places scripts/, rather than the repository, on sys.path.
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.config import get_settings
 from app.core.ops.cost_sync_service import VapiCostSyncService

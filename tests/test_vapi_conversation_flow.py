@@ -680,6 +680,79 @@ class ConversationFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual('especialidade', self.state().conversation_meta['recovery_field'])
         self.provider.search_providers.assert_not_called()
 
+    def test_recovery_city_binding_survives_success_and_newer_history_replay(self):
+        self.settings.pbsaude_vapi_recovery_gate_enabled = True
+        self.ingest(self.standard())
+        with self.assertRaises(BusinessRuleError):
+            self.direct_search(city='Manaus')
+        messages = self.extended(('bot', 'Qual especialidade?'), ('user', 'Camaçari'))
+        self.ingest(messages, rev=2)
+        self.direct_search(city='Camaçari')
+        self.assertNotIn('recovery_field', self.state().conversation_meta)
+
+        self.ingest(messages, rev=3)
+        self.assertIn(keyed_hmac(self.settings.vapi_slot_state_hmac_secret, 'camacari'),
+                      self.state().city_term_hmacs)
+        self.validate(city='Camaçari')
+        result, _ = self.direct_search(city='Camaçari')
+        self.assertTrue(result['reused_result'])
+        self.provider.search_providers.assert_called_once()
+        serialized = json.dumps(self.state().conversation_meta)
+        for plaintext in (CPF, 'camacari', 'Camaçari', 'Cardiologista'):
+            self.assertNotIn(plaintext, serialized)
+
+    def test_recovery_pinned_before_search_transaction_blocks_provider(self):
+        from app.tenants.pbsaude.search_execution import execute_search
+
+        self.settings.pbsaude_vapi_recovery_gate_enabled = True
+        self.ingest(self.standard())
+
+        def pin_then_execute(**kwargs):
+            with self.assertRaises(BusinessRuleError) as second:
+                self.direct_search(city='Manaus')
+            self.assertEqual('SLOT_UNCONFIRMED', second.exception.code)
+            return execute_search(**kwargs)
+
+        with patch('app.tenants.pbsaude.workflows.search_providers.execute_search', pin_then_execute):
+            with self.assertRaises(BusinessRuleError) as first:
+                self.direct_search()
+        self.assertEqual('USER_TURN_REQUIRED', first.exception.code)
+        self.assertEqual('cidade', self.state().conversation_meta['recovery_field'])
+        self.provider.search_providers.assert_not_called()
+
+    def test_recovery_pinned_during_provider_call_is_not_cleared_on_completion(self):
+        self.settings.pbsaude_vapi_recovery_gate_enabled = True
+        self.ingest(self.standard())
+
+        def pin_during_provider(*args, **kwargs):
+            with self.assertRaises(BusinessRuleError) as second:
+                self.direct_search(city='Manaus')
+            self.assertEqual('SLOT_UNCONFIRMED', second.exception.code)
+            return []
+
+        self.provider.search_providers.side_effect = pin_during_provider
+        with self.assertRaises(BusinessRuleError) as first:
+            self.direct_search()
+        self.assertEqual('USER_TURN_REQUIRED', first.exception.code)
+        self.assertEqual('cidade', self.state().conversation_meta['recovery_field'])
+        self.provider.search_providers.assert_called_once()
+
+    def test_existing_recovery_precedes_malformed_new_arguments(self):
+        from app.tenants.pbsaude.workflows.search_providers import _search_providers
+
+        self.settings.pbsaude_vapi_recovery_gate_enabled = True
+        self.ingest(self.standard())
+        with self.assertRaises(BusinessRuleError):
+            self.direct_search(query='Especialidade inventada')
+        with self.assertRaises(BusinessRuleError) as blocked:
+            _search_providers({'cpf': CPF, 'query': 'Cardiologia'},
+                              self.settings, 'same-call', 'tenant_a')
+        self.assertEqual('USER_TURN_REQUIRED', blocked.exception.code)
+        self.assertEqual('collect_especialidade', blocked.exception.details['recovery_action'])
+        self.assertEqual(0, blocked.exception.attempt)
+        self.assertEqual('especialidade', self.state().conversation_meta['recovery_field'])
+        self.provider.search_providers.assert_not_called()
+
     def test_recovery_attempts_count_distinct_eligible_user_turns(self):
         self.settings.pbsaude_vapi_recovery_gate_enabled = True
         messages = self.standard()
