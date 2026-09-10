@@ -66,6 +66,8 @@ class ParsedCallCost:
     raw_call_json: dict[str, Any] = field(default_factory=dict)
     identity_evidence: VapiInboundIdentityEvidence | None = None
     voice_call_id: str | None = None
+    turn_latency_average_ms: float | None = None
+    assistant_interruptions: int | None = None
 
 
 class VapiCostSyncService:
@@ -175,6 +177,60 @@ class VapiCostSyncService:
         finally:
             self._unlock(session)
 
+    def backfill_voice_quality(
+        self,
+        session: Session,
+        *,
+        tenant_id: str,
+        start: datetime,
+        end: datetime,
+    ) -> dict[str, int | str]:
+        """Import quality metrics for exactly one tenant and the [start, end) window.
+
+        This deliberately shares parsing and upsert behavior with routine cost sync,
+        so the Vapi artifact is sanitized before any data is persisted.
+        """
+        if not tenant_id.strip():
+            raise ValueError("tenant_id is required")
+        start = _as_utc(start)
+        end = _as_utc(end)
+        if end <= start:
+            raise ValueError("end must be after start")
+        if not self.settings.vapi_api_key:
+            raise RuntimeError("VAPI_API_KEY not configured")
+
+        raw_calls = self._fetch_complete_range(start, end, "createdAt")
+        parsed_batch: list[ParsedCallCost] = []
+        skipped = 0
+        for raw in raw_calls:
+            parsed = self._parse_call(raw)
+            if (
+                parsed is None
+                or parsed.tenant_id != tenant_id
+                or parsed.started_at is None
+                or not start <= _as_utc(parsed.started_at) < end
+            ):
+                skipped += 1
+                continue
+            parsed_batch.append(parsed)
+
+        self.ptax.ensure_rates(
+            session,
+            {item.started_at.date() for item in parsed_batch if item.started_at is not None},
+        )
+        created, updated, _missing_fx = self._upsert_cost_batch_detailed(
+            session,
+            parsed_batch,
+            datetime.now(timezone.utc),
+        )
+        return {
+            "tenant_id": tenant_id,
+            "processed": len(parsed_batch),
+            "created": created,
+            "updated": updated,
+            "skipped": skipped,
+        }
+
     def _fetch_complete_range(
         self,
         start: datetime,
@@ -257,6 +313,7 @@ class VapiCostSyncService:
         tenant_rejected = should_reject_tenant_resolution(resolution, self.settings)
         tenant_id = None if tenant_rejected else resolution.tenant_id
         cost_total, breakdown, components = self._extract_cost(raw)
+        turn_latency_average_ms, assistant_interruptions = self._extract_voice_quality_metrics(raw)
         return ParsedCallCost(
             call_id=call_id,
             tenant_id=tenant_id,
@@ -275,6 +332,8 @@ class VapiCostSyncService:
             components=components,
             raw_call_json=self._sanitize_call_snapshot(raw),
             identity_evidence=identity_evidence,
+            turn_latency_average_ms=turn_latency_average_ms,
+            assistant_interruptions=assistant_interruptions,
         )
 
     def _upsert_cost_batch(
@@ -398,6 +457,8 @@ class VapiCostSyncService:
                 "started_at": parsed.started_at,
                 "ended_at": parsed.ended_at,
                 "duration_seconds": parsed.duration_seconds,
+                "turn_latency_average_ms": parsed.turn_latency_average_ms,
+                "assistant_interruptions": parsed.assistant_interruptions,
                 "assistant_id": parsed.assistant_id,
                 "status": parsed.status,
                 "cost_total_usd": parsed.cost_total_usd,
@@ -560,6 +621,20 @@ class VapiCostSyncService:
         return total, breakdown, components
 
     @staticmethod
+    def _extract_voice_quality_metrics(raw: dict[str, Any]) -> tuple[float | None, int | None]:
+        """Read only aggregate numeric Vapi metrics; never retain its artifact."""
+        artifact = raw.get("artifact")
+        if not isinstance(artifact, dict):
+            return None, None
+        metrics = artifact.get("performanceMetrics")
+        if not isinstance(metrics, dict):
+            return None, None
+        return (
+            _finite_nonnegative_float_or_none(metrics.get("turnLatencyAverage")),
+            _finite_nonnegative_integer_or_none(metrics.get("numAssistantInterrupted")),
+        )
+
+    @staticmethod
     def _extract_assistant_id(raw: dict[str, Any]) -> str | None:
         assistant = raw.get("assistant")
         if isinstance(assistant, dict):
@@ -645,6 +720,25 @@ def _decimal_or_none(value: Any) -> Decimal | None:
     except (InvalidOperation, ValueError, TypeError):
         return None
     return parsed if parsed.is_finite() else None
+
+
+def _finite_nonnegative_float_or_none(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)):
+        return None
+    try:
+        parsed = float(value)
+    except (OverflowError, ValueError):
+        return None
+    if not parsed >= 0 or parsed == float("inf") or parsed == float("-inf") or parsed != parsed:
+        return None
+    return parsed
+
+
+def _finite_nonnegative_integer_or_none(value: Any) -> int | None:
+    parsed = _finite_nonnegative_float_or_none(value)
+    if parsed is None or not parsed.is_integer():
+        return None
+    return int(parsed)
 
 
 def _sum_leaf_costs(value: dict[str, Any]) -> Decimal | None:

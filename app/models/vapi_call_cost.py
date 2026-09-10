@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Numeric, String, func
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, Numeric, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
@@ -45,6 +45,8 @@ class VapiCallCost(Base):
     started_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     ended_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    turn_latency_average_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    assistant_interruptions: Mapped[int | None] = mapped_column(Integer, nullable=True)
     assistant_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     status: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     cost_total_usd: Mapped[Decimal | None] = mapped_column(Numeric(18, 8), nullable=True)

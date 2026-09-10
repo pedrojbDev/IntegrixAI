@@ -189,6 +189,12 @@ export type Resilience = {
     recommendations: number
     nativeTransfers: number
   }
+  voiceQuality: {
+    callsWithMetrics: number
+    averageTurnLatencyMs: number | null
+    totalAssistantInterruptions: number
+    callsWithAssistantInterruptions: number
+  }
   series: {
     failedCalls: ResiliencePoint[]
     technicalFailureEvents: ResiliencePoint[]
@@ -197,6 +203,8 @@ export type Resilience = {
     blocks: ResiliencePoint[]
     successes: ResiliencePoint[]
     externalFailures: ResiliencePoint[]
+    turnLatencyAverageMs: ResiliencePoint[]
+    assistantInterruptions: ResiliencePoint[]
   }
   topFailureTools: ToolPerformance[]
   topHandoffTools: ToolPerformance[]

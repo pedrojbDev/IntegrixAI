@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { useDashboardPreferences } from "@/features/shared-dashboard/dashboard-preferences"
 import { useDiagnosticsQueries } from "@/hooks/use-dashboard-queries"
 import { useRefreshEvent } from "@/hooks/use-refresh-event"
-import { formatDateTimeBR, formatNumberBR, formatPercent } from "@/lib/format"
+import { formatDateTimeBR, formatDurationMs, formatNumberBR, formatPercent } from "@/lib/format"
 
 function healthLabel(value: string) {
   if (value === "stable") return "Estável"
@@ -205,6 +205,45 @@ export function DiagnosticsPage() {
       <section className="grid gap-4 xl:grid-cols-2">
         <Card>
           <CardHeader>
+            <SectionHeader description="Agregados preservados sem artefatos, mensagens ou transcrições." title="Qualidade de voz" />
+          </CardHeader>
+          <CardContent className="grid gap-3 sm:grid-cols-2">
+            {[
+              ["Calls com métricas", formatNumberBR(resilience.voiceQuality.callsWithMetrics)],
+              ["Latência média por turno", resilience.voiceQuality.averageTurnLatencyMs == null ? "Sem dados" : formatDurationMs(resilience.voiceQuality.averageTurnLatencyMs)],
+              ["Interrupções do assistente", formatNumberBR(resilience.voiceQuality.totalAssistantInterruptions)],
+              ["Calls com interrupção", formatNumberBR(resilience.voiceQuality.callsWithAssistantInterruptions)],
+            ].map(([label, value]) => (
+              <div className="rounded-md border border-border p-3" key={String(label)}>
+                <p className="text-xs text-muted-foreground">{label}</p>
+                <p className="mt-2 font-mono text-xl">{value}</p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <SectionHeader description="Latência média e interrupções por período da janela atual." title="Tendência de qualidade" />
+          </CardHeader>
+          <CardContent>
+            {resilience.series.turnLatencyAverageMs.length || resilience.series.assistantInterruptions.length ? (
+              <ResponsiveLineChart
+                data={mergeVoiceQualitySeries(resilience.series.turnLatencyAverageMs, resilience.series.assistantInterruptions)}
+                series={[
+                  { key: "latency", label: "Latência média (ms)", color: "hsl(var(--primary))", area: true },
+                  { key: "interruptions", label: "Interrupções", color: "hsl(var(--warning))" },
+                ]}
+              />
+            ) : (
+              <EmptyState description="Nenhuma métrica de qualidade foi reportada na janela." title="Sem métricas de voz" />
+            )}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-2">
+        <Card>
+          <CardHeader>
             <SectionHeader description="Tools ordenadas por timeout ou indisponibilidade de upstream." title="Piores falhas técnicas" />
           </CardHeader>
           <CardContent>
@@ -252,6 +291,20 @@ function mergeSearchSeries(
   for (const [items, key] of [[blocks, "blocks"], [successes, "successes"], [externalFailures, "externalFailures"]] as const) {
     for (const item of items) {
       const existing = points.get(item.timestamp) || { timestamp: item.timestamp, blocks: 0, successes: 0, externalFailures: 0 }
+      points.set(item.timestamp, { ...existing, [key]: item.value })
+    }
+  }
+  return [...points.values()].sort((left, right) => left.timestamp.localeCompare(right.timestamp))
+}
+
+function mergeVoiceQualitySeries(
+  latency: Array<{ timestamp: string; value: number }>,
+  interruptions: Array<{ timestamp: string; value: number }>,
+) {
+  const points = new Map<string, { timestamp: string; latency: number; interruptions: number }>()
+  for (const [items, key] of [[latency, "latency"], [interruptions, "interruptions"]] as const) {
+    for (const item of items) {
+      const existing = points.get(item.timestamp) || { timestamp: item.timestamp, latency: 0, interruptions: 0 }
       points.set(item.timestamp, { ...existing, [key]: item.value })
     }
   }

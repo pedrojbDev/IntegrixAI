@@ -429,6 +429,24 @@ def _bucket_series_from_rows(
     ]
 
 
+def _bucket_average_series_from_rows(
+    rows: list[tuple[datetime | None, float | int | None]],
+    *,
+    bucket_minutes: int,
+) -> list[dict[str, Any]]:
+    buckets: dict[str, list[float]] = defaultdict(list)
+    for point_time, value in rows:
+        dt = _ensure_utc(point_time)
+        if dt is None or value is None:
+            continue
+        buckets[_floor_bucket(dt, bucket_minutes).isoformat()].append(float(value))
+    return [
+        {"timestamp": timestamp, "value": round(sum(values) / len(values), 2)}
+        for timestamp, values in sorted(buckets.items())
+        if values
+    ]
+
+
 def get_overview(
     session: Session,
     *,
@@ -1067,6 +1085,40 @@ def get_resilience(
     tools = get_tools(session, window=window, tenant_id=tenant_id, assistant_id=assistant_id)
     health = get_health(session, window=window, tenant_id=tenant_id, assistant_id=assistant_id)
 
+    quality_filters = [
+        VapiCallCost.started_at >= since,
+        VapiCallCost.started_at < until,
+        VapiCallCost.tenant_id.is_not(None),
+        VapiCallCost.is_verified.is_(True),
+    ]
+    if tenant_id:
+        quality_filters.append(VapiCallCost.tenant_id == tenant_id)
+    if assistant_id:
+        quality_filters.append(VapiCallCost.assistant_id == assistant_id)
+    metrics_available = (
+        VapiCallCost.turn_latency_average_ms.is_not(None)
+        | VapiCallCost.assistant_interruptions.is_not(None)
+    )
+    quality_summary = session.execute(
+        select(
+            func.count(case((metrics_available, VapiCallCost.call_id))).label("calls_with_metrics"),
+            func.avg(VapiCallCost.turn_latency_average_ms).label("average_turn_latency_ms"),
+            func.sum(VapiCallCost.assistant_interruptions).label("total_assistant_interruptions"),
+            func.count(
+                case(
+                    (VapiCallCost.assistant_interruptions >= 1, VapiCallCost.call_id),
+                )
+            ).label("calls_with_assistant_interruptions"),
+        ).where(*quality_filters)
+    ).one()
+    quality_rows = session.execute(
+        select(
+            VapiCallCost.started_at,
+            VapiCallCost.turn_latency_average_ms,
+            VapiCallCost.assistant_interruptions,
+        ).where(*quality_filters)
+    ).all()
+
     search_rows = _search_event_rows(
         session,
         since=since,
@@ -1271,6 +1323,20 @@ def get_resilience(
         "slot_blocks": slot_blocks,
         "upstream_failures": upstream_failures,
         "handoff_flow": handoff_flow,
+        "voice_quality": {
+            "calls_with_metrics": int(quality_summary.calls_with_metrics or 0),
+            "average_turn_latency_ms": (
+                round(float(quality_summary.average_turn_latency_ms), 2)
+                if quality_summary.average_turn_latency_ms is not None
+                else None
+            ),
+            "total_assistant_interruptions": int(
+                quality_summary.total_assistant_interruptions or 0
+            ),
+            "calls_with_assistant_interruptions": int(
+                quality_summary.calls_with_assistant_interruptions or 0
+            ),
+        },
         "series": {
             "failed_calls": _bucket_series_from_rows(failed_rows, bucket_minutes=bucket_minutes),
             "technical_failure_events": _bucket_series_from_rows(
@@ -1297,6 +1363,18 @@ def get_resilience(
                 bucket_minutes=bucket_minutes,
                 event_types={SEARCH_FAILED_EVENT_TYPE},
                 predicate=lambda error_code, _payload: error_code in UPSTREAM_FAILURE_KEYS,
+            ),
+            "turn_latency_average_ms": _bucket_average_series_from_rows(
+                [(started_at, latency) for started_at, latency, _interruptions in quality_rows],
+                bucket_minutes=bucket_minutes,
+            ),
+            "assistant_interruptions": _bucket_series_from_rows(
+                [
+                    (started_at, interruptions)
+                    for started_at, _latency, interruptions in quality_rows
+                    if interruptions is not None
+                ],
+                bucket_minutes=bucket_minutes,
             ),
         },
         "top_failure_tools": top_failure_tools,

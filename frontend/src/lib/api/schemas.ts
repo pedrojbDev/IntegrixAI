@@ -292,6 +292,19 @@ export const resilienceSchema = z
     handoff_flow: z
       .object({ recommendations: numeric, native_transfers: numeric })
       .catch({ recommendations: 0, native_transfers: 0 }),
+    voice_quality: z
+      .object({
+        calls_with_metrics: numeric,
+        average_turn_latency_ms: nullableNumeric,
+        total_assistant_interruptions: numeric,
+        calls_with_assistant_interruptions: numeric,
+      })
+      .catch({
+        calls_with_metrics: 0,
+        average_turn_latency_ms: null,
+        total_assistant_interruptions: 0,
+        calls_with_assistant_interruptions: 0,
+      }),
     series: z
       .object({
         failed_calls: z.array(z.object({ timestamp: z.string(), value: numeric })).catch([]),
@@ -301,6 +314,8 @@ export const resilienceSchema = z
         blocks: z.array(z.object({ timestamp: z.string(), value: numeric })).catch([]),
         successes: z.array(z.object({ timestamp: z.string(), value: numeric })).catch([]),
         external_failures: z.array(z.object({ timestamp: z.string(), value: numeric })).catch([]),
+        turn_latency_average_ms: z.array(z.object({ timestamp: z.string(), value: numeric })).catch([]),
+        assistant_interruptions: z.array(z.object({ timestamp: z.string(), value: numeric })).catch([]),
       })
       .catch({
         failed_calls: [],
@@ -310,6 +325,8 @@ export const resilienceSchema = z
         blocks: [],
         successes: [],
         external_failures: [],
+        turn_latency_average_ms: [],
+        assistant_interruptions: [],
       }),
     top_failure_tools: z.array(toolPerformanceSchema).catch([]),
     top_handoff_tools: z.array(toolPerformanceSchema).catch([]),

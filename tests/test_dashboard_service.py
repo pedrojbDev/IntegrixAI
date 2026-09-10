@@ -433,6 +433,81 @@ class DashboardServiceTests(unittest.TestCase):
 
         self.assertEqual(1, resilience["search_funnel"]["attempted_calls"])
 
+    def test_resilience_voice_quality_metrics_are_null_safe_and_tenant_assistant_scoped(self) -> None:
+        """Removing cost-table scope filters must not leak another tenant's quality metrics."""
+        session_local = self._session_local()
+        now = datetime.now(timezone.utc)
+        with session_local() as session:
+            session.add_all(
+                [
+                    VapiCallCost(
+                        call_id="quality-a-one",
+                        tenant_id="tenant_a",
+                        assistant_id="assistant_a",
+                        started_at=now - timedelta(minutes=8),
+                        turn_latency_average_ms=400.0,
+                        assistant_interruptions=0,
+                        synced_at=now,
+                        is_verified=True,
+                    ),
+                    VapiCallCost(
+                        call_id="quality-a-two",
+                        tenant_id="tenant_a",
+                        assistant_id="assistant_a",
+                        started_at=now - timedelta(minutes=7),
+                        turn_latency_average_ms=600.0,
+                        assistant_interruptions=2,
+                        synced_at=now,
+                        is_verified=True,
+                    ),
+                    VapiCallCost(
+                        call_id="quality-a-legacy",
+                        tenant_id="tenant_a",
+                        assistant_id="assistant_a",
+                        started_at=now - timedelta(minutes=6),
+                        turn_latency_average_ms=None,
+                        assistant_interruptions=None,
+                        synced_at=now,
+                        is_verified=True,
+                    ),
+                    VapiCallCost(
+                        call_id="quality-other-assistant",
+                        tenant_id="tenant_a",
+                        assistant_id="assistant_b",
+                        started_at=now - timedelta(minutes=5),
+                        turn_latency_average_ms=900.0,
+                        assistant_interruptions=9,
+                        synced_at=now,
+                        is_verified=True,
+                    ),
+                    VapiCallCost(
+                        call_id="quality-other-tenant",
+                        tenant_id="tenant_b",
+                        assistant_id="assistant_a",
+                        started_at=now - timedelta(minutes=5),
+                        turn_latency_average_ms=900.0,
+                        assistant_interruptions=9,
+                        synced_at=now,
+                        is_verified=True,
+                    ),
+                ]
+            )
+            session.commit()
+
+            resilience = get_resilience(
+                session,
+                window="24h",
+                tenant_id="tenant_a",
+                assistant_id="assistant_a",
+            )
+
+        self.assertEqual(2, resilience["voice_quality"]["calls_with_metrics"])
+        self.assertEqual(500.0, resilience["voice_quality"]["average_turn_latency_ms"])
+        self.assertEqual(2, resilience["voice_quality"]["total_assistant_interruptions"])
+        self.assertEqual(1, resilience["voice_quality"]["calls_with_assistant_interruptions"])
+        self.assertEqual(500.0, sum(point["value"] for point in resilience["series"]["turn_latency_average_ms"]))
+        self.assertEqual(2, sum(point["value"] for point in resilience["series"]["assistant_interruptions"]))
+
     def test_operational_report_is_a_pdf_for_the_requested_tenant(self) -> None:
         session_local = self._session_local()
         now = datetime.now(timezone.utc)

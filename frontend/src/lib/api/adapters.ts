@@ -217,6 +217,12 @@ export function mapResilience(raw: RawResilience): Resilience {
       recommendations: raw.handoff_flow.recommendations,
       nativeTransfers: raw.handoff_flow.native_transfers,
     },
+    voiceQuality: {
+      callsWithMetrics: raw.voice_quality.calls_with_metrics,
+      averageTurnLatencyMs: raw.voice_quality.average_turn_latency_ms,
+      totalAssistantInterruptions: raw.voice_quality.total_assistant_interruptions,
+      callsWithAssistantInterruptions: raw.voice_quality.calls_with_assistant_interruptions,
+    },
     series: {
       failedCalls: raw.series.failed_calls.map((point) => ({
         timestamp: point.timestamp,
@@ -243,6 +249,14 @@ export function mapResilience(raw: RawResilience): Resilience {
         value: point.value || 0,
       })),
       externalFailures: raw.series.external_failures.map((point) => ({
+        timestamp: point.timestamp,
+        value: point.value || 0,
+      })),
+      turnLatencyAverageMs: raw.series.turn_latency_average_ms.map((point) => ({
+        timestamp: point.timestamp,
+        value: point.value || 0,
+      })),
+      assistantInterruptions: raw.series.assistant_interruptions.map((point) => ({
         timestamp: point.timestamp,
         value: point.value || 0,
       })),
