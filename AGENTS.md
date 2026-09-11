@@ -80,6 +80,8 @@ diverges. Delegated tasks must have bounded, non-overlapping ownership.
 - Treat the graph as a navigation aid, not the source of truth: it can be
   stale (check `Built from commit` in `GRAPH_REPORT.md` vs `git rev-parse
   HEAD`). Confirm line numbers and callers in the code before editing.
+- `graphify-out/` is gitignored, so fresh worktrees start without it. If it is
+  missing, run `graphify update .` first (free, no API cost).
 - After merges that change architecture, run `graphify update .` so the graph
   does not rot.
 
