@@ -701,13 +701,11 @@ class VapiCostSyncService:
     @staticmethod
     def _extract_to_number(raw: dict[str, Any]) -> str | None:
         phone_number = raw.get("phoneNumber")
-        customer = raw.get("customer")
         candidates = [
             raw.get("to"),
             raw.get("toNumber"),
             phone_number.get("number") if isinstance(phone_number, dict) else None,
             phone_number.get("phoneNumber") if isinstance(phone_number, dict) else None,
-            customer.get("number") if isinstance(customer, dict) else None,
             raw.get("phoneNumber") if isinstance(raw.get("phoneNumber"), str) else None,
         ]
         for candidate in candidates:
