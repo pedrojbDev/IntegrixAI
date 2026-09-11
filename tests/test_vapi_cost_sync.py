@@ -1,4 +1,6 @@
+import os
 import unittest
+import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import patch
@@ -732,6 +734,61 @@ class VapiCostSyncTests(unittest.TestCase):
         self.assertEqual({"scanned": 2, "successful_handoffs": 0, "normal_completions": 0}, second)
         self.assertEqual({"customer_end", "agent_end"}, {event.call_id for event in events})
         self.assertEqual({"ENCERRADA_USUARIO", "ENCERRADA_AGENTE"}, {event.final_state for event in events})
+
+
+@unittest.skipUnless(
+    os.environ.get("VAPI_TEST_DATABASE_URL"),
+    "disposable PostgreSQL not configured",
+)
+class VapiCostSyncPostgresTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.engine = create_engine(os.environ["VAPI_TEST_DATABASE_URL"])
+        self.addCleanup(self.engine.dispose)
+        self.sessions = sessionmaker(bind=self.engine, autocommit=False, autoflush=False)
+
+    def test_postgres_guard_rejects_foreign_conflict_atomically(self) -> None:
+        call_id = f"cost-guard-{uuid.uuid4().hex}"
+        now = datetime.now(timezone.utc)
+        service = VapiCostSyncService(Settings(_env_file=None))
+        incoming = ParsedCallCost(
+            call_id=call_id,
+            tenant_id="tenant_a",
+            to_number="+5511999999999",
+            started_at=now,
+            ended_at=now + timedelta(minutes=1),
+            duration_seconds=60.0,
+            assistant_id="assistant_a",
+            status="ended",
+            cost_total_usd=Decimal("1.10"),
+            cost_breakdown_json={},
+        )
+
+        with self.sessions() as session:
+            session.add(
+                VapiCallCost(
+                    call_id=call_id,
+                    tenant_id="tenant_b",
+                    assistant_id="assistant_b",
+                    cost_total_usd=Decimal("9.00"),
+                    started_at=now,
+                    synced_at=now,
+                )
+            )
+            session.commit()
+
+            with patch.object(service.ptax, "rate_for_call", return_value=(None, None, False)):
+                result = service._upsert_cost_batch_detailed(
+                    session,
+                    [incoming],
+                    now,
+                    ownership_checked=True,
+                )
+            session.commit()
+            unchanged = session.get(VapiCallCost, call_id)
+
+        self.assertEqual((0, 0, 0), result)
+        self.assertEqual("tenant_b", unchanged.tenant_id)
+        self.assertEqual(Decimal("9.00000000"), unchanged.cost_total_usd)
 
 
 if __name__ == "__main__":
