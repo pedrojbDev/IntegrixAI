@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import {
-  ArrowDown, ArrowRight, ArrowUpRight, AudioLines, CalendarCheck2, Check,
+  ArrowDown, ArrowRight, ArrowUpRight, AudioLines, Check,
   ChevronDown, FileText, Headphones, LayoutDashboard, LockKeyhole, Menu,
   MessageSquareText, Phone, PhoneIncoming, Route, ShieldCheck, X,
 } from "lucide-react"
@@ -84,13 +84,13 @@ function Header() {
 function OperationPreview() {
   return (
     <figure className="operation-preview">
-      <div className="preview-caption"><span>DA CONVERSA À AÇÃO</span><span>01 — AGENDAMENTO</span></div>
+      <div className="preview-caption"><span>DA CONVERSA À AÇÃO</span><span>01 — PROCESSO CONECTADO</span></div>
       <div className="operation-window">
         <div className="window-heading"><span><AudioLines size={17} aria-hidden="true" />Integrix / Atendimento</span><span className="demo-label">Demonstração</span></div>
         <div className="operation-body">
           <div className="call-heading">
             <span className="call-icon"><PhoneIncoming size={21} strokeWidth={1.6} aria-hidden="true" /></span>
-            <div><h3>Uma ligação. Tudo conectado.</h3><p>Voz, agenda e registro no mesmo fluxo.</p></div>
+            <div><h3>Uma ligação. Tudo conectado.</h3><p>Voz, sistemas e próximos passos no mesmo fluxo.</p></div>
           </div>
           <div className="voice-signal" aria-hidden="true">
             <span>VOZ CONECTADA</span>
@@ -99,17 +99,17 @@ function OperationPreview() {
             ))}</div>
           </div>
           <div className="transcript">
-            <div className="transcript-line"><span>CLIENTE</span><p>“Gostaria de agendar para amanhã à tarde.”</p></div>
-            <div className="transcript-line"><span>INTEGRIX</span><p>“Claro. Tenho um horário às 14h30. Funciona para você?”</p></div>
+            <div className="transcript-line"><span>CLIENTE</span><p>“Quero saber o status da minha solicitação.”</p></div>
+            <div className="transcript-line"><span>INTEGRIX</span><p>“Vou consultar agora e registrar o próximo passo para você.”</p></div>
           </div>
           <div className="workflow-path">
             <div><span className="workflow-node"><Check size={13} aria-hidden="true" /></span><span>Solicitação compreendida</span><span className="workflow-detail">Voz</span></div>
-            <div><span className="workflow-node"><Check size={13} aria-hidden="true" /></span><span>Disponibilidade consultada</span><span className="workflow-detail">Agenda</span></div>
-            <div><span className="workflow-node"><Check size={13} aria-hidden="true" /></span><span>Confirmação registrada</span><span className="workflow-detail">Sistema</span></div>
+            <div><span className="workflow-node"><Check size={13} aria-hidden="true" /></span><span>Sistema consultado</span><span className="workflow-detail">Integração</span></div>
+            <div><span className="workflow-node"><Check size={13} aria-hidden="true" /></span><span>Próximo passo registrado</span><span className="workflow-detail">Ação</span></div>
           </div>
-          <div className="appointment-receipt">
-            <CalendarCheck2 size={22} strokeWidth={1.5} aria-hidden="true" />
-            <div><strong>Agendamento confirmado</strong><span>Amanhã, às 14h30 · atendimento presencial</span></div>
+          <div className="action-receipt">
+            <Route size={22} strokeWidth={1.5} aria-hidden="true" />
+            <div><strong>Solicitação encaminhada</strong><span>Contexto registrado para a equipe responsável</span></div>
           </div>
         </div>
         <div className="window-footer"><span><FileText size={13} aria-hidden="true" />Histórico disponível para a equipe</span><LockKeyhole size={13} aria-hidden="true" /></div>
@@ -126,8 +126,8 @@ function Hero() {
         <div className="hero-grid">
           <div className="hero-copy entrance">
             <p className="eyebrow"><span className="eyebrow-square" />Atendimento por voz com IA</p>
-            <h1 id="hero-title">Boas conversas.<br />Processos <em>resolvidos.</em></h1>
-            <p className="hero-description">Atenda chamadas, consulte seus sistemas e resolva tarefas com IA. Sua equipe ganha tempo. Seu cliente encontra uma resposta.</p>
+            <h1 id="hero-title">Menos espera.<br />Mais processos <em>resolvidos.</em></h1>
+            <p className="hero-description">Substitua ligações demoradas e processos repetitivos por atendimento com IA: rápido, eficiente e disponível 24 horas por dia.</p>
             <div className="hero-actions">
               <a className="button button-primary" href={contactHref}>Conhecer a solução<ArrowUpRight size={17} aria-hidden="true" /></a>
               <a className="button button-secondary" href="#calculadora">Simular custos<ArrowDown size={16} aria-hidden="true" /></a>
@@ -149,9 +149,9 @@ function Hero() {
 
 function SolutionSection() {
   const solutions = [
-    { icon: CalendarCheck2, number: "01", title: "Agendar e confirmar", text: "Consulte horários, registre agendamentos e organize remarcações a partir das regras da sua agenda.", tag: "Menos etapas manuais" },
-    { icon: MessageSquareText, number: "02", title: "Informar e resolver", text: "Responda dúvidas recorrentes e consulte informações nos sistemas conectados, durante a conversa.", tag: "Respostas com contexto" },
-    { icon: Headphones, number: "03", title: "Encaminhar com cuidado", text: "Defina os casos que precisam de uma pessoa e encaminhe a solicitação com o histórico do atendimento.", tag: "Continuidade para o cliente" },
+    { icon: MessageSquareText, number: "01", title: "Responder e orientar", text: "Entenda o motivo da ligação e responda dúvidas com clareza, sem fazer o cliente repetir a história.", tag: "Respostas mais rápidas" },
+    { icon: Route, number: "02", title: "Consultar e executar", text: "Conecte a IA aos sistemas da operação para consultar informações e concluir tarefas durante a conversa.", tag: "Menos retrabalho" },
+    { icon: Headphones, number: "03", title: "Encaminhar com contexto", text: "Defina os casos que precisam de uma pessoa e encaminhe a solicitação com o histórico do atendimento.", tag: "Continuidade para o cliente" },
   ]
   return (
     <section className="section solution-section" id="solucao" aria-labelledby="solution-title">
@@ -206,7 +206,7 @@ function HowItWorks() {
 function FaqSection() {
   const faqs = [
     { question: "Como é uma conversa com a Integrix?", answer: "O cliente fala com um agente de voz em linguagem natural. A conversa segue o fluxo definido para sua empresa e pode consultar informações ou executar as tarefas previstas nas integrações. Na demonstração, apresentamos como isso se aplica ao seu caso." },
-    { question: "Preciso trocar os sistemas que já utilizo?", answer: "A proposta é trabalhar com os sistemas da sua operação. Antes da implantação, avaliamos as possibilidades de integração com sua agenda, cadastro ou CRM e definimos o que pode ser conectado no primeiro projeto." },
+    { question: "Preciso trocar os sistemas que já utilizo?", answer: "A proposta é trabalhar com os sistemas da sua operação. Antes da implantação, avaliamos as possibilidades de integração com cadastro, CRM, financeiro ou outras ferramentas e definimos o que pode ser conectado no primeiro projeto." },
     { question: "O que acontece quando o cliente precisa de uma pessoa?", answer: "Definimos com sua equipe os casos que exigem atendimento humano e o caminho de encaminhamento. A solicitação segue com o contexto registrado, respeitando a disponibilidade e as regras da operação." },
     { question: "Quanto custa e como funciona a contratação?", answer: "A proposta considera o processo, o volume de voz e as integrações necessárias. A calculadora oferece uma referência de consumo para iniciar a análise; o valor contratado e os custos de implantação são definidos na proposta comercial." },
     { question: "Quanto tempo leva para colocar em funcionamento?", answer: "O prazo depende do escopo e das integrações. Após entender sua operação, apresentamos as etapas de configuração, testes e entrada em uso. Começar por um processo bem definido ajuda a validar o projeto antes de expandir." },
@@ -225,7 +225,7 @@ function Footer() {
   return (
     <>
       <section className="contact-section" id="contato" aria-labelledby="contact-title">
-        <div className="container contact-inner"><div><p className="eyebrow">O próximo passo é uma conversa</p><h2 id="contact-title">Vamos olhar para<br /><em>a sua operação?</em></h2></div><div className="contact-actions"><p>Conte o que ocupa o tempo da sua equipe.<br />Vamos identificar por onde começar.</p><a className="button button-light" href={contactHref}>Agendar uma conversa<ArrowUpRight size={18} aria-hidden="true" /></a><a className="contact-email" href="mailto:contato@integrix.com.br">contato@integrix.com.br</a></div></div>
+        <div className="container contact-inner"><div><p className="eyebrow">O próximo passo é uma conversa</p><h2 id="contact-title">Vamos olhar para<br /><em>a sua operação?</em></h2></div><div className="contact-actions"><p>Conte o que ocupa o tempo da sua equipe.<br />Vamos identificar por onde começar.</p><a className="button button-light" href={contactHref}>Falar sobre minha operação<ArrowUpRight size={18} aria-hidden="true" /></a><a className="contact-email" href="mailto:contato@integrix.com.br">contato@integrix.com.br</a></div></div>
       </section>
       <footer className="site-footer"><div className="container"><div className="footer-top"><div><Brand /><p>Voz, processos e pessoas.<br />Uma operação mais conectada.</p></div><nav aria-label="Rodapé"><a href="#solucao">A solução</a><a href="#calculadora">Simular custos</a><a href="#seguranca">Segurança e controle</a><a href={opsConsoleUrl}>Área do cliente<ArrowUpRight size={13} aria-hidden="true" /></a></nav></div><div className="footer-bottom"><p>© {new Date().getFullYear()} Integrix AI. Todos os direitos reservados.</p><span>Inteligência aplicada. Relações humanas.</span></div></div></footer>
     </>
