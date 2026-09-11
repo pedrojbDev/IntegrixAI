@@ -12,6 +12,7 @@ from app.core.ops.cost_sync_service import ParsedCallCost, VapiCostSyncService
 from app.db import Base
 from app.models.ops_sync_state import OpsSyncState
 from app.models.call_event import CallEvent
+from app.models.voice_call import VoiceCall
 from app.models.vapi_call_cost import VapiCallCost
 
 
@@ -82,6 +83,67 @@ class VapiCostSyncTests(unittest.TestCase):
         self.assertEqual("phone_123", parsed.phone_number_id)
         self.assertEqual(Decimal("1.23000000"), parsed.cost_total_usd)
         self.assertEqual(Decimal("0.03000000"), parsed.components["other"])
+
+    def test_parse_call_ignores_caller_ani_when_resolving_tenant(self) -> None:
+        service = VapiCostSyncService(
+            production_settings(
+                tenant_map={"+5511888888888": "tenant_victim"},
+            )
+        )
+
+        parsed = service._parse_call(
+            {
+                "id": "ani-call",
+                "customer": {"number": "+5511888888888"},
+                "createdAt": "2026-04-08T11:59:00Z",
+                "startedAt": "2026-04-08T12:00:00Z",
+            }
+        )
+
+        self.assertIsNotNone(parsed)
+        self.assertIsNone(parsed.to_number)
+        self.assertIsNone(parsed.tenant_id)
+        self.assertNotEqual("tenant_victim", parsed.tenant_resolution_source)
+
+    def test_parse_call_still_resolves_real_dnis_number(self) -> None:
+        service = VapiCostSyncService(
+            Settings(
+                _env_file=None,
+                tenant_map={"+5511999999999": "tenant_a"},
+            )
+        )
+
+        parsed = service._parse_call(
+            {
+                "id": "dnis-call",
+                "to": "+5511999999999",
+                "createdAt": "2026-04-08T11:59:00Z",
+                "startedAt": "2026-04-08T12:00:00Z",
+            }
+        )
+
+        self.assertIsNotNone(parsed)
+        self.assertEqual("tenant_a", parsed.tenant_id)
+
+    def test_parse_call_resolves_nested_phone_number_dnis(self) -> None:
+        service = VapiCostSyncService(
+            Settings(
+                _env_file=None,
+                tenant_map={"+5511999999999": "tenant_a"},
+            )
+        )
+
+        parsed = service._parse_call(
+            {
+                "id": "nested-dnis-call",
+                "phoneNumber": {"number": "+5511999999999"},
+                "startedAt": "2026-04-08T12:00:00Z",
+            }
+        )
+
+        self.assertIsNotNone(parsed)
+        self.assertEqual("+5511999999999", parsed.to_number)
+        self.assertEqual("tenant_a", parsed.tenant_id)
 
     def test_missing_cost_is_null_and_explicit_zero_remains_zero(self) -> None:
         service = VapiCostSyncService(
@@ -214,6 +276,114 @@ class VapiCostSyncTests(unittest.TestCase):
         self.assertEqual((0, 1), (created_again, updated_again))
         self.assertEqual(Decimal("2.50000000"), row.cost_total_usd)
         self.assertTrue(row.is_verified)
+
+    def test_upsert_does_not_rewrite_foreign_existing_call(self) -> None:
+        session_local = self._session_local()
+        now = datetime.now(timezone.utc)
+        service = VapiCostSyncService(Settings(_env_file=None))
+
+        with session_local() as session:
+            session.add(
+                VapiCallCost(
+                    call_id="shared-call",
+                    tenant_id="tenant_b",
+                    assistant_id="assistant_b",
+                    cost_total_usd=Decimal("9.00"),
+                    started_at=now - timedelta(minutes=5),
+                    synced_at=now,
+                )
+            )
+            session.commit()
+
+            spoofed = ParsedCallCost(
+                call_id="shared-call",
+                tenant_id="tenant_a",
+                to_number="+5511999999999",
+                started_at=now - timedelta(minutes=5),
+                ended_at=now - timedelta(minutes=4),
+                duration_seconds=60.0,
+                assistant_id="assistant_a",
+                status="ended",
+                cost_total_usd=Decimal("1.10"),
+                cost_breakdown_json={"total": 1.1},
+            )
+
+            with patch.object(service.ptax, "rate_for_call", return_value=(None, None, False)):
+                service._upsert_cost_batch(session, [spoofed], now)
+
+            session.commit()
+            unchanged = session.get(VapiCallCost, "shared-call")
+
+        self.assertEqual("tenant_b", unchanged.tenant_id)
+        self.assertEqual(Decimal("9.00000000"), unchanged.cost_total_usd)
+
+    def test_sync_drops_foreign_call_before_fx_shadow_upsert_and_reconcile(self) -> None:
+        session_local = self._session_local()
+        now = datetime.now(timezone.utc)
+        service = VapiCostSyncService(
+            Settings(
+                _env_file=None,
+                vapi_api_key="vapi-key",
+                ops_cost_backfill_days=1,
+                tenant_map={"+5511999999999": "tenant_a"},
+                voice_call_shadow_enabled=True,
+            )
+        )
+        raw_call = {
+            "id": "shared-call",
+            "to": "+5511999999999",
+            "createdAt": (now - timedelta(minutes=5)).isoformat(),
+            "updatedAt": now.isoformat(),
+            "startedAt": (now - timedelta(minutes=5)).isoformat(),
+            "endedAt": (now - timedelta(minutes=4)).isoformat(),
+            "status": "ended",
+            "endedReason": "customer-ended-call",
+            "cost": "1.10",
+        }
+
+        with session_local() as session:
+            session.add(
+                VapiCallCost(
+                    call_id="shared-call",
+                    tenant_id="tenant_b",
+                    assistant_id="assistant_b",
+                    cost_total_usd=Decimal("9.00"),
+                    started_at=now - timedelta(minutes=5),
+                    synced_at=now,
+                )
+            )
+            session.commit()
+
+            with (
+                patch.object(service, "_fetch_complete_range", return_value=[raw_call]),
+                patch.object(service.ptax, "ensure_rates", return_value=0) as ensure_rates,
+                patch.object(service.ptax, "rate_for_call", return_value=(None, None, False)) as rate_for_call,
+                patch(
+                    "app.core.ops.cost_sync_service.VoiceCallReconciliationService.reconcile",
+                    side_effect=RuntimeError("shadow must not run for foreign call"),
+                ) as shadow_reconcile,
+            ):
+                result = service.sync(session)
+
+            unchanged = session.get(VapiCallCost, "shared-call")
+            events = session.execute(
+                select(CallEvent).where(CallEvent.call_id == "shared-call")
+            ).scalars().all()
+            voice_calls = session.execute(
+                select(VoiceCall).where(VoiceCall.provider_call_id == "shared-call")
+            ).scalars().all()
+
+        self.assertEqual(1, result["processed"])
+        self.assertEqual(1, result["skipped"])
+        self.assertEqual(0, result["updated"])
+        self.assertEqual(0, result["missing_fx"])
+        ensure_rates.assert_called_once_with(session, set())
+        rate_for_call.assert_not_called()
+        shadow_reconcile.assert_not_called()
+        self.assertEqual("tenant_b", unchanged.tenant_id)
+        self.assertEqual(Decimal("9.00000000"), unchanged.cost_total_usd)
+        self.assertEqual([], events)
+        self.assertEqual([], voice_calls)
 
     def test_quality_metric_upsert_is_idempotent_and_preserves_legacy_nulls(self) -> None:
         """An upsert must refresh metrics without inventing values for old calls."""
