@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
-from sqlalchemy import case, desc, func, select
+from sqlalchemy import case, desc, func, select, tuple_
 
 from ...config import Settings, get_settings
 from ...core.metrics.service import metrics_store
@@ -94,6 +94,27 @@ def _assistant_call_ids_for_filter(
         stmt = stmt.where(VapiCallCost.started_at >= since)
     rows = session.execute(stmt).scalars().all()
     return {row for row in rows if row}
+
+
+def _assistant_call_keys_for_audit_summary(
+    session,
+    *,
+    tenant_id: str | None,
+    assistant_id: str | None,
+    since: datetime | None = None,
+) -> set[tuple[str, str]] | None:
+    if not assistant_id:
+        return None
+
+    stmt = select(VapiCallCost.tenant_id, VapiCallCost.call_id).where(
+        VapiCallCost.assistant_id == assistant_id
+    )
+    if tenant_id:
+        stmt = stmt.where(VapiCallCost.tenant_id == tenant_id)
+    if since is not None:
+        stmt = stmt.where(VapiCallCost.started_at >= since)
+    rows = session.execute(stmt).all()
+    return {(row.tenant_id, row.call_id) for row in rows if row.tenant_id and row.call_id}
 
 
 @router.get("/baseline")
@@ -189,14 +210,14 @@ async def audit_summary(
         else:
             cutoff = None
 
-        assistant_call_ids = _assistant_call_ids_for_filter(
+        assistant_call_keys = _assistant_call_keys_for_audit_summary(
             session,
             tenant_id=tenant_id,
             assistant_id=assistant_id,
             since=cutoff,
         )
-        if assistant_call_ids is not None:
-            if not assistant_call_ids:
+        if assistant_call_keys is not None:
+            if not assistant_call_keys:
                 return {
                     "metric_version": METRIC_VERSION,
                     "enabled": True,
@@ -217,12 +238,41 @@ async def audit_summary(
                     },
                     "per_tool": [],
                 }
-            filters.append(CallEvent.call_id.in_(assistant_call_ids))
+            if tenant_id:
+                scoped_call_ids = {
+                    call_id for key_tenant_id, call_id in assistant_call_keys if key_tenant_id == tenant_id
+                }
+                if not scoped_call_ids:
+                    return {
+                        "metric_version": METRIC_VERSION,
+                        "enabled": True,
+                        "window_minutes": since_minutes,
+                        "totals": {
+                            "total_calls": 0,
+                            "success_calls": 0,
+                            "failed_calls": 0,
+                            "handoff_calls": 0,
+                            "automated_resolution_calls": 0,
+                            "successful_handoff_calls": 0,
+                            "normal_completion_calls": 0,
+                            "successful_agent_calls": 0,
+                            "agent_success_rate_pct": 0.0,
+                            "unresolved_calls": 0,
+                            "technical_failure_events": 0,
+                            "avg_duration_ms": 0.0,
+                        },
+                        "per_tool": [],
+                    }
+                filters.append(CallEvent.call_id.in_(scoped_call_ids))
+            else:
+                filters.append(
+                    tuple_(CallEvent.tenant_id, CallEvent.call_id).in_(assistant_call_keys)
+                )
 
         outcomes = _call_outcomes_subquery(
             since=cutoff or datetime(1970, 1, 1, tzinfo=timezone.utc),
             tenant_id=tenant_id,
-            call_ids_filter=assistant_call_ids,
+            call_keys_filter=assistant_call_keys,
         )
         if outcomes is None:
             outcome_rows = []

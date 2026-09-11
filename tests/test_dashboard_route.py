@@ -333,6 +333,102 @@ class DashboardRouteTests(unittest.TestCase):
                 self.assertFalse(errors)
                 self.assertEqual(since_minutes, value)
 
+    def test_audit_summary_returns_200_and_isolates_tenants(self) -> None:
+        from datetime import datetime, timedelta, timezone
+
+        from app.models.call_event import CallEvent
+        from app.models.vapi_call_cost import VapiCallCost
+
+        now = datetime.now(timezone.utc)
+        with self.session_local() as session:
+            session.add_all(
+                [
+                    CallEvent(
+                        tenant_id="tenant_a",
+                        call_id="call_shared",
+                        tool_call_id="tc_a1",
+                        tool_name="search_providers",
+                        event_type="tool_completed",
+                        final_state="RESOLVIDA_AUTOMATICO",
+                        ok=True,
+                        duration_ms=1000,
+                        error_code=None,
+                        payload_masked={},
+                        created_at=now - timedelta(minutes=5),
+                    ),
+                    CallEvent(
+                        tenant_id="tenant_b",
+                        call_id="call_shared",
+                        tool_call_id="tc_b1",
+                        tool_name="search_providers",
+                        event_type="tool_completed",
+                        final_state="RESOLVIDA_AUTOMATICO",
+                        ok=True,
+                        duration_ms=1000,
+                        error_code=None,
+                        payload_masked={},
+                        created_at=now - timedelta(minutes=5),
+                    ),
+                    VapiCallCost(
+                        call_id="call_shared_a",
+                        tenant_id="tenant_a",
+                        assistant_id="assistant_a",
+                        started_at=now - timedelta(minutes=5),
+                        synced_at=now,
+                    ),
+                    VapiCallCost(
+                        call_id="call_shared",
+                        tenant_id="tenant_b",
+                        assistant_id="assistant_a",
+                        started_at=now - timedelta(minutes=5),
+                        synced_at=now,
+                    ),
+                    CallEvent(
+                        tenant_id="tenant_a",
+                        call_id="call_a_pos",
+                        tool_call_id="tc_a_pos",
+                        tool_name="search_providers",
+                        event_type="tool_completed",
+                        final_state="RESOLVIDA_AUTOMATICO",
+                        ok=True,
+                        duration_ms=1200,
+                        error_code=None,
+                        payload_masked={},
+                        created_at=now - timedelta(minutes=4),
+                    ),
+                    VapiCallCost(
+                        call_id="call_a_pos",
+                        tenant_id="tenant_a",
+                        assistant_id="assistant_a",
+                        started_at=now - timedelta(minutes=4),
+                        synced_at=now,
+                    ),
+                ]
+            )
+            session.commit()
+
+        client = self._client()
+        self._bootstrap(client)
+
+        scoped = client.get("/ops/audit/summary?tenant_id=tenant_a&since_minutes=60")
+        self.assertEqual(200, scoped.status_code, scoped.text)
+        self.assertEqual(2, scoped.json()["totals"]["total_calls"])
+
+        filtered = client.get(
+            "/ops/audit/summary?tenant_id=tenant_a&assistant_id=assistant_a&since_minutes=60"
+        )
+        self.assertEqual(200, filtered.status_code, filtered.text)
+        self.assertEqual(1, filtered.json()["totals"]["total_calls"])
+
+        app.dependency_overrides[get_settings] = lambda: production_settings(
+            ops_allow_global_queries=True
+        )
+        global_filtered = client.get(
+            "/ops/audit/summary?assistant_id=assistant_a&since_minutes=60"
+        )
+        self.assertEqual(200, global_filtered.status_code, global_filtered.text)
+        self.assertEqual(2, global_filtered.json()["totals"]["total_calls"])
+
     def test_admin_crud_returns_temporary_password_once(self) -> None:
         client = self._client()
         self._bootstrap(client)
