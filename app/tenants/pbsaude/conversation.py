@@ -12,6 +12,7 @@ from .catalog import get_specialty_catalog
 
 MAX_TURNS = 256
 KEYPAD = re.compile(r"(?:user'?s\s+keypad\s+entry|keypad\s+entry)\s*:\s*([0-9\s.#*-]+)", re.I)
+BARE_KEYPAD = re.compile(r"^\s*((?:[0-9]\s*){11})#")
 CPF_CHANGE = re.compile(r"\b(?:corrigir|corrigindo|trocar|mudar)\b.*\bcpf\b|\bcpf\b.*\b(?:corrigir|corrigindo|trocar|mudar)\b")
 CPF_INVALIDATION = re.compile(r"\bcpf\b.*\b(?:errado|incorreto|outro|diferente)\b")
 CPF_NEGATED_CHANGE = re.compile(
@@ -135,8 +136,12 @@ def _encode(turn: dict, secret: str, catalog) -> dict:
         return entry
 
     match = KEYPAD.search(raw)
+    keypad_value = match.group(1) if match else None
+    if match is None:
+        match = BARE_KEYPAD.match(raw)
+        keypad_value = match.group(1) if match else None
     if match:
-        digits = re.sub(r"\D", "", match.group(1))
+        digits = re.sub(r"\D", "", keypad_value or "")
         entry["keypad"] = True
         entry["cpf"] = keyed_hmac(secret, digits) if len(digits) == 11 else None
         # Vapi may combine a keypad event and speech in one transcript turn.

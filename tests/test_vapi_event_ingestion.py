@@ -88,6 +88,25 @@ class VapiEventIngestionTests(unittest.TestCase):
         self.assertEqual("cpf", state.phase)
         self.assertIsNone(state.cpf_hmac)
 
+    def test_hash_terminated_bare_keypad_entry_confirms_cpf(self) -> None:
+        payload = self._conversation(
+            "call_bare_keypad_cpf",
+            "+5511999999999",
+            ["12345678901#", "Salvador", "cardiologista"],
+        )
+        with self.session_local() as session:
+            VapiEventIngestionService(self.settings).ingest(session, payload)
+            state = session.get(
+                VapiCallSlotState,
+                {"tenant_id": "tenant_a", "call_id": "call_bare_keypad_cpf"},
+            )
+
+        self.assertEqual("especialidade", state.phase)
+        self.assertEqual(
+            keyed_hmac(self.settings.vapi_slot_state_hmac_secret, "12345678901"),
+            state.cpf_hmac,
+        )
+
     def test_slot_guard_blocks_invented_city_and_accepts_specialty_alias(self) -> None:
         secret = self.settings.vapi_slot_state_hmac_secret
         now = datetime.now(timezone.utc)
