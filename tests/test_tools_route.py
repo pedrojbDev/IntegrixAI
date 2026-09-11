@@ -1,11 +1,10 @@
 import unittest
 from unittest.mock import patch
 
-from fastapi.testclient import TestClient
-
 from app.config import Settings, get_settings
 from app.main import app
 from app.utils.enums import CallFinalState
+from tests.local_client import LocalASGIClient
 
 
 def production_settings(**overrides):
@@ -35,7 +34,7 @@ class ToolsRouteTests(unittest.TestCase):
     def test_tools_route_keeps_success_envelope(self) -> None:
         settings = Settings(_env_file=None, tenant_map={"+5511999999999": "tenant_a"})
         app.dependency_overrides[get_settings] = lambda: settings
-        client = TestClient(app)
+        client = LocalASGIClient(app)
 
         response = client.post(
             "/tools",
@@ -78,7 +77,7 @@ class ToolsRouteTests(unittest.TestCase):
     def test_tools_route_argument_validation_keeps_same_envelope(self) -> None:
         settings = Settings(_env_file=None)
         app.dependency_overrides[get_settings] = lambda: settings
-        client = TestClient(app)
+        client = LocalASGIClient(app)
 
         response = client.post(
             "/tools",
@@ -104,7 +103,7 @@ class ToolsRouteTests(unittest.TestCase):
     def test_tools_route_invalid_tool_name_keeps_same_envelope(self) -> None:
         settings = Settings(_env_file=None)
         app.dependency_overrides[get_settings] = lambda: settings
-        client = TestClient(app)
+        client = LocalASGIClient(app)
 
         response = client.post(
             "/tools",
@@ -130,7 +129,7 @@ class ToolsRouteTests(unittest.TestCase):
     def test_tools_route_rejects_disabled_authenticate_member_without_provider_call(self) -> None:
         settings = Settings(_env_file=None)
         app.dependency_overrides[get_settings] = lambda: settings
-        client = TestClient(app)
+        client = LocalASGIClient(app)
 
         with patch(
             "app.tenants.pbsaude.workflows.authenticate_member.get_data_provider"
@@ -164,7 +163,7 @@ class ToolsRouteTests(unittest.TestCase):
     def test_tools_route_rejects_disabled_authorization_status_without_provider_call(self) -> None:
         settings = Settings(_env_file=None)
         app.dependency_overrides[get_settings] = lambda: settings
-        client = TestClient(app)
+        client = LocalASGIClient(app)
 
         with patch(
             "app.tenants.pbsaude.workflows.get_authorization_status.get_data_provider"
@@ -198,7 +197,7 @@ class ToolsRouteTests(unittest.TestCase):
     def test_tools_route_processes_valid_tool_when_batch_contains_disabled_tool(self) -> None:
         settings = Settings(_env_file=None, tenant_map={"+5511999999999": "tenant_a"})
         app.dependency_overrides[get_settings] = lambda: settings
-        client = TestClient(app)
+        client = LocalASGIClient(app)
 
         with patch(
             "app.tenants.pbsaude.workflows.authenticate_member.get_data_provider"
@@ -242,7 +241,7 @@ class ToolsRouteTests(unittest.TestCase):
             webhook_secret_header="x-webhook-secret",
         )
         app.dependency_overrides[get_settings] = lambda: settings
-        client = TestClient(app)
+        client = LocalASGIClient(app)
 
         response = client.post(
             "/tools",
@@ -270,7 +269,7 @@ class ToolsRouteTests(unittest.TestCase):
             webhook_secret_header="x-webhook-secret",
         )
         app.dependency_overrides[get_settings] = lambda: settings
-        client = TestClient(app)
+        client = LocalASGIClient(app)
 
         response = client.post(
             "/tools",
@@ -300,7 +299,7 @@ class ToolsRouteTests(unittest.TestCase):
             webhook_secret_header="x-webhook-secret",
         )
         app.dependency_overrides[get_settings] = lambda: settings
-        client = TestClient(app)
+        client = LocalASGIClient(app)
 
         response = client.post(
             "/tools",
@@ -327,7 +326,7 @@ class ToolsRouteTests(unittest.TestCase):
     def test_tools_route_rejects_unknown_did_in_production(self) -> None:
         settings = production_settings()
         app.dependency_overrides[get_settings] = lambda: settings
-        client = TestClient(app)
+        client = LocalASGIClient(app)
 
         with (
             patch("app.core.tools.dispatcher.record_call_event"),
@@ -360,7 +359,7 @@ class ToolsRouteTests(unittest.TestCase):
     def test_tools_route_checks_webhook_before_tenant_rejection_in_production(self) -> None:
         settings = production_settings()
         app.dependency_overrides[get_settings] = lambda: settings
-        client = TestClient(app)
+        client = LocalASGIClient(app)
 
         with (
             patch("app.core.tools.dispatcher.record_call_event"),
@@ -390,7 +389,7 @@ class ToolsRouteTests(unittest.TestCase):
     def test_tools_route_rejects_missing_did_in_production(self) -> None:
         settings = production_settings()
         app.dependency_overrides[get_settings] = lambda: settings
-        client = TestClient(app)
+        client = LocalASGIClient(app)
 
         with (
             patch("app.core.tools.dispatcher.record_call_event"),
@@ -423,7 +422,7 @@ class ToolsRouteTests(unittest.TestCase):
     def test_tools_route_accepts_mapped_did_in_production(self) -> None:
         settings = production_settings()
         app.dependency_overrides[get_settings] = lambda: settings
-        client = TestClient(app)
+        client = LocalASGIClient(app)
 
         with (
             patch("app.core.tools.dispatcher.record_call_event"),

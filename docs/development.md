@@ -19,6 +19,18 @@ da raiz do repo ou de um worktree:
 - `./scripts/test.sh` usa sempre `.venv/bin/python`. Sem argumentos, roda
   a suite ampla (igual ao CI). Com argumentos, repassa ao unittest:
   `./scripts/test.sh -p "test_dashboard_route.py"`.
+- `./scripts/run-local.sh` sobe o backend em `127.0.0.1:8000` com o mesmo
+  ambiente seguro (mock, SQLite desabilitado e schedulers desligados). Passe
+  argumentos do Uvicorn, por exemplo `./scripts/run-local.sh --reload`.
+- O runner local executa `asyncio.to_thread` inline durante os testes. Isso
+  evita que o pool de threads do provedor deixe agentes presos no encerramento
+  do processo; chamadas externas continuam cobertas por mocks e cenários
+  explícitos. Com `ALLOW_EXTERNAL_TESTS=1`, o comportamento original de
+  threads é preservado para os testes PostgreSQL descartáveis.
+- O runner força `ENVIRONMENT=dev`, `DATA_MODE=mock`, `DB_ENABLED=false` e
+  `DATABASE_URL=sqlite://`, além de desligar schedulers. Assim, credenciais ou
+  `.env` de produção não fazem a suite acessar a VPS. Testes PostgreSQL
+  descartáveis são opt-in explícito com `ALLOW_EXTERNAL_TESTS=1`.
 - Cada worktree tem seu proprio `.venv` (ignorado pelo git). Depois de
   criar um worktree, rode `./scripts/dev-setup.sh` uma vez la dentro.
 - Python esperado: `3.12` (ver `.python-version`; o CI usa a mesma versao).

@@ -3,7 +3,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -13,6 +12,7 @@ from app.core.security.ops import hash_password
 from app.db import Base, get_db
 from app.main import app
 from app.models.ops_auth import OpsUser, OpsUserTenant
+from tests.local_client import LocalASGIClient
 
 
 def production_settings(**overrides):
@@ -53,7 +53,7 @@ class DashboardRouteTests(unittest.TestCase):
         Base.metadata.drop_all(bind=self.engine)
         self.engine.dispose()
 
-    def _client(self, settings: Settings | None = None) -> TestClient:
+    def _client(self, settings: Settings | None = None) -> LocalASGIClient:
         selected_settings = settings or production_settings()
         app.dependency_overrides[get_settings] = lambda: selected_settings
 
@@ -65,7 +65,7 @@ class DashboardRouteTests(unittest.TestCase):
                 session.close()
 
         app.dependency_overrides[get_db] = override_db
-        return TestClient(app, base_url="https://testserver")
+        return LocalASGIClient(app, base_url="https://testserver")
 
     def _patch_spa_dist(self):
         temp_dir = tempfile.TemporaryDirectory()
@@ -82,7 +82,7 @@ class DashboardRouteTests(unittest.TestCase):
             assets,
         )
 
-    def _bootstrap(self, client: TestClient, email: str = "admin@example.com") -> dict:
+    def _bootstrap(self, client: LocalASGIClient, email: str = "admin@example.com") -> dict:
         response = client.post(
             "/ops/bootstrap",
             json={
@@ -95,7 +95,7 @@ class DashboardRouteTests(unittest.TestCase):
         return response.json()
 
     @staticmethod
-    def _csrf(client: TestClient) -> dict[str, str]:
+    def _csrf(client: LocalASGIClient) -> dict[str, str]:
         return {
             "x-csrf-token": client.cookies.get("integrix_ops_csrf"),
             "origin": "https://testserver",

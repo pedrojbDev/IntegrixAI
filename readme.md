@@ -281,6 +281,14 @@ os dias às 07:00 no fuso `America/Sao_Paulo`. O relatório usa por padrão os
 
 ### Backend
 
+Linux/macOS (caminho usado por agentes e CI):
+
+```bash
+./scripts/dev-setup.sh
+```
+
+No Windows, o equivalente manual e:
+
 ```powershell
 python -m venv venv
 .\venv\Scripts\activate
@@ -312,6 +320,14 @@ LOG_LEVEL=INFO
 ## Rodando localmente
 
 ### Backend
+
+Linux/macOS:
+
+```bash
+./scripts/run-local.sh --reload
+```
+
+No Windows:
 
 ```powershell
 .\venv\Scripts\activate
@@ -677,25 +693,21 @@ Ha cobertura de testes em `tests/` para:
 
 ### Comando
 
-```powershell
-python -m unittest discover -s tests
+```bash
+./scripts/test.sh
 ```
 
-### Resultado da verificacao feita agora
-
-No ambiente atual, a suite backend nao rodou completamente porque o Python usado fora do `venv` nao tem dependencias instaladas, em especial:
-
-- `structlog`
-- `psycopg`
-
-Ou seja: a suite existe, mas exige que o ambiente esteja preparado com `pip install -r requirements.txt`.
+O runner prepara o `.venv` quando necessario e força `DATA_MODE=mock`,
+`DB_ENABLED=false`, `DATABASE_URL=sqlite://` e schedulers desligados. Assim,
+os testes locais não herdam credenciais ou banco da VPS. Testes PostgreSQL
+descartáveis exigem `ALLOW_EXTERNAL_TESTS=1`.
 
 ### Smoke script
 
 Existe um smoke script operacional:
 
-```powershell
-python scripts\smoke_local.py --base-url http://127.0.0.1:8000
+```bash
+./.venv/bin/python scripts/smoke_local.py --base-url http://127.0.0.1:8000
 ```
 
 Ele valida:
@@ -753,8 +765,8 @@ npm run build
 
 ### Testes backend
 
-```powershell
-python -m unittest discover -s tests
+```bash
+./scripts/test.sh
 ```
 
 ### Migrations
@@ -765,20 +777,20 @@ alembic upgrade head
 
 ### Smoke local
 
-```powershell
-python scripts\smoke_local.py --base-url http://127.0.0.1:8000
+```bash
+./.venv/bin/python scripts/smoke_local.py --base-url http://127.0.0.1:8000
 ```
 
 ## Fluxo recomendado para subir o projeto corretamente
 
-1. Criar e ativar o `venv`.
-2. Instalar dependencias Python com `pip install -r requirements.txt`.
-3. Copiar `.env.example` para `.env` e ajustar valores.
-4. Se usar DB, executar `alembic upgrade head`.
-5. Instalar dependencias do frontend em `frontend/`.
-6. Rodar `npm run build` para gerar `frontend/dist` se quiser validar a console localmente fora do Docker.
-7. Subir o backend com `uvicorn`.
-8. Validar `GET /health`.
-9. Rodar `python -m unittest discover -s tests`.
-10. Rodar `python scripts\smoke_local.py`.
-11. Acessar `/dashboard`, criar o primeiro administrador e autenticar por email e senha.
+1. Rodar `./scripts/dev-setup.sh` (ou criar o `venv` manualmente no Windows).
+2. Copiar `.env.example` para `.env` e ajustar valores quando for subir um
+   ambiente que realmente precise dessas integrações.
+3. Se usar DB, executar `alembic upgrade head`.
+4. Instalar dependencias do frontend em `frontend/`.
+5. Rodar `npm run build` para gerar `frontend/dist` se quiser validar a console localmente fora do Docker.
+6. Subir o backend com `./scripts/run-local.sh` para uma execução local segura.
+7. Validar `GET /health`.
+8. Rodar `./scripts/test.sh`.
+9. Rodar `./.venv/bin/python scripts/smoke_local.py`.
+10. Acessar `/dashboard`, criar o primeiro administrador e autenticar por email e senha.
