@@ -69,6 +69,22 @@ and `.codex/agents`; skill selection is defined in
 skills; add a new agent or skill only when ownership or workflow genuinely
 diverges. Delegated tasks must have bounded, non-overlapping ownership.
 
+## Knowledge Graph (Graphify)
+
+`graphify-out/` holds the repo's knowledge graph (`graph.json`,
+`GRAPH_REPORT.md`). Every agent must consult it when planning or changing code:
+
+- Before touching code, run `graphify explain "<symbol>"` on each symbol you
+  plan to change and `graphify path "<A>" "<B>"` to check blast radius between
+  callers and effects (e.g. upsert paths vs `CallEvent` reconciliation).
+- Treat the graph as a navigation aid, not the source of truth: it can be
+  stale (check `Built from commit` in `GRAPH_REPORT.md` vs `git rev-parse
+  HEAD`). Confirm line numbers and callers in the code before editing.
+- `graphify-out/` is gitignored, so fresh worktrees start without it. If it is
+  missing, run `graphify update .` first (free, no API cost).
+- After merges that change architecture, run `graphify update .` so the graph
+  does not rot.
+
 ## Evolution And Non-Goals
 
 Keep these instructions aligned with real architecture. Refine existing docs,
