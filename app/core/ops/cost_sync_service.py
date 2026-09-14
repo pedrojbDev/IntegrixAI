@@ -6,7 +6,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import httpx
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -128,12 +128,20 @@ class VapiCostSyncService:
                     stats["processed"] += 1
                     stats["missing_cost"] += int(parsed.cost_total_usd is None)
                     stats["unresolved_tenant"] += int(parsed.tenant_id is None)
+                parsed_batch, foreign_dropped = self._drop_foreign_owned_rows(
+                    session,
+                    parsed_batch,
+                )
+                stats["skipped"] += foreign_dropped
                 self.ptax.ensure_rates(
                     session,
                     {item.started_at.date() for item in parsed_batch if item.started_at is not None},
                 )
                 created, updated, missing_fx = self._upsert_cost_batch_detailed(
-                    session, parsed_batch, now
+                    session,
+                    parsed_batch,
+                    now,
+                    ownership_checked=True,
                 )
                 stats["created"] += created
                 stats["updated"] += updated
@@ -422,6 +430,52 @@ class VapiCostSyncService:
                 reconciled["normal_completions"] += 1
         return reconciled
 
+    def _drop_foreign_owned_rows(
+        self,
+        session: Session,
+        parsed_batch: list[ParsedCallCost],
+    ) -> tuple[list[ParsedCallCost], int]:
+        """Keep rows whose existing Vapi call owner is compatible.
+
+        ``call_id`` is the primary key of the Vapi-only ``vapi_call_costs``
+        table, so this is an intentional global integrity lookup rather than
+        a tenant-scoped business query.
+        """
+        if not parsed_batch:
+            return [], 0
+
+        owners = dict(
+            session.execute(
+                select(VapiCallCost.call_id, VapiCallCost.tenant_id).where(
+                    VapiCallCost.call_id.in_(
+                        [parsed.call_id for parsed in parsed_batch]
+                    )
+                )
+            ).all()
+        )
+
+        kept: list[ParsedCallCost] = []
+        dropped = 0
+        for parsed in parsed_batch:
+            existing_tenant_id = owners.get(parsed.call_id)
+            if (
+                parsed.call_id in owners
+                and existing_tenant_id is not None
+                and existing_tenant_id != parsed.tenant_id
+            ):
+                dropped += 1
+                log.warning(
+                    "ops_cost_sync_tenant_owner_mismatch",
+                    event_type="ops_cost_sync",
+                    provider="vapi",
+                    call_id=parsed.call_id,
+                    existing_tenant_id=existing_tenant_id,
+                    incoming_tenant_id=parsed.tenant_id,
+                )
+                continue
+            kept.append(parsed)
+        return kept, dropped
+
     def reconcile_saved_terminal_outcomes(
         self,
         session: Session,
@@ -481,9 +535,15 @@ class VapiCostSyncService:
         session: Session,
         parsed_batch: list[ParsedCallCost],
         synced_at: datetime,
+        *,
+        ownership_checked: bool = False,
     ) -> tuple[int, int, int]:
         if not parsed_batch:
             return 0, 0, 0
+        if not ownership_checked:
+            parsed_batch, _ = self._drop_foreign_owned_rows(session, parsed_batch)
+            if not parsed_batch:
+                return 0, 0, 0
         if self.settings.voice_call_shadow_enabled:
             self._reconcile_voice_calls_shadow(session, parsed_batch, synced_at)
         call_ids = [parsed.call_id for parsed in parsed_batch]
@@ -531,8 +591,6 @@ class VapiCostSyncService:
             for component in COMPONENT_NAMES:
                 row[f"cost_{component}_usd"] = parsed.components.get(component)
             rows.append(row)
-        created = sum(1 for call_id in call_ids if call_id not in existing_ids)
-        updated = len(rows) - created
         if session.bind and session.bind.dialect.name == "postgresql":
             insert_stmt = pg_insert(VapiCallCost).values(rows)
             excluded = insert_stmt.excluded
@@ -543,23 +601,60 @@ class VapiCostSyncService:
                 excluded.voice_call_id,
                 VapiCallCost.voice_call_id,
             )
-            session.execute(
-                insert_stmt.on_conflict_do_update(
-                    index_elements=[VapiCallCost.call_id],
-                    set_=update_values,
+            statement = insert_stmt.on_conflict_do_update(
+                index_elements=[VapiCallCost.call_id],
+                set_=update_values,
+                where=or_(
+                    VapiCallCost.tenant_id.is_(None),
+                    VapiCallCost.tenant_id == excluded.tenant_id,
+                ),
+            )
+            affected_ids = set(
+                session.execute(statement.returning(VapiCallCost.call_id)).scalars()
+            )
+            created = sum(1 for call_id in affected_ids if call_id not in existing_ids)
+            updated = sum(1 for call_id in affected_ids if call_id in existing_ids)
+            missing_fx = sum(
+                int(
+                    row["call_id"] in affected_ids
+                    and row["cost_total_usd"] is not None
+                    and row["usd_brl_rate"] is None
                 )
+                for row in rows
             )
             return created, updated, missing_fx
+        affected_ids: set[str] = set()
         for values in rows:
             row = session.get(VapiCallCost, values["call_id"])
             if row is None:
                 row = VapiCallCost(call_id=values["call_id"])
                 session.add(row)
+            elif row.tenant_id is not None and row.tenant_id != values["tenant_id"]:
+                log.warning(
+                    "ops_cost_sync_tenant_owner_mismatch",
+                    event_type="ops_cost_sync",
+                    provider="vapi",
+                    call_id=values["call_id"],
+                    existing_tenant_id=row.tenant_id,
+                    incoming_tenant_id=values["tenant_id"],
+                )
+                continue
             for key, value in values.items():
                 if key != "call_id":
                     if key == "voice_call_id" and value is None and row.voice_call_id:
                         continue
                     setattr(row, key, value)
+            affected_ids.add(values["call_id"])
+        created = sum(1 for call_id in affected_ids if call_id not in existing_ids)
+        updated = sum(1 for call_id in affected_ids if call_id in existing_ids)
+        missing_fx = sum(
+            int(
+                row["call_id"] in affected_ids
+                and row["cost_total_usd"] is not None
+                and row["usd_brl_rate"] is None
+            )
+            for row in rows
+        )
         return created, updated, missing_fx
 
     def _reconcile_voice_calls_shadow(
@@ -701,13 +796,11 @@ class VapiCostSyncService:
     @staticmethod
     def _extract_to_number(raw: dict[str, Any]) -> str | None:
         phone_number = raw.get("phoneNumber")
-        customer = raw.get("customer")
         candidates = [
             raw.get("to"),
             raw.get("toNumber"),
             phone_number.get("number") if isinstance(phone_number, dict) else None,
             phone_number.get("phoneNumber") if isinstance(phone_number, dict) else None,
-            customer.get("number") if isinstance(customer, dict) else None,
             raw.get("phoneNumber") if isinstance(raw.get("phoneNumber"), str) else None,
         ]
         for candidate in candidates:
