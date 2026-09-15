@@ -46,7 +46,13 @@ DEFAULT_SPECIALTY_ALIASES: dict[str, tuple[str, ...]] = {
     "TOMOGRAFIA COMPUTADORIZADA": ("tomografia",),
     "ULTRASSONOGRAFIA": ("ultrassom",),
     "RADIOLOGIA": ("raio x", "raio-x", "radiografia"),
-    "MAMOGRAFIA": (),
+    # The provider accepts the exam family as MAMOGRAFIA; laterality and the
+    # acquisition method are safe qualifiers used by callers in natural speech.
+    "MAMOGRAFIA": (
+        "mamografia digital",
+        "mamografia bilateral",
+        "mamografia digital bilateral",
+    ),
     "ENDOSCOPIA": (),
     "COLONOSCOPIA": (),
     "HOSPITAL": ("hospital da rede",),
@@ -58,3 +64,8 @@ DEFAULT_SPECIALTY_ALIASES: dict[str, tuple[str, ...]] = {
 AMBIGUOUS_SPECIALTY_TERMS = {
     "cirurgiao", "medico da coluna", "medico de circulacao", "neuro", "terapeuta", "vascular", "exame de vista",
 }
+
+# These procedures were observed in calls but are not present in the
+# customer's authoritative CSV.  Keep them blocked until the customer gives
+# the exact API value; a later CSV entry automatically enables the canonical.
+UNCONFIRMED_EXAM_TERMS = frozenset({"urofluxometria", "eletroneuromiografia"})

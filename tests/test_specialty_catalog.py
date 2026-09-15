@@ -37,6 +37,16 @@ class SpecialtyCatalogTests(unittest.TestCase):
         self.assertEqual("RESSONANCIA MAGNETICA", catalog.resolve("ressonância"))
         self.assertEqual("RADIOLOGIA", catalog.resolve("raio-X"))
 
+    def test_mammography_qualified_variant_resolves_to_api_canonical(self) -> None:
+        catalog = get_specialty_catalog(Settings(_env_file=None))
+        self.assertEqual("MAMOGRAFIA", catalog.resolve("mamografia digital bilateral"))
+
+    def test_suggestions_do_not_offer_unrelated_specialties(self) -> None:
+        catalog = get_specialty_catalog(Settings(_env_file=None))
+        suggestions = catalog.suggest("médico da família")
+        self.assertNotIn("MASTOLOGIA", suggestions)
+        self.assertNotIn("ALERGOLOGIA", suggestions)
+
     def test_ambiguous_terms_are_not_resolved_arbitrarily(self) -> None:
         catalog = get_specialty_catalog(Settings(_env_file=None))
         for raw_value in ("neuro", "vascular", "terapeuta", "médico da coluna"):
@@ -60,10 +70,16 @@ class SpecialtyCatalogTests(unittest.TestCase):
     def test_external_csv_aliases_extend_default_catalog(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "especialidades.csv"
-            path.write_text("BAQ_DESCRI,ALIASES\nMEDICINA ESPORTIVA,medico do esporte|esportiva\n", encoding="utf-8")
+            path.write_text(
+                "BAQ_DESCRI,ALIASES\n"
+                "MEDICINA ESPORTIVA,medico do esporte|esportiva\n"
+                "MAMOGRAFIA,\n",
+                encoding="utf-8",
+            )
             catalog = get_specialty_catalog(Settings(_env_file=None, specialties_csv_path=str(path)))
         self.assertEqual("MEDICINA ESPORTIVA", catalog.resolve("médico do esporte"))
         self.assertEqual("DERMATOLOGIA", catalog.resolve("dermatologista"))
+        self.assertEqual("MAMOGRAFIA", catalog.resolve("mamografia digital bilateral"))
         self.assertIsNone(catalog.resolve("especialidade futura"))
 
 

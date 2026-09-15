@@ -23,6 +23,9 @@ SPOKEN_CPF = re.compile(r"\b(?:(?:esse|este)\s+(?:e|eh|esta|ta)\s+)?(?:meu\s+)?c
 NOISE = re.compile(r"^(alo|oi|ola|sim estou ouvindo|esta ouvindo|ta ouvindo|so um momento|um momento|aguarde|pera ai|deixa eu ver|nao entendi)[ !?.]*$")
 YES = {"sim", "isso", "isso mesmo", "correto", "certo", "exatamente", "pode", "pode sim"}
 ALL = {"todos", "todos os tres", "todos os 3", "os tres", "os 3", "ambos", "as duas", "os dois"}
+NATURAL_PROPOSAL = re.compile(
+    r"\bvoce (?:esta )?(?:procurando|procura|busca|quer|deseja|precisa)\b"
+)
 REFRESH = re.compile(r"\b(?:consulte novamente|atualize a busca|pesquise de novo)\b")
 REMOVE = re.compile(r"\b(?:nao (?:quero|preciso|desejo|e)|retire|remova|exclua|cancele|tire|sem|troque|trocar|substitua|substituir)\b")
 
@@ -91,6 +94,12 @@ def _question(value: str) -> str | None:
         return "cidade"
     if any(t in value for t in ("especialidade", "exame", "procedimento", "qual atendimento")):
         return "especialidade"
+    # Natural read-backs frequently omit the words "especialidade" or
+    # "confirmar" (for example, "Você procura mamografia digital bilateral?").
+    # Treat those proposals as specialty questions so a following assent can
+    # be bound to the proposed canonical request.
+    if NATURAL_PROPOSAL.search(value):
+        return "especialidade"
     if "cpf" in value and any(t in value for t in ("digite", "digitar", "novamente")):
         return "cpf"
     return None
@@ -118,8 +127,10 @@ def _encode(turn: dict, secret: str, catalog) -> dict:
         # A read-back is evidence only after a subsequent explicit assent.
         question_text = _last_question(raw)
         question_normalized = normalize_text(question_text)
+        natural_proposal = bool(NATURAL_PROPOSAL.search(question_normalized))
         confirmation = (any(t in question_normalized for t in ("confirmar", "voce quis dizer", "voce quer dizer"))
-                        or question_normalized.endswith("certo"))
+                        or question_normalized.endswith("certo")
+                        or natural_proposal)
         if confirmation:
             requests, _ = _requests(question_normalized, secret, catalog)
             if not entry["question"] and requests:

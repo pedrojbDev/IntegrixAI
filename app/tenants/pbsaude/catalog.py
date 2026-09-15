@@ -4,7 +4,7 @@ import csv
 import re
 import unicodedata
 from dataclasses import dataclass
-from difflib import get_close_matches
+from difflib import SequenceMatcher
 from functools import lru_cache
 from pathlib import Path
 
@@ -95,11 +95,27 @@ class SpecialtyCatalog:
         if not candidate_keys:
             return []
 
-        fuzzy_keys = get_close_matches(
-            candidate_keys[0], self.by_alias.keys(), n=limit * 2, cutoff=0.7
-        )
+        # Fuzzy suggestions are only hints, never provenance.  Compare the
+        # complete phrase first and require either a meaningful token in
+        # common or a close single-token typo.  Without this guard phrases
+        # such as "médico da família" matched unrelated aliases sharing only
+        # the generic words "médico" and "da".
+        query_key = candidate_keys[0]
+        query_tokens = set(query_key.split())
+        query_core = query_tokens - FILLER_WORDS
+        query_is_single_token = len(_normalize_text(raw_value).split()) == 1
+        ranked_keys: list[tuple[float, str]] = []
+        for alias_key in self.by_alias:
+            ratio = SequenceMatcher(None, query_key, alias_key).ratio()
+            if ratio < 0.78:
+                continue
+            alias_core = set(alias_key.split()) - FILLER_WORDS
+            if not (query_core & alias_core) and not query_is_single_token:
+                continue
+            ranked_keys.append((ratio, alias_key))
+        ranked_keys.sort(key=lambda item: (-item[0], item[1]))
         out: list[str] = []
-        for key in fuzzy_keys:
+        for _, key in ranked_keys[: limit * 2]:
             for candidate in self.by_alias[key]:
                 if candidate not in out:
                     out.append(candidate)

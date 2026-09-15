@@ -1,5 +1,6 @@
 import asyncio
 import json
+from collections.abc import Mapping
 from typing import NoReturn
 
 from pydantic import ValidationError
@@ -9,6 +10,7 @@ from ....logging import get_logger
 from ....core.tools.exceptions import UpstreamToolError
 from ....utils.enums import CallFinalState
 from ..catalog import get_specialty_catalog
+from ..specialty_aliases import UNCONFIRMED_EXAM_TERMS
 from ..search_execution import execute_search
 from ..search_events import persist_search_event
 from ....platform.services.vapi_conversation import normalize_text
@@ -61,6 +63,7 @@ async def search_providers(args: dict, settings: Settings, call_id: str, tenant_
                 field=exc.field,
                 code=exc.code,
             )
+            _promote_handoff_after_retry(exc)
         raise
 
 
@@ -79,6 +82,15 @@ def _rejected_value(args: dict, field: str | None) -> str | None:
     else:
         value = None
     return str(value) if value is not None else None
+
+
+def _promote_handoff_after_retry(error: BusinessRuleError) -> BusinessRuleError:
+    """Turn the second real invalid answer into an explicit handoff outcome."""
+    if error.handoff_after_retry and (error.attempt or 0) >= 2:
+        error.details = {**error.details, "recovery_action": "offer_handoff"}
+        error.retryable = False
+        error.handoff_after_retry = False
+    return error
 
 
 def _technical_upstream_code(exc: BaseException) -> str:
@@ -185,6 +197,7 @@ def _search_providers(
                 code=error.code,
                 rejected_value=_rejected_value(args, error.field),
             )
+            _promote_handoff_after_retry(error)
             error._vapi_recovery_applied = True
         action = (error.details or {}).get("recovery_action")
         event_type = "provider_search_failed" if action == "offer_handoff" else "provider_search_blocked"
@@ -268,7 +281,25 @@ def _search_providers_impl(
         )
     if catalog.is_enabled:
         canonical_specialty = catalog.resolve(payload.query)
-        if canonical_specialty is None:
+        normalized_query = normalize_text(payload.query)
+        mentioned_unconfirmed_exam = bool(
+            set(normalized_query.split()) & UNCONFIRMED_EXAM_TERMS
+        )
+        catalog_mapping = getattr(catalog, "by_normalized", {})
+        catalog_aliases = getattr(catalog, "by_alias", {})
+        canonical_is_catalogued = bool(
+            canonical_specialty
+            and isinstance(catalog_mapping, Mapping)
+            and normalize_text(canonical_specialty) in catalog_mapping
+        )
+        query_is_explicit_alias = (
+            isinstance(catalog_aliases, Mapping)
+            and normalized_query in catalog_aliases
+        )
+        unconfirmed_exam = mentioned_unconfirmed_exam and (
+            not canonical_is_catalogued or not query_is_explicit_alias
+        )
+        if canonical_specialty is None or unconfirmed_exam:
             suggestions = catalog.suggest(payload.query)
             clarification = {}
             if normalize_text(payload.query) == 'exame de vista':

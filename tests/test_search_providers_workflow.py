@@ -1,5 +1,7 @@
 import asyncio
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
 from app.config import Settings
@@ -436,3 +438,55 @@ class SearchClarificationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('consulta', error.exception.details['clarification_question'])
         self.assertIn('exame', error.exception.details['clarification_question'])
         provider.search_providers.assert_not_called()
+
+    async def test_unknown_exams_are_blocked_when_authoritative_catalog_is_loaded(self):
+        for exam in ('urofluxometria', 'eletroneuromiografia', 'exame de urofluxometria'):
+            with self.subTest(exam=exam), tempfile.TemporaryDirectory() as temp_dir:
+                path = Path(temp_dir) / 'especialidades.csv'
+                path.write_text('BAQ_DESCRI\nMAMOGRAFIA\n', encoding='utf-8')
+                provider = Mock()
+                with patch(
+                    'app.tenants.pbsaude.workflows.search_providers.get_data_provider',
+                    return_value=provider,
+                ), patch(
+                    'app.tenants.pbsaude.workflows.search_providers.asyncio.to_thread',
+                    new=AsyncMock(side_effect=lambda func, *args: func(*args)),
+                ):
+                    with self.assertRaises(BusinessRuleError) as error:
+                        await search_providers(
+                            {
+                                'cpf': '03457351538',
+                                'cidade': 'Salvador',
+                                'especialidade': exam,
+                            },
+                            Settings(_env_file=None, specialties_csv_path=str(path)),
+                            f'call-{exam}',
+                            'pbsaude',
+                        )
+                self.assertEqual('ESPECIALIDADE_INVALIDA', error.exception.code)
+                provider.search_providers.assert_not_called()
+
+    async def test_pending_unknown_exams_are_blocked_before_catalog_confirmation(self):
+        for exam in ('urofluxometria', 'eletroneuromiografia', 'exame de urofluxometria'):
+            with self.subTest(exam=exam):
+                provider = Mock()
+                with patch(
+                    'app.tenants.pbsaude.workflows.search_providers.get_data_provider',
+                    return_value=provider,
+                ), patch(
+                    'app.tenants.pbsaude.workflows.search_providers.asyncio.to_thread',
+                    new=AsyncMock(side_effect=lambda func, *args: func(*args)),
+                ):
+                    with self.assertRaises(BusinessRuleError) as error:
+                        await search_providers(
+                            {
+                                'cpf': '03457351538',
+                                'cidade': 'Salvador',
+                                'especialidade': exam,
+                            },
+                            Settings(_env_file=None),
+                            f'call-pending-{exam}',
+                            'pbsaude',
+                        )
+                self.assertEqual('ESPECIALIDADE_INVALIDA', error.exception.code)
+                provider.search_providers.assert_not_called()

@@ -20,6 +20,10 @@ antigos ou provisórios.
   abreviacoes, expressoes populares, servicos e exames. Ele fica ativo mesmo
   sem CSV externo; um `SPECIALTIES_CSV_PATH` valido estende o catalogo e passa
   a funcionar como lista autoritativa para termos desconhecidos.
+- `mamografia digital`, `mamografia bilateral` e `mamografia digital bilateral`
+  sao aliases seguros de `MAMOGRAFIA`. `urofluxometria` e
+  `eletroneuromiografia` permanecem bloqueadas ate o cliente confirmar o valor
+  canonico aceito pela API e atualizá-lo no CSV.
 
 Nao mova regras PB Saude para `app/core`. Compartilhe apenas capacidades que
 tenham contrato de plataforma comprovado. Tenant e `call_id` devem continuar

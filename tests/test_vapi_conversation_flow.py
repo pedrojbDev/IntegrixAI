@@ -665,6 +665,44 @@ class ConversationFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(0, blocked.exception.attempt)
         self.provider.search_providers.assert_not_called()
 
+    def test_natural_mammography_confirmation_releases_recovery_with_one_upstream_call(self):
+        self.settings.pbsaude_vapi_recovery_gate_enabled = True
+        messages = self.standard()
+        messages[-1]['message'] = 'Exame de vista'
+        self.ingest(messages)
+        with self.assertRaises(BusinessRuleError):
+            self.direct_search(query='Exame de vista')
+
+        messages.extend([
+            {'role': 'bot', 'message': 'Você procura mamografia digital bilateral?', 'time': self.base + 6000},
+            {'role': 'user', 'message': 'Sim', 'time': self.base + 7000},
+        ])
+        self.ingest(messages, rev=2)
+        result, _ = self.direct_search(query='mamografia digital bilateral')
+
+        self.assertEqual([], result['providers'])
+        self.provider.search_providers.assert_called_once()
+        self.assertEqual('MAMOGRAFIA', self.provider.search_providers.call_args.args[3])
+        self.assertNotIn('recovery_field', self.state().conversation_meta)
+
+    def test_second_invalid_specialty_attempt_offers_handoff(self):
+        self.settings.pbsaude_vapi_recovery_gate_enabled = True
+        messages = self.standard()
+        messages[-1]['message'] = 'Exame de vista'
+        self.ingest(messages)
+        with self.assertRaises(BusinessRuleError):
+            self.direct_search(query='Exame de vista')
+        messages.extend([
+            {'role': 'bot', 'message': 'Qual exame você procura?', 'time': self.base + 6000},
+            {'role': 'user', 'message': 'Exame de vista', 'time': self.base + 7000},
+        ])
+        self.ingest(messages, rev=2)
+        with self.assertRaises(BusinessRuleError) as second:
+            self.direct_search(query='Exame de vista')
+        self.assertEqual(2, second.exception.attempt)
+        self.assertEqual('offer_handoff', second.exception.details['recovery_action'])
+        self.assertFalse(second.exception.retryable)
+
     def test_missing_recoverable_argument_pins_backend_field(self):
         self.settings.pbsaude_vapi_recovery_gate_enabled = True
         self.ingest(self.standard())
