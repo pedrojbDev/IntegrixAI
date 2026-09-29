@@ -7,7 +7,9 @@ const STORAGE_KEY = "ops-dashboard:prefs:v1"
 const preferencesSchema = z.object({
   filters: z
     .object({
-      window: z.enum(["15m", "1h", "24h", "7d", "30d", "60d", "90d"]).catch("24h"),
+      window: z.enum(["15m", "1h", "24h", "7d", "30d", "60d", "90d", "custom"]).catch("24h"),
+      startDate: z.string().optional(),
+      endDate: z.string().optional(),
       tenantId: z.string().optional(),
       assistantId: z.string().optional(),
     })
@@ -42,9 +44,12 @@ export function loadPreferences(): DashboardPreferences {
       return defaultPreferences
     }
     const parsed = preferencesSchema.parse(JSON.parse(raw))
+    const validCustom = parsed.filters.startDate && parsed.filters.endDate
     return {
       filters: {
-        window: parsed.filters.window || "24h",
+        window: parsed.filters.window === "custom" && !validCustom ? "24h" : parsed.filters.window,
+        startDate: validCustom ? parsed.filters.startDate : undefined,
+        endDate: validCustom ? parsed.filters.endDate : undefined,
         tenantId: parsed.filters.tenantId,
         assistantId: parsed.filters.assistantId,
       },

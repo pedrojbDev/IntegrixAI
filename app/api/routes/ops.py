@@ -1,4 +1,5 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 from sqlalchemy import case, desc, func, select, tuple_
@@ -33,6 +34,33 @@ from ...models.vapi_call_cost import VapiCallCost
 
 router = APIRouter(prefix="/ops", tags=["ops"])
 log = get_logger()
+
+
+def _date_range(
+    start_date: date | None, end_date: date | None, *, required: bool = False,
+) -> tuple[datetime | None, datetime | None]:
+    if start_date is None and end_date is None and not required:
+        return None, None
+    if start_date is None or end_date is None or start_date > end_date or end_date == date.max:
+        raise HTTPException(status_code=422, detail="Informe datas inicial e final válidas")
+    if (end_date - start_date).days > 365:
+        raise HTTPException(status_code=422, detail="O intervalo máximo é de 366 dias")
+    local_zone = ZoneInfo("America/Sao_Paulo")
+    start_at = datetime.combine(start_date, time.min, tzinfo=local_zone).astimezone(timezone.utc)
+    end_at = datetime.combine(
+        end_date + timedelta(days=1), time.min, tzinfo=local_zone
+    ).astimezone(timezone.utc)
+    return start_at, end_at
+
+
+def _dashboard_range(
+    window: str, start_date: date | None, end_date: date | None,
+) -> tuple[datetime | None, datetime | None]:
+    if window == "custom":
+        return _date_range(start_date, end_date, required=True)
+    if start_date is not None or end_date is not None:
+        raise HTTPException(status_code=422, detail="Datas exigem window=custom")
+    return None, None
 
 
 def _assert_db_enabled(settings: Settings) -> None:
@@ -83,6 +111,7 @@ def _assistant_call_ids_for_filter(
     tenant_id: str | None,
     assistant_id: str | None,
     since: datetime | None = None,
+    until: datetime | None = None,
 ) -> set[str] | None:
     if not assistant_id:
         return None
@@ -92,6 +121,8 @@ def _assistant_call_ids_for_filter(
         stmt = stmt.where(VapiCallCost.tenant_id == tenant_id)
     if since is not None:
         stmt = stmt.where(VapiCallCost.started_at >= since)
+    if until is not None:
+        stmt = stmt.where(VapiCallCost.started_at < until)
     rows = session.execute(stmt).scalars().all()
     return {row for row in rows if row}
 
@@ -102,6 +133,7 @@ def _assistant_call_keys_for_audit_summary(
     tenant_id: str | None,
     assistant_id: str | None,
     since: datetime | None = None,
+    until: datetime | None = None,
 ) -> set[tuple[str, str]] | None:
     if not assistant_id:
         return None
@@ -113,6 +145,8 @@ def _assistant_call_keys_for_audit_summary(
         stmt = stmt.where(VapiCallCost.tenant_id == tenant_id)
     if since is not None:
         stmt = stmt.where(VapiCallCost.started_at >= since)
+    if until is not None:
+        stmt = stmt.where(VapiCallCost.started_at < until)
     rows = session.execute(stmt).all()
     return {(row.tenant_id, row.call_id) for row in rows if row.tenant_id and row.call_id}
 
@@ -125,6 +159,8 @@ async def baseline_metrics(_: OpsPrincipal = Depends(require_platform_admin)):
 @router.get("/audit/recent")
 async def recent_audit_events(
     limit: int = Query(default=50, ge=1, le=200),
+    start_date: date | None = None,
+    end_date: date | None = None,
     tenant_id: str | None = Query(default=None),
     assistant_id: str | None = Query(default=None),
     tool_name: str | None = Query(default=None),
@@ -137,16 +173,21 @@ async def recent_audit_events(
 ):
     _assert_db_enabled(settings)
     tenant_id = _authorized_tenant(principal, settings, tenant_id)
+    start_at, end_at = _date_range(start_date, end_date)
 
     session = SessionLocal()
     try:
         stmt = select(CallEvent).order_by(desc(CallEvent.created_at)).limit(limit)
+        if start_at is not None:
+            stmt = stmt.where(CallEvent.created_at >= start_at, CallEvent.created_at < end_at)
         if tenant_id:
             stmt = stmt.where(CallEvent.tenant_id == tenant_id)
         assistant_call_ids = _assistant_call_ids_for_filter(
             session,
             tenant_id=tenant_id,
             assistant_id=assistant_id,
+            since=start_at,
+            until=end_at,
         )
         if assistant_call_ids is not None:
             if not assistant_call_ids:
@@ -191,6 +232,8 @@ async def recent_audit_events(
 @router.get("/audit/summary")
 async def audit_summary(
     since_minutes: int | None = Query(default=None, ge=1, le=129600),
+    start_date: date | None = None,
+    end_date: date | None = None,
     tenant_id: str | None = Query(default=None),
     assistant_id: str | None = Query(default=None),
     settings: Settings = Depends(get_settings),
@@ -198,13 +241,19 @@ async def audit_summary(
 ):
     _assert_db_enabled(settings)
     tenant_id = _authorized_tenant(principal, settings, tenant_id)
+    start_at, end_at = _date_range(start_date, end_date)
 
     session = SessionLocal()
     try:
         filters = []
         if tenant_id:
             filters.append(CallEvent.tenant_id == tenant_id)
-        if since_minutes is not None:
+        if start_at is not None and since_minutes is not None:
+            raise HTTPException(status_code=422, detail="Escolha janela ou intervalo personalizado")
+        if start_at is not None:
+            cutoff = start_at
+            filters.extend((CallEvent.created_at >= start_at, CallEvent.created_at < end_at))
+        elif since_minutes is not None:
             cutoff = datetime.now(timezone.utc) - timedelta(minutes=since_minutes)
             filters.append(CallEvent.created_at >= cutoff)
         else:
@@ -215,6 +264,7 @@ async def audit_summary(
             tenant_id=tenant_id,
             assistant_id=assistant_id,
             since=cutoff,
+            until=end_at,
         )
         if assistant_call_keys is not None:
             if not assistant_call_keys:
@@ -271,6 +321,7 @@ async def audit_summary(
 
         outcomes = _call_outcomes_subquery(
             since=cutoff or datetime(1970, 1, 1, tzinfo=timezone.utc),
+            until=end_at,
             tenant_id=tenant_id,
             call_keys_filter=assistant_call_keys,
         )
@@ -455,7 +506,9 @@ async def download_operational_report(
 
 @router.get("/dashboard/overview")
 async def dashboard_overview(
-    window: str = Query(default="24h", pattern="^(15m|1h|24h|7d|30d|60d|90d)$"),
+    window: str = Query(default="24h", pattern="^(15m|1h|24h|7d|30d|60d|90d|custom)$"),
+    start_date: date | None = None,
+    end_date: date | None = None,
     tenant_id: str | None = Query(default=None),
     assistant_id: str | None = Query(default=None),
     settings: Settings = Depends(get_settings),
@@ -463,16 +516,19 @@ async def dashboard_overview(
 ):
     _assert_db_enabled(settings)
     tenant_id = _authorized_tenant(principal, settings, tenant_id)
+    start_at, end_at = _dashboard_range(window, start_date, end_date)
     session = SessionLocal()
     try:
-        return get_overview(session, window=window, tenant_id=tenant_id, assistant_id=assistant_id)
+        return get_overview(session, window=window, tenant_id=tenant_id, assistant_id=assistant_id, start_at=start_at, end_at=end_at)
     finally:
         session.close()
 
 
 @router.get("/dashboard/costs")
 async def dashboard_costs(
-    window: str = Query(default="24h", pattern="^(15m|1h|24h|7d|30d|60d|90d)$"),
+    window: str = Query(default="24h", pattern="^(15m|1h|24h|7d|30d|60d|90d|custom)$"),
+    start_date: date | None = None,
+    end_date: date | None = None,
     tenant_id: str | None = Query(default=None),
     assistant_id: str | None = Query(default=None),
     settings: Settings = Depends(get_settings),
@@ -480,11 +536,14 @@ async def dashboard_costs(
 ):
     _assert_db_enabled(settings)
     tenant_id = _authorized_tenant(principal, settings, tenant_id)
+    start_at, end_at = _dashboard_range(window, start_date, end_date)
     session = SessionLocal()
     try:
         payload = get_costs(
             session,
             window=window,
+            start_at=start_at,
+            end_at=end_at,
             tenant_id=tenant_id,
             assistant_id=assistant_id,
         )
@@ -509,7 +568,9 @@ async def dashboard_costs(
 
 @router.get("/dashboard/tools")
 async def dashboard_tools(
-    window: str = Query(default="24h", pattern="^(15m|1h|24h|7d|30d|60d|90d)$"),
+    window: str = Query(default="24h", pattern="^(15m|1h|24h|7d|30d|60d|90d|custom)$"),
+    start_date: date | None = None,
+    end_date: date | None = None,
     tenant_id: str | None = Query(default=None),
     assistant_id: str | None = Query(default=None),
     settings: Settings = Depends(get_settings),
@@ -517,16 +578,19 @@ async def dashboard_tools(
 ):
     _assert_db_enabled(settings)
     tenant_id = _authorized_tenant(principal, settings, tenant_id)
+    start_at, end_at = _dashboard_range(window, start_date, end_date)
     session = SessionLocal()
     try:
-        return get_tools(session, window=window, tenant_id=tenant_id, assistant_id=assistant_id)
+        return get_tools(session, window=window, tenant_id=tenant_id, assistant_id=assistant_id, start_at=start_at, end_at=end_at)
     finally:
         session.close()
 
 
 @router.get("/dashboard/health")
 async def dashboard_health(
-    window: str = Query(default="24h", pattern="^(15m|1h|24h|7d|30d|60d|90d)$"),
+    window: str = Query(default="24h", pattern="^(15m|1h|24h|7d|30d|60d|90d|custom)$"),
+    start_date: date | None = None,
+    end_date: date | None = None,
     tenant_id: str | None = Query(default=None),
     assistant_id: str | None = Query(default=None),
     settings: Settings = Depends(get_settings),
@@ -534,16 +598,19 @@ async def dashboard_health(
 ):
     _assert_db_enabled(settings)
     tenant_id = _authorized_tenant(principal, settings, tenant_id)
+    start_at, end_at = _dashboard_range(window, start_date, end_date)
     session = SessionLocal()
     try:
-        return get_health(session, window=window, tenant_id=tenant_id, assistant_id=assistant_id)
+        return get_health(session, window=window, tenant_id=tenant_id, assistant_id=assistant_id, start_at=start_at, end_at=end_at)
     finally:
         session.close()
 
 
 @router.get("/dashboard/resilience")
 async def dashboard_resilience(
-    window: str = Query(default="24h", pattern="^(15m|1h|24h|7d|30d|60d|90d)$"),
+    window: str = Query(default="24h", pattern="^(15m|1h|24h|7d|30d|60d|90d|custom)$"),
+    start_date: date | None = None,
+    end_date: date | None = None,
     tenant_id: str | None = Query(default=None),
     assistant_id: str | None = Query(default=None),
     settings: Settings = Depends(get_settings),
@@ -551,8 +618,9 @@ async def dashboard_resilience(
 ):
     _assert_db_enabled(settings)
     tenant_id = _authorized_tenant(principal, settings, tenant_id)
+    start_at, end_at = _dashboard_range(window, start_date, end_date)
     session = SessionLocal()
     try:
-        return get_resilience(session, window=window, tenant_id=tenant_id, assistant_id=assistant_id)
+        return get_resilience(session, window=window, tenant_id=tenant_id, assistant_id=assistant_id, start_at=start_at, end_at=end_at)
     finally:
         session.close()

@@ -9,7 +9,7 @@ export async function fetchAuditSummary(filters: DashboardFilters) {
   const payload = await apiRequest("/ops/audit/summary", {
     params: {
       ...dashboardParams(filters),
-      since_minutes: WINDOW_TO_MINUTES[filters.window],
+      since_minutes: filters.window === "custom" ? undefined : WINDOW_TO_MINUTES[filters.window],
     },
     schema: auditSummarySchema,
   })

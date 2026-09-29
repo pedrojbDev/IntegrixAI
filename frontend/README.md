@@ -34,6 +34,9 @@ aceitar tenant arbitrario para esse papel.
 TanStack Query controla cache, carregamento, erro e revalidacao. Filtros
 compartilhados de tenant, assistant e periodo devem produzir chaves de consulta
 distintas para impedir reaproveitamento de dados com outro escopo.
+O periodo personalizado aceita datas inicial e final inclusivas no fuso de
+Sao Paulo, com ate 366 dias, e filtra metricas e auditoria. O periodo do PDF
+e escolhido separadamente.
 Ao trocar tenant, consultas em andamento sao canceladas e caches de dashboard
 anteriores sao descartados para evitar reaproveitamento visual.
 

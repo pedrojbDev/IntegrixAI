@@ -84,12 +84,20 @@ def _floor_bucket(dt: datetime, minutes: int) -> datetime:
     return dt.replace(minute=minute_floor, second=0, microsecond=0)
 
 
-def _resolve_window(window: str) -> tuple[datetime, int]:
+def _resolve_window(
+    window: str, start_at: datetime | None = None, end_at: datetime | None = None,
+) -> tuple[datetime, datetime, int]:
+    if window == "custom":
+        if start_at is None or end_at is None or start_at >= end_at:
+            raise ValueError("intervalo personalizado invalido")
+        duration = end_at - start_at
+        bucket_minutes = 60 if duration <= timedelta(days=2) else 1440
+        return start_at, end_at, bucket_minutes
     if window not in WINDOW_TO_MINUTES:
         raise ValueError("window invalida")
+    until = datetime.now(timezone.utc)
     minutes = WINDOW_TO_MINUTES[window]
-    since = datetime.now(timezone.utc) - timedelta(minutes=minutes)
-    return since, WINDOW_BUCKET_MINUTES[window]
+    return until - timedelta(minutes=minutes), until, WINDOW_BUCKET_MINUTES[window]
 
 
 def _search_event_rows(
@@ -200,6 +208,7 @@ def _assistant_call_keys(
     session: Session,
     *,
     since: datetime,
+    until: datetime | None = None,
     tenant_id: str | None,
     assistant_id: str | None,
 ) -> set[tuple[str, str]] | None:
@@ -210,6 +219,8 @@ def _assistant_call_keys(
         VapiCallCost.started_at >= since,
         VapiCallCost.assistant_id == assistant_id,
     )
+    if until is not None:
+        stmt = stmt.where(VapiCallCost.started_at < until)
     if tenant_id:
         stmt = stmt.where(VapiCallCost.tenant_id == tenant_id)
     rows = session.execute(stmt).all()
@@ -219,10 +230,13 @@ def _assistant_call_keys(
 def _latest_tool_completed_subquery(
     *,
     since: datetime,
+    until: datetime | None = None,
     tenant_id: str | None,
     call_keys_filter: set[tuple[str, str]] | None = None,
 ):
     filters = [CallEvent.event_type == "tool_completed", CallEvent.created_at >= since]
+    if until is not None:
+        filters.append(CallEvent.created_at < until)
     if tenant_id:
         filters.append(CallEvent.tenant_id == tenant_id)
     if not _apply_call_key_filter(
@@ -268,6 +282,7 @@ def _latest_tool_completed_subquery(
 def _tool_completed_filters(
     *,
     since: datetime,
+    until: datetime | None = None,
     tenant_id: str | None,
     call_keys_filter: set[tuple[str, str]] | None,
 ) -> list[Any]:
@@ -275,6 +290,8 @@ def _tool_completed_filters(
         CallEvent.event_type == "tool_completed",
         CallEvent.created_at >= since,
     ]
+    if until is not None:
+        filters.append(CallEvent.created_at < until)
     if tenant_id:
         filters.append(CallEvent.tenant_id == tenant_id)
     if not _apply_call_key_filter(
@@ -291,6 +308,7 @@ def _tool_completed_filters(
 def _call_outcomes_subquery(
     *,
     since: datetime,
+    until: datetime | None = None,
     tenant_id: str | None,
     call_keys_filter: set[tuple[str, str]] | None,
 ):
@@ -307,6 +325,8 @@ def _call_outcomes_subquery(
             {"tool_completed", NATIVE_HANDOFF_EVENT_TYPE, NORMAL_COMPLETION_EVENT_TYPE}
         ),
     ]
+    if until is not None:
+        filters.append(CallEvent.created_at < until)
     if tenant_id:
         filters.append(CallEvent.tenant_id == tenant_id)
     if not _apply_call_key_filter(
@@ -391,12 +411,15 @@ def _summarize_call_outcomes(rows: list[Any]) -> dict[str, int]:
 def _event_filters(
     *,
     since: datetime,
+    until: datetime | None = None,
     tenant_id: str | None,
     call_keys_filter: set[tuple[str, str]] | None,
     event_type: str | None = None,
     ok: bool | None = None,
 ) -> list[Any]:
     filters: list[Any] = [CallEvent.created_at >= since]
+    if until is not None:
+        filters.append(CallEvent.created_at < until)
     if tenant_id:
         filters.append(CallEvent.tenant_id == tenant_id)
     if event_type:
@@ -456,21 +479,26 @@ def get_overview(
     window: str,
     tenant_id: str | None,
     assistant_id: str | None,
+    start_at: datetime | None = None,
+    end_at: datetime | None = None,
 ) -> dict[str, Any]:
-    since, bucket_minutes = _resolve_window(window)
+    since, until, bucket_minutes = _resolve_window(window, start_at, end_at)
     assistant_call_keys = _assistant_call_keys(
         session,
         since=since,
+        until=until,
         tenant_id=tenant_id,
         assistant_id=assistant_id,
     )
     outcomes = _call_outcomes_subquery(
         since=since,
+        until=until,
         tenant_id=tenant_id,
         call_keys_filter=assistant_call_keys,
     )
     tool_filters = _tool_completed_filters(
         since=since,
+        until=until,
         tenant_id=tenant_id,
         call_keys_filter=assistant_call_keys,
     )
@@ -593,9 +621,10 @@ def get_costs(
     window: str,
     tenant_id: str | None,
     assistant_id: str | None,
+    start_at: datetime | None = None,
+    end_at: datetime | None = None,
 ) -> dict[str, Any]:
-    since, bucket_minutes = _resolve_window(window)
-    until = datetime.now(timezone.utc)
+    since, until, bucket_minutes = _resolve_window(window, start_at, end_at)
     filters = [
         VapiCallCost.started_at >= since,
         VapiCallCost.started_at < until,
@@ -826,17 +855,21 @@ def get_tools(
     window: str,
     tenant_id: str | None,
     assistant_id: str | None,
+    start_at: datetime | None = None,
+    end_at: datetime | None = None,
 ) -> dict[str, Any]:
-    since, _ = _resolve_window(window)
+    since, until, _ = _resolve_window(window, start_at, end_at)
     assistant_call_keys = _assistant_call_keys(
         session,
         since=since,
+        until=until,
         tenant_id=tenant_id,
         assistant_id=assistant_id,
     )
 
     filters = _tool_completed_filters(
         since=since,
+        until=until,
         tenant_id=tenant_id,
         call_keys_filter=assistant_call_keys,
     )
@@ -946,20 +979,23 @@ def get_health(
     window: str,
     tenant_id: str | None,
     assistant_id: str | None,
+    start_at: datetime | None = None,
+    end_at: datetime | None = None,
 ) -> dict[str, Any]:
-    since, _ = _resolve_window(window)
+    since, until, _ = _resolve_window(window, start_at, end_at)
     assistant_call_keys = _assistant_call_keys(
         session,
         since=since,
+        until=until,
         tenant_id=tenant_id,
         assistant_id=assistant_id,
     )
-    overview = get_overview(session, window=window, tenant_id=tenant_id, assistant_id=assistant_id)
-    costs = get_costs(session, window=window, tenant_id=tenant_id, assistant_id=assistant_id)
-    tools = get_tools(session, window=window, tenant_id=tenant_id, assistant_id=assistant_id)
+    overview = get_overview(session, window=window, tenant_id=tenant_id, assistant_id=assistant_id, start_at=since, end_at=until)
+    costs = get_costs(session, window=window, tenant_id=tenant_id, assistant_id=assistant_id, start_at=since, end_at=until)
+    tools = get_tools(session, window=window, tenant_id=tenant_id, assistant_id=assistant_id, start_at=since, end_at=until)
     sync = _sync_snapshot(session)
 
-    repeated_filters = [ToolBusinessErrorAttempt.updated_at >= since]
+    repeated_filters = [ToolBusinessErrorAttempt.updated_at >= since, ToolBusinessErrorAttempt.updated_at < until]
     if tenant_id:
         repeated_filters.append(ToolBusinessErrorAttempt.tenant_id == tenant_id)
     if assistant_call_keys is not None:
@@ -993,6 +1029,7 @@ def get_health(
 
     idempotency_filters = _event_filters(
         since=since,
+        until=until,
         tenant_id=tenant_id,
         call_keys_filter=assistant_call_keys,
         event_type="idempotency_hit",
@@ -1075,18 +1112,20 @@ def get_resilience(
     window: str,
     tenant_id: str | None,
     assistant_id: str | None,
+    start_at: datetime | None = None,
+    end_at: datetime | None = None,
 ) -> dict[str, Any]:
-    since, bucket_minutes = _resolve_window(window)
-    until = datetime.now(timezone.utc)
+    since, until, bucket_minutes = _resolve_window(window, start_at, end_at)
     assistant_call_keys = _assistant_call_keys(
         session,
         since=since,
+        until=until,
         tenant_id=tenant_id,
         assistant_id=assistant_id,
     )
-    overview = get_overview(session, window=window, tenant_id=tenant_id, assistant_id=assistant_id)
-    tools = get_tools(session, window=window, tenant_id=tenant_id, assistant_id=assistant_id)
-    health = get_health(session, window=window, tenant_id=tenant_id, assistant_id=assistant_id)
+    overview = get_overview(session, window=window, tenant_id=tenant_id, assistant_id=assistant_id, start_at=since, end_at=until)
+    tools = get_tools(session, window=window, tenant_id=tenant_id, assistant_id=assistant_id, start_at=since, end_at=until)
+    health = get_health(session, window=window, tenant_id=tenant_id, assistant_id=assistant_id, start_at=since, end_at=until)
 
     quality_filters = [
         VapiCallCost.started_at >= since,
@@ -1189,6 +1228,7 @@ def get_resilience(
 
     failed_filters = _event_filters(
         since=since,
+        until=until,
         tenant_id=tenant_id,
         call_keys_filter=assistant_call_keys,
         event_type="tool_completed",
@@ -1201,6 +1241,7 @@ def get_resilience(
     )
     technical_failure_filters = _tool_completed_filters(
         since=since,
+        until=until,
         tenant_id=tenant_id,
         call_keys_filter=assistant_call_keys,
     )
@@ -1219,6 +1260,7 @@ def get_resilience(
     )
     idempotency_filters = _event_filters(
         since=since,
+        until=until,
         tenant_id=tenant_id,
         call_keys_filter=assistant_call_keys,
         event_type="idempotency_hit",
@@ -1229,7 +1271,7 @@ def get_resilience(
         else []
     )
 
-    attempt_filters = [ToolBusinessErrorAttempt.updated_at >= since]
+    attempt_filters = [ToolBusinessErrorAttempt.updated_at >= since, ToolBusinessErrorAttempt.updated_at < until]
     if tenant_id:
         attempt_filters.append(ToolBusinessErrorAttempt.tenant_id == tenant_id)
     if assistant_call_keys is not None:

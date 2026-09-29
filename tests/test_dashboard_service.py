@@ -27,6 +27,49 @@ class DashboardServiceTests(unittest.TestCase):
         Base.metadata.create_all(bind=engine)
         return sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
+    def test_custom_range_excludes_later_events_and_other_tenants(self) -> None:
+        session_local = self._session_local()
+        since = datetime(2026, 1, 10, tzinfo=timezone.utc)
+        until = datetime(2026, 1, 12, tzinfo=timezone.utc)
+        with session_local() as session:
+            for tenant, call_id, created_at in (
+                ("tenant_a", "inside", since + timedelta(hours=12)),
+                ("tenant_a", "later", until),
+                ("tenant_b", "other", since + timedelta(hours=12)),
+            ):
+                session.add(CallEvent(
+                    tenant_id=tenant,
+                    call_id=call_id,
+                    tool_call_id=call_id,
+                    tool_name="search_providers",
+                    event_type="tool_completed",
+                    ok=True,
+                    final_state="RESOLVIDA_AUTOMATICO",
+                    created_at=created_at,
+                ))
+                session.add(VapiCallCost(
+                    call_id=call_id,
+                    tenant_id=tenant,
+                    to_number="+5511999999999",
+                    started_at=created_at,
+                    assistant_id="assistant_1",
+                    is_verified=True,
+                    cost_total_usd=1.0,
+                ))
+            session.commit()
+            kwargs = dict(window="custom", tenant_id="tenant_a", assistant_id=None,
+                          start_at=since, end_at=until)
+            overview = get_overview(session, **kwargs)
+            costs = get_costs(session, **kwargs)
+            tools = get_tools(session, **kwargs)
+            health = get_health(session, **kwargs)
+            resilience = get_resilience(session, **kwargs)
+        self.assertEqual(1, overview["kpis"]["total_calls"])
+        self.assertEqual(1, costs["summary"]["vapi_calls"])
+        self.assertEqual(1, tools["items"][0]["total_calls"])
+        self.assertEqual(1, health["counters"]["total_calls"])
+        self.assertEqual(1, resilience["summary"]["total_calls"])
+
     def test_health_and_resilience_surface_operational_signals(self) -> None:
         session_local = self._session_local()
         now = datetime.now(timezone.utc)

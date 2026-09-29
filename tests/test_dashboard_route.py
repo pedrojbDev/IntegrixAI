@@ -36,6 +36,50 @@ def production_settings(**overrides):
 
 
 class DashboardRouteTests(unittest.TestCase):
+    def test_custom_dashboard_range_requires_valid_dates(self) -> None:
+        client = self._client()
+        self._bootstrap(client)
+        valid = client.get(
+            "/ops/dashboard/overview?window=custom&tenant_id=tenant_a&start_date=2026-01-10&end_date=2026-01-12"
+        )
+        self.assertEqual(200, valid.status_code)
+        for query in (
+            "window=custom",
+            "window=custom&start_date=2026-01-12&end_date=2026-01-10",
+            "window=custom&start_date=2025-01-01&end_date=2026-12-31",
+        ):
+            with self.subTest(query=query):
+                response = client.get(f"/ops/dashboard/overview?tenant_id=tenant_a&{query}")
+                self.assertEqual(422, response.status_code)
+
+    def test_custom_dates_are_inclusive_in_sao_paulo_and_scope_audit(self) -> None:
+        from datetime import datetime, timezone
+
+        from app.models.call_event import CallEvent
+
+        with self.session_local() as session:
+            for tenant, call_id, created_at in (
+                ("tenant_a", "at_start", datetime(2026, 1, 10, 3, tzinfo=timezone.utc)),
+                ("tenant_a", "at_end", datetime(2026, 1, 13, 3, tzinfo=timezone.utc)),
+                ("tenant_b", "other", datetime(2026, 1, 10, 3, tzinfo=timezone.utc)),
+            ):
+                session.add(CallEvent(
+                    tenant_id=tenant, call_id=call_id, tool_call_id=call_id,
+                    tool_name="search_providers", event_type="tool_completed",
+                    final_state="RESOLVIDA_AUTOMATICO", ok=True, created_at=created_at,
+                ))
+            session.commit()
+        client = self._client()
+        self._bootstrap(client)
+        dates = "tenant_id=tenant_a&start_date=2026-01-10&end_date=2026-01-12"
+        overview = client.get(f"/ops/dashboard/overview?window=custom&{dates}")
+        summary = client.get(f"/ops/audit/summary?{dates}")
+        recent = client.get(f"/ops/audit/recent?{dates}")
+        self.assertEqual(200, overview.status_code)
+        self.assertEqual(1, overview.json()["kpis"]["total_calls"])
+        self.assertEqual(1, summary.json()["totals"]["total_calls"])
+        self.assertEqual(["at_start"], [item["call_id"] for item in recent.json()["items"]])
+
     def setUp(self) -> None:
         self.engine = create_engine(
             "sqlite://",

@@ -99,6 +99,15 @@ No overview, uma conclusao normal da Vapi conta como resolucao automatica,
 independentemente de o cliente ou o agente encerrar a ligacao. Handoff permanece
 um resultado separado porque exige continuidade humana.
 
+As metricas do dashboard aceitam janelas moveis ou `window=custom` com
+`start_date` e `end_date` (datas inclusivas no fuso `America/Sao_Paulo`,
+ate 366 dias). O backend converte o fim para o inicio do dia seguinte e usa
+limite superior exclusivo nas consultas de eventos, custos e auditoria.
+Eventos usam `CallEvent.created_at`, custos usam `VapiCallCost.started_at` e
+tentativas de erro usam `ToolBusinessErrorAttempt.updated_at`; dados recebidos
+tardiamente aparecem quando as consultas sao atualizadas.
+O relatorio PDF conserva sua selecao independente de periodo.
+
 ## Relatório diário por e-mail
 
 Quando `DAILY_REPORT_ENABLED=true`, cada worker inicia um verificador em

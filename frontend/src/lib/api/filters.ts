@@ -8,9 +8,10 @@ export const WINDOW_OPTIONS: Array<{ value: WindowKey; label: string }> = [
   { value: "30d", label: "30 dias" },
   { value: "60d", label: "60 dias" },
   { value: "90d", label: "90 dias" },
+  { value: "custom", label: "Intervalo personalizado" },
 ]
 
-export const WINDOW_TO_MINUTES: Record<WindowKey, number> = {
+export const WINDOW_TO_MINUTES: Record<Exclude<WindowKey, "custom">, number> = {
   "15m": 15,
   "1h": 60,
   "24h": 1440,
@@ -28,6 +29,8 @@ function clean(value: string | undefined) {
 export function normalizeDashboardFilters(filters: DashboardFilters): DashboardFilters {
   return {
     window: filters.window || "24h",
+    startDate: filters.window === "custom" ? filters.startDate : undefined,
+    endDate: filters.window === "custom" ? filters.endDate : undefined,
     tenantId: clean(filters.tenantId),
     assistantId: clean(filters.assistantId),
   }
@@ -46,6 +49,8 @@ export function dashboardParams(filters: DashboardFilters) {
   const normalized = normalizeDashboardFilters(filters)
   return {
     window: normalized.window,
+    start_date: normalized.startDate,
+    end_date: normalized.endDate,
     tenant_id: normalized.tenantId,
     assistant_id: normalized.assistantId,
   }
