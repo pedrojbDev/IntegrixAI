@@ -37,6 +37,23 @@ metricas nem as regras gerais de tenant.
 6. Uma falha de SMTP nao deve marcar o dia como entregue. O proximo ciclo deve
    poder tentar novamente, com a falha observavel nos logs estruturados.
 
+## Conteudo E Layout Do PDF
+
+- Resumo executivo: resultados do atendimento, grafico de volume e definicoes.
+  Resolucao automatica usa `automated_resolution_calls`; sucesso do agente soma
+  resolucoes e transferencias bem-sucedidas. Transferencias permanecem nao
+  resolvidas do ponto de vista da automacao.
+- Custos e consumo: USD, BRL, custo medio, cobertura, duracao, componentes e
+  qualidade da conversao PTAX. Valores ausentes nao devem aparecer como zero
+  confirmado. Os componentes agregados nao distinguem ausencia de valor zero;
+  essa limitacao e indicada no PDF.
+- Diagnostico: saude, sincronizacao global, execucoes, falhas tecnicas e tabela
+  por ferramenta. As tabelas repetem o cabecalho quando continuam em outra
+  pagina. Datas sao exibidas no horario de Brasilia.
+- A grade tem tres cards por linha e considera margens e padding do frame A4.
+  Cards permanecem inteiros; valores extensos ajustam a fonte e nomes quebram
+  linha. Cada area comeca em nova pagina e tabelas extensas podem continuar.
+
 ## Configuracao Operacional
 
 Mantenha `DAILY_REPORT_ENABLED=false` por padrao. Para habilitar em producao,
@@ -53,6 +70,7 @@ variaveis de ambiente e reinicio/deploy da aplicacao.
 Para mudancas de relatorio ou entrega, execute o menor conjunto aplicavel:
 
 ```text
+./scripts/test.sh -p "test_report_layout.py"
 venv\Scripts\python.exe -m unittest discover -s tests -p "test_dashboard_route.py"
 venv\Scripts\python.exe -m unittest discover -s tests -p "test_dashboard_service.py"
 venv\Scripts\python.exe -m unittest discover -s tests -p "test_daily_report_delivery.py"
