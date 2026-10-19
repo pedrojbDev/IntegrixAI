@@ -18,6 +18,19 @@ REQUIRED_TOOLS = {
     "transfer_call_tool_PB": "transferCall",
     "end_call_tool": "endCall",
 }
+VERSION = "pbsaude-flow-v18-mitigation"
+IDLE_HOOKS = [
+    {
+        "on": "customer.speech.timeout",
+        "options": {"timeoutSeconds": seconds, "triggerMaxCount": 1,
+                    "triggerResetMode": "onUserSpeech"},
+        "do": [{"type": "say", "exact": message}],
+    }
+    for seconds, message in (
+        (15, "Você ainda está na linha?"),
+        (45, "Estou aguardando sua resposta para continuar."),
+    )
+]
 
 
 def fingerprint(value: object) -> str:
@@ -28,6 +41,20 @@ def fingerprint(value: object) -> str:
 def build_bundle(snapshot: dict, prompt: str) -> dict:
     assistant = snapshot["assistant"]
     model = assistant["model"]
+    if not isinstance(assistant.get("updatedAt"), str) or not assistant["updatedAt"].strip():
+        raise ValueError("Snapshot must contain updatedAt for publication preconditions")
+    silence = assistant.get("silenceTimeoutSeconds")
+    if type(silence) not in (int, float) or not 0 < silence <= 3600:
+        raise ValueError("Explicit silenceTimeoutSeconds required for a reviewable rollback; do not guess defaults")
+    hooks = assistant.get("hooks", [])
+    if not isinstance(hooks, list) or any(
+        not isinstance(hook, dict) or not isinstance(hook.get("on"), str)
+        for hook in hooks
+    ):
+        raise ValueError("Review unsupported hooks before preparing a bundle")
+    timeout_hooks = [hook for hook in hooks if hook["on"] == "customer.speech.timeout"]
+    if timeout_hooks and timeout_hooks != IDLE_HOOKS:
+        raise ValueError("Existing silence hooks conflict with the mitigation; review manually")
     # Retain the complete model object: PATCH implementations may replace it.
     # Refuse custom model credentials/URLs instead of copying secrets to a bundle.
     allowed = {"provider", "model", "messages", "toolIds", "tools", "temperature",
@@ -63,17 +90,42 @@ def build_bundle(snapshot: dict, prompt: str) -> dict:
     desired_model = copy.deepcopy(model)
     desired_model["messages"] = [{"role": "system", "content": prompt.strip()}]
     desired_model["toolIds"] = attached
+    desired_hooks = copy.deepcopy(hooks if timeout_hooks else hooks + IDLE_HOOKS)
+    desired = {"model": desired_model, "hooks": desired_hooks, "silenceTimeoutSeconds": 90}
+    # PATCH omission cannot remove a field introduced by the desired patch.
+    # Absent hooks have the same behavior as []; never guess numeric defaults.
+    rollback = {"model": copy.deepcopy(model), "hooks": copy.deepcopy(hooks),
+                "silenceTimeoutSeconds": silence}
+    expected_hashes = {
+        field: fingerprint({"present": True, "value": assistant[field]}
+                           if field in assistant else {"present": False})
+        for field in desired
+    }
+    desired_hashes = {field: fingerprint({"present": True, "value": value})
+                      for field, value in desired.items()}
+    changed_fields = [f"model.{field}" for field in ("messages", "toolIds")
+                      if model[field] != desired_model[field]]
+    changed_fields.extend(field for field in ("hooks", "silenceTimeoutSeconds")
+                          if expected_hashes[field] != desired_hashes[field])
     return {
-        "desired": {"model": desired_model},
-        "rollback": {"model": copy.deepcopy(model)},
+        "desired": desired,
+        "rollback": rollback,
         "manifest": {
-            "version": "pbsaude-flow-v16-candidate",
+            "version": VERSION,
             "assistant_id": assistant["id"],
             "expected_updated_at": assistant.get("updatedAt"),
             "expected_model_sha256": fingerprint(model),
             "desired_model_sha256": fingerprint(desired_model),
+            "expected_fields_sha256": expected_hashes,
+            "desired_fields_sha256": desired_hashes,
+            "rollback_preconditions": {
+                "expected_fields_sha256": copy.deepcopy(desired_hashes),
+                "updated_at_policy": "require_reviewed_post_publication_updatedAt",
+            },
+            "absent_field_restoration": {} if "hooks" in assistant else {"hooks": "explicit_empty_list"},
             "prompt_sha256": hashlib.sha256(prompt.strip().encode()).hexdigest(),
-            "changed_fields": ["model.messages", "model.toolIds"],
+            "touched_fields": list(desired),
+            "changed_fields": changed_fields,
             "removed_tools": ["handoff_human"] if "handoff_human" in names else [],
             "native_tool_edits": [],
             "publication_status": "local_only",

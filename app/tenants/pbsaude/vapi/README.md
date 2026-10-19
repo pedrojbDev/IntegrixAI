@@ -1,6 +1,7 @@
 # Fluxo de conversa PB Saúde
 
-`prompt.md` é a versão candidata do fluxo de Rede Credenciada. A configuração
+`prompt.md` é a versão v18 candidata da mitigação do fluxo de Rede Credenciada.
+A versão do manifest é `pbsaude-flow-v18-mitigation`. A configuração
 usa `search_providers`, `transfer_call_tool_PB` e `end_call_tool`. A ferramenta
 legada `handoff_human` continua disponível no backend por compatibilidade,
 mas é desanexada deste assistente. O anúncio da transferência permanece na
@@ -16,12 +17,71 @@ python scripts/prepare_vapi_flow_bundle.py /caminho/privado/snapshot.json /camin
 
 O snapshot deve conter `assistant` e `tooldefs` obtidos por GET autenticado.
 Não versionar snapshots, patches preenchidos ou credenciais. O diretório de
-saída é privado e deve ser novo. `desired.json` contém o modelo completo com
-apenas mensagens e anexos de tools alterados; `rollback.json` restaura o modelo
-anterior. `manifest.json` identifica o assistente e hashes de pré-condição.
-Não substituir configurações que mudaram desde o snapshot: obter outro snapshot
-e revisar novamente. O gerador recusa campos de modelo desconhecidos e ausência
-do anúncio nativo para evitar perder configurações silenciosamente.
+saída é privado e deve ser novo. O snapshot permanece intacto. `desired.json`
+contém o modelo completo com mensagens e anexos de tools alterados, os hooks
+preservados mais os avisos de silêncio e `silenceTimeoutSeconds=90`.
+`rollback.json` restaura os três campos de topo: `model`, `hooks` e
+`silenceTimeoutSeconds`. Voz, transcrição, DTMF, destinos, interrupções e duração
+máxima não entram no PATCH; ausência de `maxDurationSeconds` continua ausente.
+
+`manifest.json` identifica o assistente, a revisão `expected_updated_at` e os
+hashes de todos os campos tocados em `expected_fields_sha256`. Cada hash usa
+`fingerprint({"present": true, "value": valor})`, ou
+`fingerprint({"present": false})` se o campo estava ausente. Antes de uma
+publicação autorizada, comparar um GET novo com a revisão e **todos** esses
+hashes; divergência exige novo snapshot e revisão. Após publicar, verificar
+`desired_fields_sha256` e guardar o novo `updatedAt`. Para rollback, exigir
+esses hashes e a revisão pós-publicação revisada, como indicado em
+`rollback_preconditions`; a revisão anterior não serve para autorizar rollback.
+O gerador prepara pré-condições locais; não faz GET, PATCH ou validação remota.
+`touched_fields` enumera os campos de topo enviados e protegidos pelos hashes;
+`changed_fields` lista somente diferenças reais, incluindo subcampos do modelo.
+Gerar novamente a mesma configuração produz `changed_fields=[]`, preservando
+as pré-condições de todos os campos enviados.
+
+Se `hooks` estava ausente, o rollback envia `[]`, restaurando semanticamente a
+ausência de hooks. O manifest declara isso em `absent_field_restoration`; não
+promete restaurar a omissão literal do campo no GET. Omitir `hooks` no PATCH de
+rollback deixaria os avisos ativos. `silenceTimeoutSeconds` ausente, nulo ou
+inválido bloqueia a geração: não inferir um default nem tentar limpá-lo com
+`null`. Obter uma configuração explícita revisada antes de preparar o bundle.
+O gerador também recusa falta de `updatedAt`, campos de modelo desconhecidos,
+hooks malformados, hooks de silêncio incompatíveis e ausência do anúncio nativo.
+Hooks não relacionados são preservados; os dois hooks exatos da mitigação já
+presentes não são duplicados. Snapshots incompatíveis exigem revisão manual.
+
+## Recuperação e silêncio da mitigação
+
+`SLOT_UNCONFIRMED` e `USER_TURN_REQUIRED` devolvem
+`data.requires_user_turn=true` e uma `data.clarification_question` segura. O
+assistente fala essa pergunta exatamente e espera uma nova resposta real do
+beneficiário, preservando os demais dados. Repetir uma tool, reler o histórico,
+ouvir ruído ou receber uma saudação não autoriza nova busca. Uma confirmação
+afirmativa vale apenas para o último campo ou exame concreto perguntado.
+
+Após duas respostas reais inválidas, `offer_handoff` tem prioridade sobre a
+coleta: oferecer atendimento humano uma vez e aguardar aceitação. Se recusar,
+aguardar correção explícita ou encerramento, sem repetir ofertas ou buscas.
+Antes dessas regras, `stop` interrompe ações e `wait_current_search` aguarda a
+busca admitida. Nenhuma dessas duas ações oferece transferência por causa de
+`retryable=false`; a flag genérica só é considerada depois de excluí-las.
+O CPF continua sendo recebido exclusivamente pelo teclado, com 11 dígitos e
+`#`; confirmação falada ou de últimos dígitos não serve como evidência.
+
+Os hooks nativos `customer.speech.timeout` falam somente:
+
+| Timeout configurado | Mensagem exata |
+|---|---|
+| 15 segundos | Você ainda está na linha? |
+| 45 segundos | Estou aguardando sua resposta para continuar. |
+
+Cada hook tem `triggerMaxCount=1` e `triggerResetMode=onUserSpeech`. Nenhum hook
+encerra ou transfere a chamada. O encerramento por silêncio fica com o timeout
+nativo de 90 segundos, preservando o motivo `silence-timed-out` nas métricas.
+A [documentação de idle messages da Vapi](https://docs.vapi.ai/assistants/idle-messages)
+informa que os hooks são suspensos durante tools e transferências. Os limiares
+são configuração, não tempos comprovados por ligação: verificar em voz o efeito
+dos avisos, do processamento de áudio, das respostas e do DTMF no timeout.
 
 ## Backend e implantação
 
@@ -77,6 +137,10 @@ Após publicação autorizada, validar por telefone e conferir transcrição/too
 | Duas entradas incompletas de teclado | transferência nativa, um anúncio |
 | Pedido explícito de atendente | transferência imediata, sem novas perguntas |
 | Transferência falha e ligação permanece ativa | não alega sucesso nem transfere em ciclo |
+| Busca bloqueada sem nova resposta real | fala a pergunta segura e aguarda, sem repetir tool |
+| Duas respostas inválidas e recusa de atendente | uma oferta; aguarda correção ou encerramento |
+| Silêncio contínuo | avisos 15/45 configurados; timeout nativo 90, motivo `silence-timed-out` |
+| Dígitos e `#` durante coleta e recuperação | CPF completo libera só o campo correto; medir silêncio por voz |
 
 Testes determinísticos validam backend e preparação da configuração, não a
 qualidade de reconhecimento de fala ou a aderência probabilística do modelo.

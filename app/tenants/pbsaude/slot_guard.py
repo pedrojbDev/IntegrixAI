@@ -90,8 +90,16 @@ def enforce_recovery_gate(
             city=city,
             query=query,
         )
+        # Earlier failed replies can arrive in the same snapshot as a newer
+        # valid field value. Keep them before a catalog/provider rejection can
+        # advance the recovery anchor to that newer turn.
+        attempt = _record_unconfirmed_replies(meta, field)
+        if meta != state.conversation_meta:
+            state.conversation_meta = meta
+            if owns_session:
+                session.commit()
         if not eligible or not supplied_hmac or not _matches_field(state, field, supplied_hmac):
-            raise _user_turn_required(field)
+            raise _user_turn_required(field, attempt=attempt)
         # Keep the attempt ledger pinned until the full search succeeds. A
         # catalog/provider business rejection means this newer turn was still
         # invalid and must become the next recovery anchor.
@@ -110,26 +118,77 @@ def _specialty_candidates(query: str, catalog: SpecialtyCatalog) -> set[str]:
     return {candidate for candidate in candidates if candidate}
 
 
+def _collection_details(field: str) -> dict:
+    questions = {
+        "cpf": "Digite os 11 dígitos do CPF no teclado, terminando com jogo da velha.",
+        "cidade": "Pode me falar a cidade para atendimento?",
+        "especialidade": "Qual especialidade ou tipo de exame você procura?",
+    }
+    return {"recovery_action": f"collect_{field}", "confirmed": False,
+            "requires_user_turn": True, "clarification_question": questions[field]}
+
+
 def _unconfirmed(field: str) -> BusinessRuleError:
     return BusinessRuleError(
         code="SLOT_UNCONFIRMED",
         field=field,
         message="Confirme o dado informado pelo usuario antes de pesquisar a rede",
-        details={"recovery_action": f"collect_{field}", "confirmed": False},
+        details=_collection_details(field),
         attempt=0,
     )
 
 
-def _user_turn_required(field: str) -> BusinessRuleError:
+def _user_turn_required(field: str, *, attempt: int = 0) -> BusinessRuleError:
+    details = _collection_details(field)
+    if attempt >= 2:
+        details.update(recovery_action="offer_handoff",
+                       clarification_question="Você gostaria de falar com um atendente?")
     return BusinessRuleError(
         code="USER_TURN_REQUIRED",
         field=field,
         message="Aguarde uma nova resposta do usuario antes de pesquisar",
-        details={"recovery_action": f"collect_{field}", "confirmed": False},
-        retryable=True,
+        details=details,
+        retryable=attempt < 2,
         handoff_after_retry=False,
-        attempt=0,
+        attempt=attempt,
     )
+
+
+def _record_unconfirmed_replies(meta: dict, field: str) -> int:
+    """Count real rejected answers after recovery starts, never model/tool retries.
+
+    The ledger already contains only hashed evidence. A denial or unbound assent
+    to a same-field question is a failed client response; an invented tool
+    argument, noise, or a reply to another question is not.
+    """
+    attempts = dict(meta.get("recovery_attempts", {}))
+    record = dict(attempts.get(field, {}))
+    seen = set(record.get("unconfirmed_turns", []))
+    anchor_order = _turn_order(meta, meta.get("recovery_anchor_user"))
+    asking_field = False
+    has_proposal = False
+    for turn in sorted(meta.get("turns", {}).values(), key=lambda item: item["order"]):
+        if turn["role"] == "assistant":
+            if turn.get("question") or turn.get("unrelated_question"):
+                asking_field = turn.get("question") == field
+                has_proposal = bool(turn.get("confirmation_requests") if field == "especialidade"
+                                    else turn.get("confirmation")) and not turn.get("ambiguous")
+            continue
+        if turn.get("noise") or turn.get("keypad"):
+            continue
+        after_anchor = anchor_order is not None and turn["order"] > anchor_order
+        unbound_assent = (turn.get("yes") or turn.get("all")) and not has_proposal
+        if asking_field and after_anchor and (turn.get("negative") or unbound_assent) and turn["key"] not in seen:
+            seen.add(turn["key"])
+            record["count"] = int(record.get("count", 0)) + 1
+        asking_field = False
+    if not seen:
+        # Preserve attempt=0 for tool retries with no additional rejected reply.
+        return 0
+    record["unconfirmed_turns"] = sorted(seen)
+    attempts[field] = record
+    meta["recovery_attempts"] = attempts
+    return min(2, int(record.get("count", 0)))
 
 
 def reopen_slot_collection(

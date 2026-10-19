@@ -1012,3 +1012,141 @@ class ConversationFlowTests(unittest.IsolatedAsyncioTestCase):
             call_id='same-call',
             event_type='provider_search_requested',
         )
+
+    async def test_unconfirmed_exam_response_requires_user_turn_without_consuming_retries(self):
+        self.settings.pbsaude_vapi_recovery_gate_enabled = True
+        messages = self.standard()[:-1]
+        for index in range(4):
+            result = (await self.dispatch(
+                messages, [self.tool(f'pending-exam-{index}', query='Ultrassonografia')]
+            ))['results'][0]['result']
+            self.assertFalse(result['ok'])
+            self.assertTrue(result['data']['requires_user_turn'])
+            self.assertEqual('Qual especialidade ou tipo de exame você procura?',
+                             result['data']['clarification_question'])
+            self.assertEqual(0, result['data']['attempt'])
+            self.assertEqual('collect_especialidade', result['data']['recovery_action'])
+        self.provider.search_providers.assert_not_called()
+
+    def _recover_blocked_exam(self, query, question, answer, canonical):
+        self.settings.pbsaude_vapi_recovery_gate_enabled = True
+        messages = self.standard()[:-1]
+        self.ingest(messages)
+        before = self.state()
+        with self.assertRaises(BusinessRuleError) as blocked:
+            self.direct_search(query=query)
+        self.assertTrue(blocked.exception.details['requires_user_turn'])
+        messages.extend([
+            {'role': 'bot', 'message': question, 'time': self.base + 6000},
+            {'role': 'user', 'message': answer, 'time': self.base + 7000},
+        ])
+        self.ingest(messages, rev=2)
+        result, state = self.direct_search(query=query)
+        self.assertEqual('RESOLVIDA_AUTOMATICO', state.value)
+        self.assertEqual([], result['providers'])
+        self.provider.search_providers.assert_called_once()
+        self.assertEqual(canonical, self.provider.search_providers.call_args.args[3])
+        after = self.state()
+        self.assertEqual(before.cpf_hmac, after.cpf_hmac)
+        self.assertEqual(before.city_term_hmacs, after.city_term_hmacs)
+        self.assertNotIn('recovery_field', after.conversation_meta)
+
+    def test_ultrasound_recovery_accepts_new_spoken_alias(self):
+        self._recover_blocked_exam('Ultrassonografia',
+                                  'Qual especialidade ou tipo de exame você procura?',
+                                  'Preciso fazer um ultrassom', 'ULTRASSONOGRAFIA')
+
+    def test_mri_recovery_accepts_confirmation_of_last_exam_question(self):
+        self._recover_blocked_exam('Ressonância magnética',
+                                  'Você procura ressonância magnética?',
+                                  'Sim', 'RESSONANCIA MAGNETICA')
+
+    def test_two_real_negative_recovery_replies_offer_handoff_and_valid_reply_still_recovers(self):
+        self.settings.pbsaude_vapi_recovery_gate_enabled = True
+        messages = self.standard()[:-1]
+        self.ingest(messages)
+        with self.assertRaises(BusinessRuleError):
+            self.direct_search(query='Ultrassonografia')
+        for attempt in (1, 2):
+            messages.extend([
+                {'role': 'bot', 'message': 'Você procura ultrassonografia?',
+                 'time': self.base + (attempt * 2 + 4) * 1000},
+                {'role': 'user', 'message': 'Não',
+                 'time': self.base + (attempt * 2 + 5) * 1000},
+            ])
+            self.ingest(messages, rev=attempt + 1)
+            # Repeating a tool or snapshot cannot count the same client reply again.
+            for _ in range(2):
+                with self.assertRaises(BusinessRuleError) as blocked:
+                    self.direct_search(query='Ultrassonografia')
+                self.assertEqual('USER_TURN_REQUIRED', blocked.exception.code)
+                self.assertEqual(attempt, blocked.exception.attempt)
+                self.assertEqual('offer_handoff' if attempt == 2 else 'collect_especialidade',
+                                 blocked.exception.details['recovery_action'])
+                self.assertEqual(attempt < 2, blocked.exception.retryable)
+        self.provider.search_providers.assert_not_called()
+        messages.extend([
+            {'role': 'bot', 'message': 'Qual exame você procura?', 'time': self.base + 10000},
+            {'role': 'user', 'message': 'Quero ultrassom', 'time': self.base + 11000},
+        ])
+        self.ingest(messages, rev=4)
+        self.direct_search(query='Ultrassonografia')
+        self.provider.search_providers.assert_called_once()
+
+    def test_later_denial_does_not_reclassify_an_earlier_valid_confirmation_as_failure(self):
+        self.settings.pbsaude_vapi_recovery_gate_enabled = True
+        messages = self.standard()[:-1]
+        self.ingest(messages)
+        with self.assertRaises(BusinessRuleError):
+            self.direct_search(query='Ultrassonografia')
+        messages.extend([
+            {'role': 'bot', 'message': 'Você procura ultrassonografia?', 'time': self.base + 6000},
+            {'role': 'user', 'message': 'Sim', 'time': self.base + 7000},
+            {'role': 'bot', 'message': 'Você procura ultrassonografia?', 'time': self.base + 8000},
+            {'role': 'user', 'message': 'Não', 'time': self.base + 9000},
+        ])
+        self.ingest(messages, rev=2)
+        with self.assertRaises(BusinessRuleError) as blocked:
+            self.direct_search(query='Ultrassonografia')
+        self.assertEqual(1, blocked.exception.attempt)
+        self.assertEqual('collect_especialidade', blocked.exception.details['recovery_action'])
+
+    def test_invalid_catalog_reply_then_negative_reply_offer_handoff_once_each(self):
+        self.settings.pbsaude_vapi_recovery_gate_enabled = True
+        messages = self.standard()
+        messages[-1]['message'] = 'Exame de vista'
+        self.ingest(messages)
+        with self.assertRaises(BusinessRuleError) as first:
+            self.direct_search(query='Exame de vista')
+        self.assertEqual(1, first.exception.attempt)
+        messages.extend([
+            {'role': 'bot', 'message': 'Você procura ultrassonografia?', 'time': self.base + 6000},
+            {'role': 'user', 'message': 'Não', 'time': self.base + 7000},
+        ])
+        self.ingest(messages, rev=2)
+        for _ in range(2):
+            with self.assertRaises(BusinessRuleError) as blocked:
+                self.direct_search(query='Ultrassonografia')
+            self.assertEqual(2, blocked.exception.attempt)
+            self.assertEqual('offer_handoff', blocked.exception.details['recovery_action'])
+        self.provider.search_providers.assert_not_called()
+
+    def test_negative_then_invalid_catalog_reply_in_one_snapshot_count_both(self):
+        self.settings.pbsaude_vapi_recovery_gate_enabled = True
+        messages = self.standard()[:-1]
+        self.ingest(messages)
+        with self.assertRaises(BusinessRuleError):
+            self.direct_search(query='Ultrassonografia')
+        messages.extend([
+            {'role': 'bot', 'message': 'Qual exame você procura?', 'time': self.base + 6000},
+            {'role': 'user', 'message': 'Não', 'time': self.base + 7000},
+            {'role': 'bot', 'message': 'Qual exame você procura?', 'time': self.base + 8000},
+            {'role': 'user', 'message': 'Exame de vista', 'time': self.base + 9000},
+        ])
+        self.ingest(messages, rev=2)
+        with self.assertRaises(BusinessRuleError) as blocked:
+            self.direct_search(query='Exame de vista')
+        self.assertEqual('ESPECIALIDADE_INVALIDA', blocked.exception.code)
+        self.assertEqual(2, blocked.exception.attempt)
+        self.assertEqual('offer_handoff', blocked.exception.details['recovery_action'])
+        self.provider.search_providers.assert_not_called()

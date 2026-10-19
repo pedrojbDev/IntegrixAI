@@ -6,6 +6,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from threading import Barrier
+from unittest.mock import patch
 
 from sqlalchemy import create_engine, select, func
 from sqlalchemy.orm import sessionmaker
@@ -18,6 +19,8 @@ from app.platform.services.vapi_event_ingestion import VapiEventIngestionService
 from app.platform.services.vapi_conversation import keyed_hmac
 from app.tenants.pbsaude.conversation import capture_pbsaude_conversation
 from app.tenants.pbsaude.tool_handlers import register_pbsaude_handlers
+from app.tenants.pbsaude.workflows.search_providers import _search_providers
+from app.core.tools.exceptions import BusinessRuleError
 
 
 @unittest.skipUnless(os.environ.get("VAPI_TEST_DATABASE_URL"), "disposable PostgreSQL not configured")
@@ -77,3 +80,48 @@ class ConversationPostgresTests(unittest.TestCase):
             city = keyed_hmac(self.settings.vapi_slot_state_hmac_secret, 'feira de santana')
             self.assertIn(city, a.city_term_hmacs)
             self.assertNotIn(city, b.city_term_hmacs)
+
+    def test_concurrent_recovery_retries_count_client_replies_once_and_preserve_tenant_scope(self):
+        self.settings.pbsaude_vapi_recovery_gate_enabled = True
+        args = {'cpf': '12345678901', 'city': 'Salvador', 'query': 'Ultrassonografia'}
+        with self.sessions() as session:
+            VapiEventIngestionService(self.settings).ingest(session, self.payload)
+        with patch('app.tenants.pbsaude.slot_guard.SessionLocal', self.sessions):
+            with self.assertRaises(BusinessRuleError) as initial:
+                _search_providers(args, self.settings, self.call_id, 'tenant_a')
+            self.assertEqual('SLOT_UNCONFIRMED', initial.exception.code)
+
+            recovery = copy.deepcopy(self.payload)
+            recovery['message']['timestamp'] += 1
+            recovery['message']['messages'].extend([
+                {'role': role, 'message': message, 'time': self.now - 5000 + i * 1000}
+                for i, (role, message) in enumerate([
+                    ('bot', 'Você procura ultrassonografia?'), ('user', 'Não'),
+                    ('bot', 'Você procura ultrassonografia?'), ('user', 'Não'),
+                ])
+            ])
+            with self.sessions() as session:
+                VapiEventIngestionService(self.settings).ingest(session, recovery)
+
+            barrier = Barrier(6)
+            def retry(_):
+                barrier.wait(timeout=10)
+                try:
+                    _search_providers(args, self.settings, self.call_id, 'tenant_a')
+                except BusinessRuleError as exc:
+                    return exc.code, exc.attempt, exc.details['recovery_action']
+                self.fail('Unconfirmed specialty reached the provider')
+            with ThreadPoolExecutor(max_workers=6) as pool:
+                results = list(pool.map(retry, range(6)))
+        self.assertEqual([('USER_TURN_REQUIRED', 2, 'offer_handoff')] * 6, results)
+
+        other = copy.deepcopy(self.payload)
+        other['message']['call']['to'] = '+551100000002'
+        with self.sessions() as session:
+            VapiEventIngestionService(self.settings).ingest(session, other)
+            a = session.get(VapiCallSlotState, {'tenant_id': 'tenant_a', 'call_id': self.call_id})
+            b = session.get(VapiCallSlotState, {'tenant_id': 'tenant_b', 'call_id': self.call_id})
+            attempts = a.conversation_meta['recovery_attempts']['especialidade']
+            self.assertEqual(2, attempts['count'])
+            self.assertEqual(2, len(attempts['unconfirmed_turns']))
+            self.assertNotIn('recovery_attempts', b.conversation_meta)
