@@ -1,11 +1,20 @@
 # PB Geral — primeiro hardening
 
-`prompt.md` é candidato local para substituir o único system prompt do Geral
-observado na revisão v36. Não foi publicado. As fontes privadas `pbgeral.docx`
+`prompt.md` versiona o system prompt do Geral. O primeiro hardening foi publicado
+em 23/10/2026 na revisão v37, após revisão da v36. As fontes privadas `pbgeral.docx`
 e `pbprest.docx` permanecem intactas, vinculadas ao `model.knowledgeBase` Google.
 A consulta automática `defaultQueryTool` foi observada em teste: o assistente
 tem três ferramentas operacionais explícitas e também essa consulta automática.
 Não remova a base nem converta sua documentação em uma quarta tool explícita.
+
+O ajuste de aviso de consulta orienta uma frase curta antes de `defaultQueryTool`,
+seguida da consulta no mesmo turno sem exigir confirmação. Repetir informação já
+recuperada não exige aviso ou nova busca. Esse aviso é orientação do prompt para
+a consulta automática existente, não uma mensagem nativa `request-start`; a
+ordem e a audibilidade precisam ser verificadas em voz. Não duplica os anúncios
+nativos de transferência nem os hooks de silêncio. As seções de preparação e
+primeira publicação abaixo registram os controles do rollout original; não
+representam autorização permanente para mudanças futuras.
 
 ## Escopo e limites
 

@@ -1,6 +1,6 @@
 {
   "purpose": "QA semântico manual em voz; não são assertions sobre frases do prompt.",
-  "status": "Planejado, não executado; candidato isolado, sem publicação.",
+  "status": "Casos manuais aguardando validação em voz; testes de texto isolados não comprovam áudio ou latência.",
   "evidence": [
     "transcrição privada redigida",
     "fonte/público consultados",
@@ -196,6 +196,28 @@
       "expected_outcome": "Dizer que não encontrou na fonte consultada.",
       "forbidden_behavior": [
         "Alegar indisponibilidade ou provar inexistência da regra."
+      ]
+    },
+    {
+      "id": "aviso_consulta",
+      "utterances": [
+        "Sou beneficiário. Preciso passar pela APS antes de fazer um exame eletivo?"
+      ],
+      "setup": "Nenhuma resposta recuperada para esta pergunta; consulta real à base necessária.",
+      "expected_outcome": "Falar um aviso curto antes de defaultQueryTool, consultar no mesmo turno sem pedir confirmação e responder após o retorno.",
+      "forbidden_behavior": [
+        "Consultar em silêncio, avisar somente após o retorno, esperar um sim para pesquisar, repetir avisos ou prometer prazo."
+      ]
+    },
+    {
+      "id": "repeticao_sem_consulta",
+      "utterances": [
+        "Pode repetir a orientação que acabou de me dar?"
+      ],
+      "setup": "Resposta pertinente já recuperada; mesma pergunta, público e condições.",
+      "expected_outcome": "Repetir a informação disponível diretamente, sem nova pesquisa e sem aviso de consulta.",
+      "forbidden_behavior": [
+        "Anunciar pesquisa que não será feita ou repetir a consulta sem necessidade."
       ]
     },
     {
