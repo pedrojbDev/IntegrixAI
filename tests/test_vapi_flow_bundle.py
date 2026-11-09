@@ -136,12 +136,12 @@ class VapiFlowBundleTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 build_bundle(snapshot, 'new prompt')
 
-    def test_bundle_and_prompt_versions_match_the_mitigation(self):
+    def test_bundle_and_prompt_versions_match_the_urgent_care_flow(self):
         prompt = (Path(__file__).resolve().parents[1]
                   / 'app/tenants/pbsaude/vapi/prompt.md').read_text()
         bundle = build_bundle(self.snapshot(), prompt)
-        self.assertEqual('pbsaude-flow-v18-mitigation', bundle['manifest']['version'])
-        self.assertIn('fluxo v18', prompt.splitlines()[0])
+        self.assertEqual('pbsaude-flow-v19-urgent-care', bundle['manifest']['version'])
+        self.assertIn('fluxo v19', prompt.splitlines()[0])
 
     def test_recovery_prompt_uses_supplied_question_and_waits_for_real_new_reply(self):
         prompt = (Path(__file__).resolve().parents[1]

@@ -8,6 +8,42 @@ from app.tenants.pbsaude.specialty_aliases import DEFAULT_SPECIALTY_ALIASES
 
 
 class SpecialtyCatalogTests(unittest.TestCase):
+    def test_urgent_care_requests_resolve_to_pronto_atendimento(self):
+        catalog = get_specialty_catalog(Settings(_env_file=None))
+        for query in ('urgência', 'EMERGÊNCIA', 'atendimento de urgência',
+                      'atendimento de emergência', 'urgência/emergência',
+                      'pronto-socorro', 'pronto-atendimento', 'preciso de emergência'):
+            with self.subTest(query=query):
+                self.assertEqual('PRONTO ATENDIMENTO', catalog.resolve(query))
+
+    def test_hurry_and_negation_do_not_select_urgent_care(self):
+        catalog = get_specialty_catalog(Settings(_env_file=None))
+        for query in ('exame de sangue com urgência',
+                      'preciso de um exame de sangue com muita urgência',
+                      'exame de sangue em caráter de urgência',
+                      'não quero emergência, quero exame de sangue',
+                      'urgência não, quero exame de sangue',
+                      'Não tenho emergência, quero exame de sangue'):
+            with self.subTest(query=query):
+                self.assertEqual('LABORATORIO', catalog.resolve(query))
+        self.assertIsNone(catalog.resolve('não é emergência'))
+        self.assertIsNone(catalog.resolve('urgência na autorização'))
+        self.assertIsNone(catalog.resolve('não quero pronto-socorro'))
+        self.assertIsNone(catalog.resolve('quero emergência, não quero emergência'))
+
+    def test_later_correction_can_reinstate_urgent_care(self):
+        catalog = get_specialty_catalog(Settings(_env_file=None))
+        self.assertEqual('PRONTO ATENDIMENTO', catalog.resolve(
+            'não quero emergência, agora quero pronto-socorro'))
+
+    def test_external_catalog_keeps_urgent_care_aliases(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / 'specialties.csv'
+            path.write_text('BAQ_DESCRI\nCARDIOLOGIA\n', encoding='utf-8')
+            catalog = get_specialty_catalog(Settings(_env_file=None, specialties_csv_path=str(path)))
+            self.assertEqual('PRONTO ATENDIMENTO', catalog.resolve('urgência'))
+            self.assertIsNone(catalog.resolve('serviço desconhecido'))
+
     def test_every_default_alias_resolves_to_its_canonical_value(self) -> None:
         catalog = get_specialty_catalog(Settings(_env_file=None))
         for canonical, aliases in DEFAULT_SPECIALTY_ALIASES.items():

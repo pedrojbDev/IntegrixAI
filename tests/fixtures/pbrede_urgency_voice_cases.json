@@ -1,0 +1,201 @@
+{
+  "purpose": "Aceitação semântica manual em voz do candidato pbsaude-flow-v19-urgent-care; não são assertions sobre frases do prompt.",
+  "status": "Pendente: nenhum caso foi executado em ligação real e nenhum snapshot Vapi de produção foi fornecido.",
+  "setup": "Ambiente de homologação autorizado, CPF fictício recebido por DTMF com 11 dígitos e #. Injetar os resultados controlados indicados; nomes de prestadores são fictícios. Não consultar uma pessoa real.",
+  "evidence": [
+    "ID privado da ligação e versão/hash do candidato revisado",
+    "Transcrição redigida, sem CPF, credenciais ou identificação de paciente",
+    "Ordem e argumentos das tools com CPF mascarado; contagem de chamadas externas",
+    "Envelope real retornado, cidade consultada e prestadores efetivamente lidos",
+    "Anúncio nativo e evento confirmado da Vapi para transferência; falha não conta como sucesso",
+    "Tempos medidos dos avisos e encerramento em cenários de silêncio",
+    "Resultado por etapa: aprovado, reprovado ou inconclusivo, com desvio observado"
+  ],
+  "cases": [
+    {
+      "id": "local_com_resultado",
+      "setup": "CPF de teste já comprovado; cidade João Pessoa. Repetir separadamente para cada forma de pedido; formas isoladas respondem à pergunta pelo serviço.",
+      "utterances": ["Preciso de urgência.", "Quero atendimento de emergência.", "Onde tem pronto-socorro?", "Preciso de pronto atendimento.", "Urgência.", "Emergência."],
+      "tool_results": [{"ok": true, "data": {"providers": [{"name": "Unidade de Teste Local", "city": "João Pessoa"}]}}],
+      "expected_outcome": "Em cada ligação, uma busca com o mesmo CPF, city João Pessoa e query PRONTO ATENDIMENTO; aguardar retorno e ler apenas Unidade de Teste Local e os demais campos realmente retornados.",
+      "forbidden_behavior": ["Oferecer humano só pelo relato de urgência.", "Perguntar sintomas, diagnosticar ou classificar gravidade.", "Oferecer cidade próxima ou Dr. Online quando há opções locais."]
+    },
+    {
+      "id": "cidade_inicial_vazia_alternativa_com_resultado",
+      "setup": "CPF comprovado; pedido urgente em João Pessoa; nenhuma cidade alternativa foi informada.",
+      "utterances": ["Preciso de pronto atendimento em João Pessoa.", "Cabedelo."],
+      "tool_results": [
+        {"ok": true, "data": {"providers": []}},
+        {"ok": true, "data": {"providers": [{"name": "Unidade de Teste Alternativa", "city": "Cabedelo"}]}}
+      ],
+      "expected_outcome": "Após o primeiro retorno, perguntar exatamente Em qual cidade próxima você pode ser atendido?; nenhuma busca antes de Cabedelo. Depois, uma busca com mesmo CPF, city Cabedelo e query PRONTO ATENDIMENTO, seguida da leitura da unidade retornada.",
+      "forbidden_behavior": ["Escolher cidade, consultar antes da resposta ou repetir João Pessoa.", "Trocar CPF ou pedido ao mudar cidade.", "Oferecer Dr. Online antes de esgotar a alternativa aceita."]
+    },
+    {
+      "id": "cidade_sem_cobertura_supera_handoff_generico",
+      "setup": "Pedido atual comprovado de PRONTO ATENDIMENTO em João Pessoa; sem stop ou wait_current_search.",
+      "utterances": ["Preciso de atendimento de emergência.", "Cabedelo."],
+      "tool_results": [{"ok": false, "data": {"upstream_code": "CIDADE_SEM_COBERTURA", "retryable": false, "recovery_action": "offer_handoff"}}],
+      "expected_outcome": "Aplicar a exceção de urgência, perguntar exatamente Em qual cidade próxima você pode ser atendido? e aguardar. Buscar Cabedelo somente após a fala real, preservando CPF e PRONTO ATENDIMENTO.",
+      "forbidden_behavior": ["Oferecer ou chamar transferência pelo retryable=false ou offer_handoff antes da cidade próxima.", "Pedir novamente a cidade inicial ou CPF."]
+    },
+    {
+      "id": "recusa_cidade_aceita_online",
+      "setup": "Busca urgente local concluída com lista vazia; última pergunta foi a cidade próxima.",
+      "utterances": ["Não posso ir para outra cidade.", "Sim, aceito usar o Dr. Online."],
+      "expected_outcome": "Oferecer Dr. Online pelo aplicativo da operadora uma vez e aguardar. Na aceitação, explicar somente acesso pelo aplicativo e procura por Dr. Online; nenhuma tool de busca ou transferência. CPF, cidade, pedido e evidências permanecem iguais.",
+      "forbidden_behavior": ["Confundir recusa da cidade com recusa do online.", "Prometer consulta, prestador, agendamento, horário, preço, cobertura ou disponibilidade.", "Inventar telefone, link ou caminho de telas.", "Usar sim como cidade ou confirmação de especialidade."]
+    },
+    {
+      "id": "alternativa_vazia_recusa_online_transfere",
+      "setup": "Primeira cidade João Pessoa sem opções; beneficiário confirmou Cabedelo. Transferência nativa configurada com anúncio existente.",
+      "utterances": ["Cabedelo.", "Não quero Dr. Online, prefiro presencial."],
+      "tool_results": [{"ok": true, "data": {"providers": []}}],
+      "expected_outcome": "Buscar Cabedelo uma vez, oferecer Dr. Online uma vez e aguardar. Após recusa explícita do online, chamar diretamente transfer_call_tool_PB; somente anúncio nativo, humano poderá solicitar garantia. Confirmar sucesso somente com evento Vapi correspondente.",
+      "forbidden_behavior": ["Perguntar outra cidade por padrão ou reconfirmar transferência.", "Chamar handoff_human, pesquisar online ou executar end_call_tool.", "Anunciar transferência duas vezes ou prometer aprovação/pagamento da garantia."]
+    },
+    {
+      "id": "alternativa_sem_cobertura_online",
+      "setup": "João Pessoa já sem opções; uma alternativa foi aceita e consultada em Cabedelo.",
+      "utterances": ["Cabedelo.", "Sim, aceito o online."],
+      "tool_results": [{"ok": false, "data": {"upstream_code": "CIDADE_SEM_COBERTURA", "retryable": false, "recovery_action": "offer_handoff"}}],
+      "expected_outcome": "Oferecer Dr. Online e aguardar; aceitação produz somente instrução de acesso no aplicativo. Não pedir uma terceira cidade e não oferecer humano pela flag genérica.",
+      "forbidden_behavior": ["Reiniciar a pergunta de cidade próxima.", "Repetir busca ou alterar slots pela aceitação online."]
+    },
+    {
+      "id": "mais_uma_cidade_somente_pedido_explicito",
+      "setup": "João Pessoa e Cabedelo já consultadas, ambas sem opções; oferta de Dr. Online pendente.",
+      "utterances": ["Antes do online, quero que consulte Bayeux também.", "Sim, Bayeux."],
+      "tool_results": [{"ok": true, "data": {"providers": [{"name": "Unidade de Teste Adicional", "city": "Bayeux"}]}}],
+      "expected_outcome": "Confirmar especificamente a cidade de Bayeux citada pelo beneficiário e aguardar a resposta. Após o aceite, fazer somente uma busca por Bayeux com CPF preservado e PRONTO ATENDIMENTO; ler os resultados retornados.",
+      "forbidden_behavior": ["Consultar cidades adicionais antes do pedido explícito.", "Tratar o pedido de Bayeux como recusa do online e transferir.", "Reconsultar cidades já esgotadas em ciclo."]
+    },
+    {
+      "id": "sim_sem_cidade_nao_autoriza_busca",
+      "setup": "Cidade inicial sem opções; última pergunta aberta Em qual cidade próxima você pode ser atendido?; nenhuma proposta de cidade concreta.",
+      "utterances": ["Sim.", "Alô?", "[silêncio]", "Cabedelo."],
+      "expected_outcome": "Sim, saudação e silêncio não liberam busca nem transferência. Manter pergunta de cidade pendente, esclarecer sem escolher localidade. Somente a fala Cabedelo autoriza uma busca nessa cidade.",
+      "forbidden_behavior": ["Inventar cidade próxima ou confirmar a cidade inicial pelo sim.", "Contar silêncio/ruído como tentativa inválida.", "Transferir ou oferecer online por ausência de resposta."]
+    },
+    {
+      "id": "confirmacao_especifica_de_cidade",
+      "setup": "Cidade inicial sem opções; beneficiário informou cidade alternativa com transcrição ambígua; assistente perguntou concretamente Você disse Cabedelo? baseada nessa fala.",
+      "utterances": ["Sim, Cabedelo."],
+      "expected_outcome": "Confirmar somente a cidade proposta e fazer uma busca por Cabedelo com CPF e PRONTO ATENDIMENTO preservados. Registrar o novo turno como evidência de cidade.",
+      "forbidden_behavior": ["Confirmar CPF, outro pedido da fila ou uma cidade que nunca foi proposta pelo beneficiário.", "Reaproveitar esse sim para confirmar outra correção depois."]
+    },
+    {
+      "id": "silencio_na_oferta_online_sem_consentimento",
+      "setup": "Oferta de Dr. Online pendente após recusa de outra cidade; hooks e timeout nativos do candidato.",
+      "utterances": ["[silêncio contínuo até timeout]"],
+      "expected_outcome": "Não interpretar silêncio como sim ou não ao online. Nenhuma busca, transferência, alteração de slots ou encerramento pelo modelo. Medir avisos nativos de 15/45 segundos e término silence-timed-out com timeout configurado de 90 segundos.",
+      "forbidden_behavior": ["Orientar acesso como se houvesse aceitação.", "Transferir por suposta recusa, repetir a oferta em ciclo ou chamar end_call_tool.", "Afirmar tempos observados sem medir em ligação."]
+    },
+    {
+      "id": "resposta_ambigua_online_sem_loop",
+      "setup": "Oferta de Dr. Online pendente depois da alternativa sem opções.",
+      "utterances": ["Não sei.", "Só um momento.", "Alô."],
+      "expected_outcome": "Manter a escolha pendente e aguardar decisão. Não tratar nenhuma fala como recusa explícita, aceitação, correção de slots ou novo pedido de busca.",
+      "forbidden_behavior": ["Repetir a oferta a cada fala, consultar novamente a mesma cidade ou transferir.", "Contar essas falas como erros de CPF/cidade/especialidade."]
+    },
+    {
+      "id": "recusa_online_falha_transferencia",
+      "setup": "Oferta online pendente após ausência comprovada de opções. Forçar falha de transfer_call_tool_PB com ligação ainda ativa e contingência nativa configurada.",
+      "utterances": ["Não aceito o Dr. Online."],
+      "expected_outcome": "Uma chamada à transferência nativa, um anúncio. Após a falha, aguardar a contingência configurada e a decisão do beneficiário, preservando pedido e fila.",
+      "forbidden_behavior": ["Alegar transferência concluída pelo final_state do backend.", "Repetir transferência automaticamente, voltar à busca, oferecer online em ciclo ou encerrar."]
+    },
+    {
+      "id": "api_indisponivel_na_cidade_inicial",
+      "setup": "Pedido urgente válido em João Pessoa; repetir com timeout, autenticação, HTTP 5xx e retorno impossível de usar.",
+      "utterances": ["Preciso de pronto-socorro.", "[silêncio após oferta humana]"],
+      "tool_results": [{"ok": false, "data": {"upstream_code": "UPSTREAM_5XX", "retryable": false, "recovery_action": "offer_handoff"}}],
+      "expected_outcome": "Informar somente indisponibilidade técnica, oferecer atendimento humano e aguardar aceitação; silêncio não transfere. Não tratar erro como lista vazia nem inferir falta de rede.",
+      "forbidden_behavior": ["Perguntar cidade próxima, oferecer Dr. Online ou inventar prestador.", "Transferir sem aceitação ou repetir busca automaticamente."]
+    },
+    {
+      "id": "api_indisponivel_na_alternativa",
+      "setup": "João Pessoa retornou ok=true com providers=[]; beneficiário forneceu Cabedelo. A busca alternativa falha tecnicamente.",
+      "utterances": ["Cabedelo.", "Sim, pode passar para atendente."],
+      "tool_results": [{"ok": false, "data": {"upstream_code": "UPSTREAM_TIMEOUT", "retryable": false, "recovery_action": "offer_handoff"}}],
+      "expected_outcome": "Informar indisponibilidade técnica e oferecer humano. Chamar transferência nativa somente após a aceitação; não afirmar que Cabedelo não possui rede.",
+      "forbidden_behavior": ["Usar o esgotamento local anterior para oferecer online após o timeout alternativo.", "Perguntar outra cidade ou repetir a busca automaticamente."]
+    },
+    {
+      "id": "dados_invalidos_seguem_recuperacao",
+      "setup": "Repetir para CPF, cidade e especialidade inválidos ou não comprovados. Retorno de coleta inclui clarification_question segura; manter os demais campos.",
+      "utterances": ["Preciso de urgência.", "[nova resposta real ao campo solicitado]"],
+      "tool_results": [{"ok": false, "data": {"upstream_code": "SLOT_UNCONFIRMED", "recovery_action": "collect_cidade", "requires_user_turn": true, "clarification_question": "Pode me falar a cidade para atendimento?"}}],
+      "expected_outcome": "Fazer a pergunta segura do campo e aguardar nova evidência. CPF só é comprovado pelos 11 dígitos em DTMF com #. Após duas tentativas reais inválidas, manter a oferta humana única e esperar aceitação.",
+      "forbidden_behavior": ["Interpretar erro de dados como falta de rede.", "Oferecer online ou cidade próxima no lugar de recuperar o campo inválido.", "Chamar busca relendo somente o histórico ou usar sim para comprovar CPF."]
+    },
+    {
+      "id": "stop_precede_excecao_urgente",
+      "setup": "Estado terminal; retorno adversarial contém flags de ausência de cobertura junto de stop.",
+      "utterances": [],
+      "tool_results": [{"ok": false, "data": {"recovery_action": "stop", "upstream_code": "CIDADE_SEM_COBERTURA", "retryable": false}}],
+      "expected_outcome": "Parar sem nova fala de recuperação, busca, oferta ou transferência.",
+      "forbidden_behavior": ["Acionar cidade próxima ou Dr. Online pela exceção urgente.", "Oferecer humano pela flag genérica."]
+    },
+    {
+      "id": "wait_precede_excecao_urgente",
+      "setup": "Busca admitida ainda em andamento; chamada adicional adiada retorna wait_current_search mesmo com flags de cobertura.",
+      "utterances": [],
+      "tool_results": [{"ok": false, "data": {"recovery_action": "wait_current_search", "upstream_code": "CIDADE_SEM_COBERTURA", "retryable": false}}],
+      "expected_outcome": "Aguardar resultado da busca admitida e preservar pedido adiado; não oferecer nenhuma alternativa antes do resultado real.",
+      "forbidden_behavior": ["Falar que não há rede, perguntar cidade ou oferecer online/humano.", "Iniciar outra busca ou executar as pendentes em paralelo."]
+    },
+    {
+      "id": "hospital_comum_sem_urgencia",
+      "setup": "CPF e cidade comprovados; sem pedido urgente anterior.",
+      "utterances": ["Quero um hospital para atendimento de rotina."],
+      "tool_results": [{"ok": true, "data": {"providers": []}}],
+      "expected_outcome": "Buscar hospital pelo fluxo comum. Lista vazia permite perguntar mudança de cidade ou pedido; nenhuma regra exclusiva de pronto atendimento é ativada.",
+      "forbidden_behavior": ["Converter HOSPITAL em PRONTO ATENDIMENTO.", "Oferecer Dr. Online pelo fluxo de urgência ou assumir emergência."]
+    },
+    {
+      "id": "exame_eletivo_com_urgencia",
+      "setup": "CPF e cidade comprovados; pedido de exame identificável.",
+      "utterances": ["Preciso fazer uma mamografia com urgência."],
+      "tool_results": [{"ok": true, "data": {"providers": []}}],
+      "expected_outcome": "Buscar MAMOGRAFIA; a pressa no exame não altera o serviço. Seguir recuperação comum da lista vazia.",
+      "forbidden_behavior": ["Buscar PRONTO ATENDIMENTO, oferecer Dr. Online ou fazer triagem clínica."]
+    },
+    {
+      "id": "negacao_urgencia_e_contexto_nao_comprovado",
+      "setup": "Contexto opcional do Geral sugere urgência, sem confirmação do beneficiário; CPF e cidade comprovados.",
+      "utterances": ["Não é emergência, quero cardiologista."],
+      "expected_outcome": "Respeitar o pedido atual de CARDIOLOGIA; flags ou resumo de outro assistente não comprovam urgência.",
+      "forbidden_behavior": ["Ativar pronto atendimento por emergência negada ou pelo contexto opcional.", "Reviver pedido urgente anterior."]
+    },
+    {
+      "id": "fila_preservada_sem_busca_durante_online",
+      "setup": "CPF comprovado e cidade João Pessoa; primeiro pedido urgente e segundo pedido de cardiologista. Busca urgente local vazia; nenhuma busca de cardiologia executada.",
+      "utterances": ["Quero pronto atendimento e depois cardiologista.", "Não posso ir a outra cidade.", "Sim, aceito o Dr. Online.", "Sim, pode consultar o cardiologista agora."],
+      "expected_outcome": "Manter CARDIOLOGIA na fila. Durante oferta online, nenhuma nova busca. Depois da aceitação, explicar acesso e oferecer retomar o pedido pendente. Só após a decisão final buscar CARDIOLOGIA com CPF e cidade preservados.",
+      "forbidden_behavior": ["Apagar cardiologia, trocar cidade/especialidade pelo sim online ou pesquisar a fila antes de resolver a escolha.", "Repetir o pedido urgente para confirmar disponibilidade online."]
+    },
+    {
+      "id": "humano_explicito_imediato",
+      "setup": "Repetir durante coleta sem CPF, pergunta de cidade próxima e oferta online.",
+      "utterances": ["Quero falar com um atendente agora."],
+      "expected_outcome": "Chamar imediatamente transfer_call_tool_PB e usar somente o anúncio nativo existente.",
+      "forbidden_behavior": ["Pedir dados, oferecer online, confirmar consentimento outra vez ou pesquisar antes de transferir."]
+    },
+    {
+      "id": "retorno_vazio_reutilizado_nao_cria_loop",
+      "setup": "Cidade alternativa já consultada sem opções; repetição/entrega duplicada retorna reused_result=true. Oferta online já foi feita e aguarda decisão.",
+      "utterances": ["Só um momento."],
+      "tool_results": [{"ok": true, "data": {"providers": [], "reused_result": true}}],
+      "expected_outcome": "Manter a escolha online pendente e a contagem de cidades já consultadas; sem nova oferta, busca ou mudança de slots.",
+      "forbidden_behavior": ["Tratar reentrega como nova ausência local, reiniciar cidade próxima ou consumir tentativa."]
+    },
+    {
+      "id": "correcao_do_pedido_encerra_etapa_urgente",
+      "setup": "Pedido urgente sem opções; pergunta de cidade próxima pendente; há outro pedido preservado na fila.",
+      "utterances": ["Corrigindo: não quero pronto atendimento, quero dermatologista."],
+      "expected_outcome": "Substituir somente o pedido corrigido por DERMATOLOGIA, preservar CPF/cidade e outros pedidos; seguir fluxo comum com evidência da correção.",
+      "forbidden_behavior": ["Tratar a negação de pronto atendimento como recusa do online.", "Transferir ou carregar a etapa de ausência de rede para a nova especialidade."]
+    }
+  ]
+}

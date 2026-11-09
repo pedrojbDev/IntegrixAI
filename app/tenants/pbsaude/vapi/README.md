@@ -1,7 +1,7 @@
 # Fluxo de conversa PB Saúde
 
-`prompt.md` é a versão v18 candidata da mitigação do fluxo de Rede Credenciada.
-A versão do manifest é `pbsaude-flow-v18-mitigation`. A configuração
+`prompt.md` é a versão v19 candidata do fluxo de pronto atendimento da Rede
+Credenciada. A versão do manifest é `pbsaude-flow-v19-urgent-care`. A configuração
 usa `search_providers`, `transfer_call_tool_PB` e `end_call_tool`. A ferramenta
 legada `handoff_human` continua disponível no backend por compatibilidade,
 mas é desanexada deste assistente. O anúncio da transferência permanece na
@@ -16,6 +16,10 @@ python scripts/prepare_vapi_flow_bundle.py /caminho/privado/snapshot.json /camin
 ```
 
 O snapshot deve conter `assistant` e `tooldefs` obtidos por GET autenticado.
+Sem um snapshot real e revisado, não há bundle de produção preparado: os
+snapshots fictícios dos testes comprovam somente a preparação local. O gerador
+usa o prompt v19 quando receber esse snapshot; não cria nem presume um estado
+atual da Vapi.
 Não versionar snapshots, patches preenchidos ou credenciais. O diretório de
 saída é privado e deve ser novo. O snapshot permanece intacto. `desired.json`
 contém o modelo completo com mensagens e anexos de tools alterados, os hooks
@@ -64,9 +68,56 @@ coleta: oferecer atendimento humano uma vez e aguardar aceitação. Se recusar,
 aguardar correção explícita ou encerramento, sem repetir ofertas ou buscas.
 Antes dessas regras, `stop` interrompe ações e `wait_current_search` aguarda a
 busca admitida. Nenhuma dessas duas ações oferece transferência por causa de
-`retryable=false`; a flag genérica só é considerada depois de excluí-las.
+`retryable=false`; a flag genérica só é considerada depois de excluí-las e da
+exceção de pronto atendimento sem opções descrita abaixo.
 O CPF continua sendo recebido exclusivamente pelo teclado, com 11 dígitos e
 `#`; confirmação falada ou de últimos dígitos não serve como evidência.
+
+## Pronto atendimento
+
+Pedidos afirmativos para localizar urgência, emergência, pronto-socorro ou
+pronto atendimento usam `query=PRONTO ATENDIMENTO`, pelo mesmo
+`search_providers`, com CPF e cidade comprovados. “Urgência” ou “emergência”
+como resposta direta à pergunta pelo serviço também são pedidos válidos.
+Hospital comum, exame eletivo
+“com urgência” e negação de urgência mantêm o fluxo comum. Não há diagnóstico,
+triagem, orientação clínica ou argumento novo na ferramenta.
+
+Uma resposta local com `ok=true` e prestadores é lida normalmente. Somente no
+pedido atual de pronto atendimento, uma lista explicitamente vazia com
+`ok=true` ou `data.upstream_code=CIDADE_SEM_COBERTURA` aciona esta sequência:
+
+1. Perguntar exatamente “Em qual cidade próxima você pode ser atendido?” e
+   aguardar cidade real ou confirmação válida de uma cidade concreta
+   informada pelo beneficiário. Silêncio e “sim” sem proposta concreta não
+   liberam busca. Alterar somente a cidade e preservar CPF, pedido e fila.
+2. Buscar uma cidade alternativa por padrão. Ler os resultados se houver.
+   Outra cidade adicional exige pedido explícito do beneficiário; não há
+   escolha automática de localidade nem repetição em ciclo.
+   Durante a oferta online, um pedido como “consulte Bayeux também” exige
+   confirmar especificamente a cidade citada e aguardar o aceite antes da
+   busca. Consultar pelo Dr. Online “em casa” não altera a cidade.
+3. Sem opções na alternativa, ou após recusa de outra cidade, oferecer uma
+   vez Dr. Online pelo aplicativo da operadora e aguardar a escolha. Recusar
+   cidade não significa recusar online; silêncio não significa consentimento.
+4. Aceitação permite somente explicar o acesso pelo aplicativo da operadora.
+   Não pesquisar prestador online nem inventar telas, link, agendamento,
+   horário, custo, cobertura ou disponibilidade. A escolha não altera slots.
+5. Recusa explícita do Dr. Online chama diretamente `transfer_call_tool_PB`,
+   usando o anúncio existente, para um humano solicitar garantia de
+   atendimento. Não há promessa de aprovação, autorização ou pagamento.
+
+`stop` e `wait_current_search` vêm antes dessa exceção; a exceção vem antes de
+`offer_handoff` e `retryable=false`. CPF, cidade ou especialidade inválidos
+seguem a recuperação existente. Timeout, autenticação, indisponibilidade e
+retorno inválido são falhas técnicas, inclusive na cidade alternativa: nunca
+provam ausência de rede e nunca acionam Dr. Online.
+
+Enquanto aguarda cidade ou escolha online, o assistente não repete buscas nem
+avança a fila. Depois da orientação online, pode oferecer retomar o próximo
+pedido e aguardar a decisão. Pedido explícito de atendente continua imediato.
+Uma transferência que falhe e deixe a ligação ativa usa a contingência nativa;
+não autoriza nova busca, confirmação de sucesso ou transferência automática.
 
 Os hooks nativos `customer.speech.timeout` falam somente:
 
@@ -118,8 +169,8 @@ os dados. Não fazer downgrade em produção para reverter comportamento.
 ## Validação
 
 ```bash
-python -m unittest discover -s tests -p 'test_vapi_conversation_flow.py'
-python -m unittest discover -s tests -p 'test_vapi_flow_bundle.py'
+./scripts/test.sh -p 'test_vapi_conversation_flow.py'
+./scripts/test.sh -p 'test_vapi_flow_bundle.py'
 # Somente um banco PostgreSQL descartável, previamente migrado:
 VAPI_TEST_DATABASE_URL=postgresql+psycopg://... python -m unittest discover -s tests -p 'test_vapi_conversation_postgres.py'
 ```
@@ -144,6 +195,10 @@ Após publicação autorizada, validar por telefone e conferir transcrição/too
 
 Testes determinísticos validam backend e preparação da configuração, não a
 qualidade de reconhecimento de fala ou a aderência probabilística do modelo.
+Os [casos de urgência para aceitação manual em voz](../../../../tests/fixtures/pbrede_urgency_voice_cases.json)
+detalham respostas upstream controladas, falas e evidência esperada por etapa.
+Permanecem pendentes até execução em ligação real com o candidato revisado;
+não são prova de publicação ou de garantia assistencial.
 
 ## Coordenação de buscas e correções
 

@@ -11,6 +11,14 @@ from pathlib import Path
 from ...config import Settings
 from .specialty_aliases import AMBIGUOUS_SPECIALTY_TERMS, DEFAULT_SPECIALTY_ALIASES
 
+SPECIALTY_REMOVAL = re.compile(
+    r"\b(?:nao (?:quero|preciso|desejo|tenho|e)|retire|remova|exclua|cancele|tire|sem|troque|trocar|substitua|substituir)\b"
+)
+HURRY_MODIFIER = re.compile(
+    r"\b(?:com(?: muita)?|em carater de|em regime de) urgencia\b"
+    r"|\burgencia (?=(?:no|na|nos|nas|do|da|para) (?:exame|consulta|autorizacao|guia|resultado|agendamento|reembolso))"
+)
+
 FILLER_WORDS = {
     "de",
     "do",
@@ -49,11 +57,46 @@ def _normalize_text(value: str) -> str:
     return " ".join(ascii_only.split())
 
 
+def specialty_request_text(value: str) -> str:
+    """Remove haste qualifiers, retaining the actual service and its negation."""
+    return " ".join(HURRY_MODIFIER.sub(" ", _normalize_text(value)).split())
+
+
 @dataclass(slots=True)
 class SpecialtyCatalog:
     by_normalized: dict[str, str]
     by_alias: dict[str, tuple[str, ...]]
     passthrough_unknown: bool = False
+
+    def mentions(self, raw_value: str) -> list[tuple[str, str, bool]]:
+        """Exact ordered aliases shared by resolution and transcript evidence."""
+        matches = []
+        negative, replacing = False, False
+        # Keep clause boundaries until negation has been interpreted: in
+        # "urgência não, quero exame" the no rejects urgency, not the exam.
+        for clause in re.split(r"[,;.!?]+", raw_value):
+            words = specialty_request_text(clause).split()
+            i = 0
+            while i < len(words):
+                marker = SPECIALTY_REMOVAL.match(" ".join(words[i:]))
+                if marker:
+                    negative = True
+                    replacing = marker.group() in {"troque", "trocar", "substitua", "substituir"}
+                    i += len(marker.group().split())
+                    continue
+                if words[i] in {"quero", "preciso", "desejo", "inclua", "adicione", "mantenha"} or (replacing and words[i] == "por"):
+                    negative, replacing = False, False
+                for end in range(min(len(words), i + 6), i, -1):
+                    phrase = " ".join(words[i:end])
+                    choices = self.by_alias.get(phrase)
+                    if choices and len(choices) == 1:
+                        trailing_no = words[end:] == ["nao"]
+                        matches.append((phrase, choices[0], negative or trailing_no))
+                        i = len(words) if trailing_no else end
+                        break
+                else:
+                    i += 1
+        return matches
 
     def _candidate_keys(self, raw_value: str) -> list[str]:
         normalized = _normalize_text(raw_value)
@@ -76,6 +119,16 @@ class SpecialtyCatalog:
     def resolve(self, raw_value: str) -> str | None:
         if _normalize_text(raw_value) in AMBIGUOUS_SPECIALTY_TERMS:
             return None
+        if re.search(r"\b(?:urgencia|emergencia|pronto (?:socorro|atendimento))\b", _normalize_text(raw_value)):
+            # Do not let a lone urgency token outrank the requested exam, or
+            # turn a negated/administrative urgency into a medical service.
+            choices = set()
+            for _, canonical, negative in self.mentions(raw_value):
+                if negative:
+                    choices.discard(canonical)
+                else:
+                    choices.add(canonical)
+            return next(iter(choices)) if len(choices) == 1 else None
         candidate_keys = self._candidate_keys(raw_value)
         if not candidate_keys:
             return None

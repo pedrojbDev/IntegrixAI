@@ -18,7 +18,7 @@ REQUIRED_TOOLS = {
     "transfer_call_tool_PB": "transferCall",
     "end_call_tool": "endCall",
 }
-VERSION = "pbsaude-flow-v18-mitigation"
+VERSION = "pbsaude-flow-v19-urgent-care"
 IDLE_HOOKS = [
     {
         "on": "customer.speech.timeout",

@@ -111,6 +111,10 @@ def _specialty_candidates(query: str, catalog: SpecialtyCatalog) -> set[str]:
     if not canonical:
         return {candidate for candidate in candidates if candidate}
     canonical_normalized = normalize_text(canonical)
+    if canonical_normalized == "pronto atendimento":
+        # Raw words in legacy unknown-specialty evidence can mean haste, not
+        # care. Only a positively recognized service proves this new mapping.
+        return {canonical_normalized}
     candidates.add(canonical_normalized)
     for alias, values in catalog.by_alias.items():
         if canonical in values:

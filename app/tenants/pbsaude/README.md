@@ -53,6 +53,25 @@ legada da Vapi durante a migracao, mas deve ser ignorado pelo workflow e nunca
 enviado ao provider. O bairro devolvido dentro de cada prestador continua sendo
 parte valida do endereco de resposta.
 
+## Urgencia E Emergencia
+
+Pedidos de urgencia, emergencia, pronto-socorro e pronto atendimento resolvem
+para `PRONTO ATENDIMENTO`. O catalogo e a evidencia da conversa compartilham
+o reconhecimento exato e as negacoes. Expressoes de pressa, como `exame de
+sangue com urgencia`, preservam o exame e nao criam um pedido de pronto
+atendimento. A validacao exige evidencia canonica desse servico; hashes de
+palavras soltas em respostas legadas nao autorizam a nova equivalencia.
+
+O prompt v19 consulta primeiro a cidade informada. Lista vazia com sucesso ou
+`CIDADE_SEM_COBERTURA`, somente nesse pedido, permite perguntar pela cidade
+proxima aceita pelo beneficiario e consultar uma alternativa. Sem opcoes, ou
+se nao aceitar outra cidade, oferece Dr. Online pelo aplicativo da operadora.
+Recusa explicita do online aciona a transferencia nativa para o call center
+solicitar garantia. Escolhas de telemedicina nao substituem os dados de busca.
+Erros de dados e falhas tecnicas mantem suas recuperacoes; nao provam ausencia
+de rede. A sequencia de ofertas e transferencias pertence ao prompt e exige
+homologacao por voz, conforme os casos documentados no guia Vapi.
+
 ## Politica De Prestadores Por Cidade
 
 `provider_policy.json` contem a lista versionada e tenant-scoped de prestadores

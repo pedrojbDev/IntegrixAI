@@ -56,7 +56,11 @@ DEFAULT_SPECIALTY_ALIASES: dict[str, tuple[str, ...]] = {
     "ENDOSCOPIA": (),
     "COLONOSCOPIA": (),
     "HOSPITAL": ("hospital da rede",),
-    "PRONTO ATENDIMENTO": ("pronto socorro", "emergencia hospitalar"),
+    "PRONTO ATENDIMENTO": (
+        "pronto socorro", "emergencia hospitalar", "urgencia", "emergencia",
+        "atendimento de urgencia", "atendimento de emergencia",
+        "urgencia e emergencia", "urgencia emergencia",
+    ),
     "MATERNIDADE": ("hospital para parto",),
 }
 

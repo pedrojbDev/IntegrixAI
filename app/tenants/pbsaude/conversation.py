@@ -8,7 +8,7 @@ from ...models.vapi_call_slot_state import VapiCallSlotState
 from ...platform.services.vapi_conversation import (
     conversation_turns, event_time, keyed_hmac, lock_call, normalize_text, term_hmacs,
 )
-from .catalog import get_specialty_catalog
+from .catalog import SPECIALTY_REMOVAL, get_specialty_catalog, specialty_request_text
 
 MAX_TURNS = 256
 KEYPAD = re.compile(r"(?:user'?s\s+keypad\s+entry|keypad\s+entry)\s*:\s*([0-9\s.#*-]+)", re.I)
@@ -27,58 +27,33 @@ NATURAL_PROPOSAL = re.compile(
     r"\bvoce (?:esta )?(?:procurando|procura|busca|quer|deseja|precisa)\b"
 )
 REFRESH = re.compile(r"\b(?:consulte novamente|atualize a busca|pesquise de novo)\b")
-REMOVE = re.compile(r"\b(?:nao (?:quero|preciso|desejo|e)|retire|remova|exclua|cancele|tire|sem|troque|trocar|substitua|substituir)\b")
+REMOVE = SPECIALTY_REMOVAL
 
 
 def _requests(value: str, secret: str, catalog) -> tuple[list[dict], list[dict]]:
     """Retain spoken order and canonical identity, with clause-scoped negation."""
-    words = value.split()
-    accepted, removed = [], []
-    i = 0
-    negative = False
-    replacing = False
-    while i < len(words):
-        remaining = " ".join(words[i:])
-        marker = REMOVE.match(remaining)
-        if marker:
-            negative = True
-            replacing = marker.group() in {"troque", "trocar", "substitua", "substituir"}
-            i += len(marker.group().split())
-            continue
-        if words[i] in {"quero", "preciso", "desejo", "inclua", "adicione", "mantenha"} or (replacing and words[i] == "por"):
-            negative = False
-            replacing = False
-        for end in range(min(len(words), i + 6), i, -1):
-            phrase = " ".join(words[i:end])
-            choices = catalog.by_alias.get(phrase)
-            if choices and len(choices) == 1:
-                canonical = normalize_text(choices[0])
-                request = {"canonical": keyed_hmac(secret, canonical),
-                           "terms": sorted({keyed_hmac(secret, phrase), keyed_hmac(secret, canonical)})}
-                (removed if negative else accepted).append(request)
-                i = end
-                break
+    accepted, removed = {}, {}
+    for phrase, canonical, negative in catalog.mentions(value):
+        canonical = normalize_text(canonical)
+        request = {"canonical": keyed_hmac(secret, canonical),
+                   "terms": sorted({keyed_hmac(secret, phrase), keyed_hmac(secret, canonical)})}
+        if negative:
+            accepted.pop(canonical, None)
+            removed[canonical] = request
         else:
-            i += 1
-    return accepted, removed
+            removed.pop(canonical, None)
+            previous = accepted.get(canonical, {})
+            request["terms"] = sorted(set(request["terms"]) | set(previous.get("terms", [])))
+            accepted[canonical] = request
+    return list(accepted.values()), list(removed.values())
 
 
 def _specialties(value: str, catalog) -> set[str]:
     """Exact, longest non-overlapping aliases only; no fuzzy provenance."""
-    words = value.split()
     found = set()
-    i = 0
-    while i < len(words):
-        for end in range(min(len(words), i + 6), i, -1):
-            phrase = " ".join(words[i:end])
-            choices = catalog.by_alias.get(phrase)
-            if choices and len(choices) == 1:
-                found.add(phrase)
-                found.add(normalize_text(choices[0]))
-                i = end
-                break
-        else:
-            i += 1
+    for phrase, canonical, _ in catalog.mentions(value):
+        found.add(phrase)
+        found.add(normalize_text(canonical))
     return found
 
 
@@ -86,6 +61,8 @@ def _question(value: str) -> str | None:
     # Use the last question/sentence so reading a result does not reopen a slot.
     value = _last_question(value)
     value = normalize_text(value)
+    if re.search(r"\b(?:dr|doutor) online\b", value):
+        return "online_offer"
     if any(t in value for t in ("transferir", "atendente", "atendimento humano")):
         return "handoff"
     if any(t in value for t in ("mais alguma", "proxima busca", "proximo pedido", "mais opcoes", "posso continuar")):
@@ -106,6 +83,8 @@ def _question(value: str) -> str | None:
 
 
 def _last_question(value: str) -> str:
+    # The service name contains an abbreviation, not a sentence boundary.
+    value = re.sub(r"\bDr\.", "Dr", value, flags=re.I)
     sentences = [part.strip() for part in re.split(r"[.!?]", value) if part.strip()]
     while sentences and normalize_text(sentences[-1]) in {"por favor", "obrigado", "obrigada", "por gentileza"}:
         sentences.pop()
@@ -124,6 +103,8 @@ def _encode(turn: dict, secret: str, catalog) -> dict:
     entry["digest"] = keyed_hmac(secret, normalized)
     if turn["role"] == "assistant":
         entry["question"] = _question(raw)
+        if entry["question"] == "online_offer":
+            return entry
         # A read-back is evidence only after a subsequent explicit assent.
         question_text = _last_question(raw)
         question_normalized = normalize_text(question_text)
@@ -132,7 +113,7 @@ def _encode(turn: dict, secret: str, catalog) -> dict:
                         or question_normalized.endswith("certo")
                         or natural_proposal)
         if confirmation:
-            requests, _ = _requests(question_normalized, secret, catalog)
+            requests, _ = _requests(question_text, secret, catalog)
             if not entry["question"] and requests:
                 entry["question"] = "especialidade"
             entry["confirmation_requests"] = requests
@@ -173,6 +154,10 @@ def _encode(turn: dict, secret: str, catalog) -> dict:
         if normalized in {"", "nao", "por favor", "nao por favor"}:
             entry["noise"] = True
     entry["correction"] = bool(re.search(r"\b(?:na verdade|corrigindo|corrigir|trocar|mudar|agora quero)\b", normalized))
+    location_search = re.search(r"\b(?:busque|buscar|pesquise|pesquisar|consulte)\b", normalized)
+    online_service = re.search(r"\b(?:(?:dr|doutor) online|telemedicina)\b", normalized)
+    entry["city_request"] = bool((location_search and not online_service) or (entry["correction"]
+        and re.search(r"\b(?:cidade|municipio)\b", normalized)))
     if entry["noise"] or entry["yes"] or entry["all"] or entry["negative"]:
         return entry
     spoken_cpf = "cpf" in normalized or bool(re.search(r"\d{11}", normalized))
@@ -183,8 +168,8 @@ def _encode(turn: dict, secret: str, catalog) -> dict:
         entry["noise"] = bool(NOISE.fullmatch(normalized)) or not normalized
         if entry["noise"]:
             return entry
-    specialties = _specialties(normalized, catalog)
-    requests, removed = _requests(normalized, secret, catalog)
+    specialties = _specialties(raw, catalog)
+    requests, removed = _requests(raw, secret, catalog)
     entry["requests"] = requests
     entry["removed_requests"] = removed
     entry["ambiguous_removal"] = bool(REMOVE.search(normalized) and not removed and not spoken_cpf)
@@ -199,6 +184,7 @@ def _encode(turn: dict, secret: str, catalog) -> dict:
         entry["noise"] = True
         return entry
     entry["terms"] = sorted(term_hmacs(secret, normalized))
+    entry["specialty_terms"] = sorted(term_hmacs(secret, specialty_request_text(normalized)))
     entry["specialties"] = sorted({term for request in requests for term in request["terms"]})
     if location:
         # Stop a location phrase before a subsequent explicit search request.
@@ -261,6 +247,12 @@ def _reduce(
         if entry["role"] == "assistant":
             assistant_seen = True
             unrelated_question = entry.get("unrelated_question", False)
+            if entry.get("question") == "online_offer":
+                # Parse this choice separately without clearing the backend's
+                # pinned recovery field or treating it as a slot proposal.
+                result["pending"] = "online_offer"
+                confirmation = None
+                continue
             if bound_field:
                 # Agent turns cannot redirect a backend-pinned recovery field.
                 # A same-field read-back can still provide an explicit proposal
@@ -286,6 +278,12 @@ def _reduce(
             result["pending"] = "cpf"
             field = "cpf"
         if entry.get("noise") and not entry.get("keypad"):
+            continue
+        if (result["pending"] == "online_offer" and not entry.get("cpf_correction")
+                and not (entry.get("city") and entry.get("city_request"))
+                and not entry.get("specialties") and not entry.get("removed_requests")):
+            # Choice of telemedicine is not a city, CPF or specialty answer.
+            # Actual service/location corrections remain eligible evidence.
             continue
         if entry.get("keypad"):
             # A keypad marker outside CPF collection is incidental. It must
@@ -376,8 +374,9 @@ def _reduce(
                 result["cidade"] = entry["terms"]
                 result["field_turns"][field] = entry["key"]
         elif field == "especialidade" and entry.get("terms") and not entry.get("specialties") and not entry.get("city") and not entry.get("removed_requests"):
-            result["especialidade"] = entry["terms"]
-            result["active_requests"] = [{"canonical": entry["digest"], "terms": entry["terms"]}]
+            specialty_terms = entry.get("specialty_terms", entry["terms"])
+            result["especialidade"] = specialty_terms
+            result["active_requests"] = [{"canonical": entry["digest"], "terms": specialty_terms}]
             result["field_turns"][field] = entry["key"]
         for updated_field, turn_key in result["field_turns"].items():
             if turn_key == entry["key"]:
